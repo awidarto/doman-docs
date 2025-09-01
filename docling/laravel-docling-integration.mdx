@@ -1,0 +1,104 @@
+# Integrating `docling` with Laravel Artisan
+
+This guide explains how to call the `docling` command-line tool from a Laravel Artisan command. This is useful for automating document conversion tasks within your web application.
+
+## Key Concepts
+
+When running an Artisan command, the PHP process executes in a non-interactive shell. This means it doesn't have the same environment as your user's terminal session. Therefore, you cannot simply `source` the virtual environment's activation script.
+
+Instead, you must use the absolute path to the `docling` executable within the virtual environment.
+
+## Steps for Integration
+
+1.  **Locate the `docling` Executable:** The absolute path to the `docling` executable in the virtual environment we created is:
+
+    ```
+    /Users/awidarto/docling-venv/bin/docling
+    ```
+
+2.  **Create a New Artisan Command:** You can create a new Artisan command using the following command:
+
+    ```sh
+    php artisan make:command ConvertDocument
+    ```
+
+3.  **Implement the Command:** Open the newly created `app/Console/Commands/ConvertDocument.php` file and modify it to use the `Process` component to execute the `docling` command.
+
+    Here is a complete example:
+
+    ```php
+    <?php
+
+    namespace App\Console\Commands;
+
+    use Illuminate\Console\Command;
+    use Symfony\Component\Process\Process;
+    use Symfony\Component\Process\Exception\ProcessFailedException;
+
+    class ConvertDocument extends Command
+    {
+        protected $signature = 'docling:convert {inputFile} {outputFile}';
+        protected $description = 'Converts a document using docling';
+
+        public function handle()
+        {
+            $inputFile = $this->argument('inputFile');
+            $outputFile = $this->argument('outputFile');
+            $doclingPath = '/Users/awidarto/docling-venv/bin/docling';
+
+            // IMPORTANT: Always use absolute paths for input and output files
+            // when calling from a non-interactive environment.
+            $absoluteInputPath = storage_path('app/' . $inputFile);
+            $absoluteOutputPath = storage_path('app/' . $outputFile);
+
+            if (!file_exists($absoluteInputPath)) {
+                $this->error("Input file not found: {$absoluteInputPath}");
+                return 1;
+            }
+
+            $this->info("Starting conversion of {$inputFile} to {$outputFile}...");
+
+            $process = new Process([
+                $doclingPath,
+                'convert',
+                $absoluteInputPath,
+                $absoluteOutputPath
+            ]);
+
+            // Set a longer timeout if you are converting large files
+            $process->setTimeout(300); 
+
+            try {
+                $process->mustRun();
+                $this->info("Conversion successful!");
+                $this->info("Output file: {$absoluteOutputPath}");
+                $this->line($process->getOutput());
+            } catch (ProcessFailedException $exception) {
+                $this->error('The document conversion failed.');
+                $this->error($exception->getMessage());
+                return 1;
+            }
+
+            return 0;
+        }
+    }
+    ```
+
+4.  **File Permissions:** The user that runs your web server (e.g., `www-data`, `nginx`, `apache`) needs to have execute permissions on the `docling` executable and read/write permissions on the directories where your input and output files are stored. You can ensure the executable has the correct permissions with:
+
+    ```sh
+    chmod +x /Users/awidarto/docling-venv/bin/docling
+    ```
+
+    You will also need to ensure that your `storage/app` directory (or wherever you are storing your files) is writable by the web server user.
+
+## Usage
+
+Once you have created the Artisan command, you can run it from your terminal like any other command:
+
+```sh
+php artisan docling:convert my_document.pdf my_converted_document.docx
+```
+
+This command will convert the `my_document.pdf` file located in `storage/app` to `my_converted_document.docx` in the same directory.
+

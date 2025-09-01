@@ -1,0 +1,62 @@
+# `docling` Basic Usage Guide
+
+This guide provides a basic overview of how to use the `docling` command-line tool to convert and process your documents.
+
+## Activating the Environment
+
+Before you can use `docling`, you need to activate the virtual environment you created during installation:
+
+```sh
+source ~/docling-venv/bin/activate
+```
+
+## Basic Conversion
+
+The most common use case for `docling` is to convert a document from one format to another. The basic syntax is as follows:
+
+```sh
+docling convert <input_file> <output_file>
+```
+
+**Example:**
+
+To convert a PDF file named `my_document.pdf` to a Microsoft Word document, you would run the following command:
+
+```sh
+docling convert my_document.pdf my_document.docx
+```
+
+`docling` will automatically detect the input and output formats based on the file extensions.
+
+## Specifying Output Format
+
+You can also explicitly specify the output format using the `--format` or `-f` option. This is useful if you want to convert a file to a format that does not have a standard file extension.
+
+**Example:**
+
+To convert a PDF file to plain text, you can use the following command:
+
+```sh
+docling convert my_document.pdf my_document.txt -f text
+```
+
+## Getting Help
+
+`docling` provides a comprehensive help menu that lists all available commands and options. To access the help menu, you can run the following command:
+
+```sh
+docling --help
+```
+
+You can also get help for specific commands by running the command followed by the `--help` flag.
+
+**Example:**
+
+To get help for the `convert` command, you can run:
+
+```sh
+docling convert --help
+```
+
+This will provide you with a detailed description of the `convert` command and all of its available options.
+

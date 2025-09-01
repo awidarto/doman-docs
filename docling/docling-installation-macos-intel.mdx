@@ -1,0 +1,60 @@
+# Installing docling on macOS (Intel)
+
+This guide provides a comprehensive walkthrough for installing `docling` on an Intel-based macOS machine. This process addresses potential compatibility issues with PyTorch and other dependencies.
+
+## Prerequisites
+
+- **Homebrew:** Ensure you have Homebrew installed on your system. If not, you can install it by following the instructions on the [official Homebrew website](https://brew.sh/).
+- **Python 3.12 or lower:** `docling` requires a Python version of 3.12 or lower. This guide will assume you have it installed.
+
+## Installation Steps
+
+1.  **Create a Dedicated Directory:** It's good practice to create a dedicated directory for your `docling` projects and virtual environment. You can create a directory in your home folder:
+
+    ```sh
+    mkdir ~/docling
+    cd ~/docling
+    ```
+
+2.  **Create a Virtual Environment:** To avoid conflicts with other Python projects, it's highly recommended to use a virtual environment. Create a new virtual environment named `docling-venv` using `python3.12`:
+
+    ```sh
+    python3.12 -m venv docling-venv
+    ```
+
+3.  **Activate the Virtual Environment:** Before installing any packages, you need to activate the virtual environment:
+
+    ```sh
+    source docling-venv/bin/activate
+    ```
+
+    Your terminal prompt should now be prefixed with `(docling-venv)`, indicating that the virtual environment is active.
+
+4.  **Install PyTorch:** Install the compatible version of PyTorch (`2.2.2`) before installing `docling`. This is a crucial step to avoid compilation errors on Intel-based Macs.
+
+    ```sh
+    pip install torch==2.2.2
+    ```
+
+5.  **Install docling with All Dependencies:** Now, you can install `docling`. We will use the `--prefer-binary` flag to instruct `pip` to use pre-compiled packages (wheels) whenever possible, which helps to avoid compilation issues.
+
+    ```sh
+    pip install --prefer-binary docling
+    ```
+
+6.  **Verify the Installation:** Once the installation is complete, you can verify that `docling` is installed correctly by checking its version:
+
+    ```sh
+    docling --version
+    ```
+
+    You should see the installed version of `docling` and its components printed to the console.
+
+## Deactivating the Virtual Environment
+
+When you are finished using `docling`, you can deactivate the virtual environment by running the following command:
+
+```sh
+deactivate
+```
+
