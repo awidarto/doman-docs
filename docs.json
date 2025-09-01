@@ -7,7 +7,7 @@
     "light": "#07C983",
     "dark": "#15803D"
   },
-  "favicon": "/favicon.svg",
+  "favicon": "/logo/doman/doman-fav.png",
   "navigation": {
     "tabs": [
       {
@@ -141,8 +141,8 @@
     }
   },
   "logo": {
-    "light": "/logo/light.svg",
-    "dark": "/logo/dark.svg"
+    "light": "/logo/doman/doman-logo-black.png",
+    "dark": "/logo/doman/doman-logo-white.png"
   },
   "navbar": {
     "links": [
