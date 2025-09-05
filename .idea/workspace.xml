@@ -5,55 +5,8 @@
   </component>
   <component name="ChangeListManager">
     <list default="true" id="f5ee46ac-8460-424d-9b8a-dfe584e81db0" name="Changes" comment="">
-      <change afterPath="$PROJECT_DIR$/dev/dms/project-document-control.mdx" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/mejik-core/installation/development.mdx" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/mejik-core/installation/index.mdx" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/mejik-core/installation/quickstart.mdx" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/mejik-core/laravel/commands/converter/case/invoice-generator-with-template.mdx" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/mejik-core/laravel/commands/converter/docx-generate-command.mdx" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/mejik-core/laravel/commands/converter/docx-tpl-generate-command-rev0.mdx" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/mejik-core/laravel/commands/converter/docx-tpl-generate-command.mdx" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/mejik-core/laravel/commands/converter/images-convert-from-office.mdx" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/mejik-core/laravel/commands/converter/pdf-convert-from-office-rev0.mdx" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/mejik-core/laravel/commands/converter/pdf-convert-from-office.mdx" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/mejik-core/laravel/commands/converter/pdf-thumbnail-generator.mdx" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/mejik-core/laravel/commands/converter/xlsx-generate-command.mdx" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/mejik-core/laravel/commands/docx-data-merge.mdx" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/mejik-core/laravel/commands/docx-merge-convert.mdx" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/mejik-core/laravel/commands/docx-template-example-adv.mdx" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/mejik-core/laravel/commands/docx-template-example.mdx" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/mejik-core/laravel/commands/utility/source-file-optimizer.mdx" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/mejik-core/laravel/commands/xlsx-merge-convert.mdx" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/mejik-core/laravel/commands/xlsx-template-example.mdx" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/mejik-core/laravel/commands/xlsxconverter.mdx" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/mejik-core/laravel/commands/xlsxconverteradv.mdx" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/mejik-core/laravel/development.mdx" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/mejik-core/laravel/index.mdx" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/mejik-core/laravel/quickstart.mdx" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/mejik-core/laravel/tools/id/xlsxconverter.mdx" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/mejik-core/laravel/tools/module-gen/generator.mdx" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/mejik-core/laravel/tools/module-gen/guide.mdx" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/mejik-core/laravel/tools/module-gen/subgenerator.mdx" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/mejik-core/laravel/v2/admin-controller-guide-en.mdx" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/mejik-core/laravel/v2/admin-controller-guide-id.mdx" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/mejik-core/laravel/v2/commands/MakeInertiaColumns.md" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/mejik-core/laravel/v2/commands/MakeInertiaCrudAndForm.md" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/mejik-core/laravel/v2/commands/make-inertia-columns.mdx" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/mejik-core/laravel/v2/commands/make-inertia-crud-and-form.mdx" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/mejik-core/laravel/v2/commands/make-inertia-form.mdx" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/mejik-core/laravel/v2/layout-navigation-en.mdx" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/mejik-core/laravel/v2/layout-navigation-id.mdx" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/mejik-core/laravel/v2/navigation-config-guide-en.mdx" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/mejik-core/laravel/v2/stubs/route-and-model-stubs.mdx" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/mejik-core/laravel/v2/stubs/route.md" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/mejik-core/test-tools/db-analysis-tool.mdx" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/mejik-core/test-tools/process-analysis-tool.mdx" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/mejik-core/vue/components/inlineediting.mdx" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/mejik-core/vue/development.mdx" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/mejik-core/vue/index.mdx" afterDir="false" />
-      <change afterPath="$PROJECT_DIR$/mejik-core/vue/quickstart.mdx" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/docs.json" beforeDir="false" afterPath="$PROJECT_DIR$/docs.json" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/dev/dms/project-document-control.mdx" beforeDir="false" afterPath="$PROJECT_DIR$/dev/dms/project-document-control.mdx" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -123,7 +76,7 @@
       <workItem from="1756706236005" duration="4438000" />
       <workItem from="1756872258799" duration="701000" />
       <workItem from="1756882213633" duration="726000" />
-      <workItem from="1756893647212" duration="5058000" />
+      <workItem from="1756893647212" duration="6408000" />
     </task>
     <servers />
   </component>

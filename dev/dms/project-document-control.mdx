@@ -463,3 +463,195 @@ graph TD
 5.  **Special Case - Kanban Update:**
 *   The Kanban view offers a unique, streamlined update process. Instead of opening a form, the user can simply **drag a card** from one column (e.g., `Submitted for Review`) to another (e.g., `Approved`).
 *   This UI action triggers a direct `PATCH` request to the API to update only the `status` of that revision, providing a fast and intuitive user experience for managing workflow.
+
+## Wireframes
+
+Okay, here are basic wireframes for the key CRUD views we've discussed, focusing on layout and core elements. These wireframes are simple sketches, not fully designed UIs. They're meant to illustrate the structure and interaction flow.
+
+---
+
+### 1. Project Register (List/Datatable View)
+
+```
++-------------------------------------------------------------------+
+| [Logo]              Project Register                   [User Menu] |
++-------------------------------------------------------------------+
+| [ + New Project Button ]                                          |
++-------------------------------------------------------------------+
+| [ Search:  [  ]  ]  [ Filter: Status [Dropdown]  ] [ Filter: PM [Dropdown] ] |
++-------------------------------------------------------------------+
+| Table Header: Code | Name | Project Manager | Status | Planned End Date | ... |
+|-------------------------------------------------------------------|
+| Data Row 1: PROJ-001 | Web Redesign | John Doe | In Progress | 2024-12-31 | ... |
+| Data Row 2: PROJ-002 | Mobile App | Jane Smith | Completed | 2024-10-15 | ... |
+| Data Row 3: ...       | ...        | ...         | ...       | ...          | ... |
+| ...                                                                 |
++-------------------------------------------------------------------+
+| Pagination: [ << Prev ]  1  2  3  [ Next >> ]                     |
++-------------------------------------------------------------------+
+```
+
+**Key Elements:**
+
+*   **"New Project" Button:** Initiates the Create operation.
+*   **Search & Filters:** Allow users to quickly find projects.
+*   **Datatable:** Columns display key project information. Clicking on a row navigates to the Project Dashboard.
+*   **Pagination:** Handles large numbers of projects.
+
+---
+
+### 2. Create/Edit Project Form
+
+```
++-------------------------------------------------------------------+
+| [Logo]               [ Create/Edit Project ]                [User Menu] |
++-------------------------------------------------------------------+
+| [ Back to Project Register ]                                     |
++-------------------------------------------------------------------+
+| Project Code:    [ Input Field (Readonly on Edit) ]  (Required)   |
+| Project Name:    [ Input Field ]                       (Required)   |
+| Description:      [ Textarea ]                                    |
+| Project Manager: [ Dropdown (User List) ]            (Required)   |
+| Client:           [ Dropdown (Client List) ]                       |
+| Status:           [ Dropdown (Planning, In Progress, ...) ] (Required) |
+| Start Date:       [ Date Picker ]                       (Required)   |
+| Planned End Date: [ Date Picker ]                                   |
+| Actual End Date:  [ Date Picker ]                                   |
+| Budget:           [ Number Input ]                                  |
+| Currency:         [ Dropdown (USD, EUR, ...) ]                      |
++-------------------------------------------------------------------+
+| [ Cancel ]  [ Save ]                                                |
++-------------------------------------------------------------------+
+```
+
+**Key Elements:**
+
+*   **Title:** Indicates whether it's a Create or Edit form.
+*   **"Back" Button:** Returns to the Project Register or Dashboard.
+*   **Form Fields:** Capture all project data.
+*   **Required Indicators:** Clearly marks mandatory fields.
+*   **"Cancel" & "Save" Buttons:** Actions for the form.  `Project Code` should be disabled in edit mode.
+
+---
+
+### 3. Project Dashboard (View Project Details)
+
+```
++-------------------------------------------------------------------+
+| [Logo]          Project Dashboard - [Project Name]       [User Menu] |
++-------------------------------------------------------------------+
+| [ Back to Project Register ]   [ Edit Project ] [ Archive Project ] |
++-------------------------------------------------------------------+
+| Project Code:    [ PROJ-001 (Display Only) ]                      |
+| Project Name:    [ Web Redesign (Display Only) ]                  |
+| Description:      [ Multi-line Description (Display Only) ]       |
+| Project Manager: [ John Doe (Display Only) ]                      |
+| Client:           [ Acme Corp (Display Only) ]                      |
+| Status:           [ In Progress (Display Only) ]                   |
+| Start Date:       [ 2024-09-01 (Display Only) ]                   |
+| Planned End Date: [ 2024-12-31 (Display Only) ]                   |
+| Actual End Date:  [  (Display Only) ]                              |
+| Budget:           [ $100,000 (Display Only) ]                     |
++-------------------------------------------------------------------+
+| [Tab Navigation:  Overview  |  Documents  |  Team  |  ... ]       |
++-------------------------------------------------------------------+
+```
+
+**Key Elements:**
+
+*   **Title:** Shows the Project Name.
+*   **"Back" Button:** Returns to the Project Register.
+*   **Action Buttons:** "Edit" and "Archive".
+*   **Display Fields:** Presents all project data in a read-only format.
+*   **Tab Navigation:** Organizes related information (documents, team members, risks, issues, etc.).  The "Documents" tab leads to the Document Management views.
+
+---
+
+### 4. Document Register (List/Datatable View)
+
+This view is within the Project Dashboard, under the "Documents" tab.
+
+```
++-------------------------------------------------------------------+
+| [Logo]      Project: [Project Name] - Documents          [User Menu] |
++-------------------------------------------------------------------+
+| [ Back to Project Dashboard ] [ + Add Document ] [ View: [Dropdown] ]|
++-------------------------------------------------------------------+
+| [ Search:  [  ]  ]  [ Filter: Discipline [Dropdown]  ] [ Filter: Status [Dropdown] ] |
++-------------------------------------------------------------------+
+| Table Header: Code | Title | Rev | Status | Discipline | Author | Planned Date | ... |
+|-------------------------------------------------------------------|
+| Data Row 1: SPEC-001 | Specification | B | Approved | Mechanical | Jane | 2024-11-15 | ... |
+| Data Row 2: DRW-002  | Layout Plan | C | Resubmission | Civil | John | 2024-12-01 | ... |
+| Data Row 3: ...       | ...         | ... | ...       | ...        | ...  | ...       | ... |
+| ...                                                                 |
++-------------------------------------------------------------------+
+| Pagination: [ << Prev ]  1  2  3  [ Next >> ]                     |
++-------------------------------------------------------------------+
+```
+
+**Key Elements:**
+
+*   **"Back" Button:** Returns to the Project Dashboard.
+*   **"+ Add Document" Button:** Creates a new `ProjectDocument` record.
+*   **"View" Dropdown:** Selects between Datatable, Timeline, Kanban, Grid, Tree Table views.
+*   **Filters:** Specific to document attributes (Discipline, Status).
+*   **Datatable:**  Displays document metadata.  Clicking a row leads to the Document Detail Page.
+
+---
+
+### 5. Document Detail Page (View Document Details)
+
+```
++-------------------------------------------------------------------+
+| [Logo]    Project: [Project Name] - Document: [Doc Code]   [User Menu] |
++-------------------------------------------------------------------+
+| [ Back to Document List ] [ Edit Metadata ] [ Create New Revision ] |
++-------------------------------------------------------------------+
+| Document Code:  [ SPEC-001 (Display Only) ]                        |
+| Title:            [ Specification (Display Only) ]                   |
+| Discipline:       [ Mechanical (Display Only) ]                      |
+| Document Type:    [ Specification (Display Only) ]                    |
++-------------------------------------------------------------------+
+| [Revisions Table:]                                                 |
+| Revision | Status | Author | Planned Date | Actual Date | File | Actions |
+|----------|--------|--------|--------------|-------------|------|---------|
+| Rev A    | Approved | Jane   | 2024-10-31   | 2024-10-30  | [Download] | [View] |
+| Rev B    | Current | John   | 2024-11-15   |             | [Download] | [View] |
+| ...                                                                 |
++-------------------------------------------------------------------+
+```
+
+**Key Elements:**
+
+*   **"Back" Button:** Returns to the Document List.
+*   **"Edit Metadata" Button:** Allows editing of the core document record.
+*   **"Create New Revision" Button:** Initiates the upload of a new file and the creation of a new `DocumentRevision`.
+*   **Document Metadata:** Displays the document's main attributes.
+*   **Revisions Table:** Shows the history of revisions for the document, including their status, author, dates, and the download link for the file.
+*   The "Actions" column might include a "View" action to see *more details about a specific revision*, though that's often not needed given the information already present.
+---
+
+### 6.  Create New Revision Form
+```
++-------------------------------------------------------------------+
+| [Logo]    Project: [Project Name] - Document: [Doc Code]   [User Menu] |
++-------------------------------------------------------------------+
+| [ Back to Document Details ]                                         |
++-------------------------------------------------------------------+
+| Revision Number:  [ Automatically Generated (e.g., "B") ] (Readonly) |
+| Upload File:        [ File Upload Input ]                             |
+| Planned Submission Date:  [ Date Picker ]                           |
+| Planned Approval Date:    [ Date Picker ]                           |
++-------------------------------------------------------------------+
+| [ Cancel ] [ Save ]                                                  |
++-------------------------------------------------------------------+
+
+```
+
+**Key Elements:**
+* Clear Label : Indicates the form for creating new revision
+* Important Input : Date Pickers to specify the schedule
+* Important Input : File Upload field to put latest document version.
+
+These wireframes are starting points. The specifics of your UI will depend on your design choices, target users, and the overall look and feel you want to achieve.
