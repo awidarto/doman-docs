@@ -464,7 +464,226 @@ graph TD
 *   The Kanban view offers a unique, streamlined update process. Instead of opening a form, the user can simply **drag a card** from one column (e.g., `Submitted for Review`) to another (e.g., `Approved`).
 *   This UI action triggers a direct `PATCH` request to the API to update only the `status` of that revision, providing a fast and intuitive user experience for managing workflow.
 
-## Wireframes
+## Wireframes ( Table Based )
+
+Absolutely. Here is the combined output, pairing each UI wireframe (approximated in a Markdown table) with its detailed component breakdown. This provides both a visual layout and a functional explanation for each key screen.
+
+---
+
+### 1. Project Register (List/Datatable View)
+
+#### UI Layout
+
+| Component / Layout | |
+| :--- | :--- |
+| **Project Register** | `[ User Menu ]` |
+| **`[ + New Project Button ]`** | |
+| `[ Search: [      ] ]` `[ Filter: Status [Dropdown] ▼ ]` `[ Filter: PM [Dropdown] ▼ ]` | |
+| **`Project Code ▲`** | **`Project Name`** | **`Project Manager`** | **`Status`** | **`Planned End Date`** |
+| `PROJ-2024-001` | `Corporate Website Redesign` | `John Doe` | `In Progress` | `2025-03-31` |
+| `PROJ-2024-002` | `Mobile App Development` | `Jane Smith` | `Completed` | `2024-10-15` |
+| *... more rows ...* | | | | |
+| `[ << Prev ] [ 1 ] [ 2 ] [ 3 ] [ Next >> ]` | |
+
+#### Component Breakdown
+
+**Purpose:** To display a list of all active projects, allowing users to search, filter, and navigate to a specific project or create a new one.
+
+| Section | Component | Description / Purpose |
+| :--- | :--- | :--- |
+| **Header** | Title | "Project Register" |
+| | User Menu | Standard user profile and logout options. |
+| **Toolbar** | **Button: `+ New Project`** | **Primary Action.** Navigates the user to the "Create Project Form". |
+| | Search Input | Allows users to search for projects by `projectCode` or `projectName`. |
+| | Filter Dropdown | Filter the list by `Status` (e.g., In Progress, Completed). |
+| | Filter Dropdown | Filter the list by `Project Manager`. |
+| **Main Content**| **Datatable** | The main list of projects. |
+| | Table Columns | `Project Code`, `Project Name`, `Project Manager`, `Status`, `Planned End Date`. |
+| | Table Row Interaction | **Clicking on any row** navigates the user to that project's "Project Dashboard". |
+| **Footer** | Pagination Controls | Allows users to navigate through multiple pages of projects. |
+
+---
+
+### 2. Create / Edit Project Form
+
+#### UI Layout
+
+| Component / Layout | |
+| :--- | :--- |
+| **Create New Project** (or **Edit Project: [Name]**) | |
+| `< Back to Project Register` | |
+| **Project Code** | `[ Input Field (Readonly on Edit) ]` *(Required)* |
+| **Project Name** | `[ Input Field ]` *(Required)* |
+| **Description** | `[ Textarea Field ]` |
+| **Project Manager**| `[ Dropdown (User List) ▼ ]` *(Required)* |
+| **Client** | `[ Dropdown (Client List) ▼ ]` |
+| **Status** | `[ Dropdown (Planning, In Progress, ...) ▼ ]` *(Required)* |
+| **Start Date** | `[ Date Picker ]` |
+| **Planned End Date**| `[ Date Picker ]` |
+| **Budget** | `[ Number Input ]` `[ Dropdown (USD) ▼ ]` |
+| | `[ Cancel ]` **`[ Save ]`** |
+
+#### Component Breakdown
+
+**Purpose:** To provide a user interface for entering or modifying project details. The view is shared for both "Create" and "Edit" modes.
+
+| Section | Component | Description / Purpose |
+| :--- | :--- | :--- |
+| **Header** | Title | Dynamically displays "Create New Project" or "Edit Project: [Project Name]". |
+| | Link: `< Back` | Navigates back to the "Project Register" or "Project Dashboard" without saving. |
+| **Form Fields** | Input: `Project Code` | Text field. **Required and must be unique.** Should be *read-only* in Edit mode. |
+| | Input: `Project Name` | Text field. **Required.** |
+| | Textarea: `Description` | Multi-line text field for a detailed project description. |
+| | Dropdown: `Project Manager` | Select a user from a pre-populated list of users. **Required.** |
+| | Dropdown: `Client` | Select from a list of clients. Optional. |
+| | Dropdown: `Status` | Select from `Planning`, `In Progress`, `On Hold`, `Completed`, etc. **Required.** |
+| | Date Picker: `Start Date` | A calendar input for the project's start date. |
+| | Date Picker: `Planned End Date` | A calendar input for the project's target completion date. |
+| | Number Input: `Budget` | A field for the project's budget amount. |
+| **Action Bar** | Button: `Cancel` | Discards changes and navigates back. |
+| | Button: `Save` | Submits the form data to the API. On success, navigates to the "Project Dashboard". |
+
+---
+
+### 3. Project Dashboard (View Project Details)
+
+#### UI Layout
+
+| Component / Layout | |
+| :--- | :--- |
+| **Project Dashboard: Corporate Website Redesign** | `[ User Menu ]` |
+| `< Back to Register` | **`[ Edit Project ]`** **`[ Archive Project ]`** |
+| --- | --- |
+| **`[ Overview (Active) ]`** `[ Documents ]` `[ Team ]` | |
+| **Project Details** | |
+| `Project Code:` | `PROJ-2024-001` |
+| `Status:` | `In Progress` |
+| `Project Manager:`| `John Doe` |
+| `Client:` | `ACME Inc.` |
+| `Start Date:` | `2024-09-01` |
+| `Planned End Date:`| `2025-03-31` |
+| `Description:` | `To rebuild the public-facing website on a new platform...` |
+
+#### Component Breakdown
+
+**Purpose:** To serve as the central hub for a single project, displaying all its information and providing navigation to related modules like documents.
+
+| Section | Component | Description / Purpose |
+| :--- | :--- | :--- |
+| **Header** | Title | Displays the full `Project Name`. |
+| | Link: `< Back to Register` | Navigates back to the main "Project Register" list. |
+| **Toolbar** | Button: `Edit Project` | Navigates to the "Edit Project Form" pre-filled with this project's data. |
+| | Button: `Archive Project` | Initiates the soft-delete process for the project (with confirmation). |
+| **Main Content**| **Tab Navigation** | Allows switching between different sections of the project. |
+| | Tab: `Overview` | The default active tab. Displays the "Project Details" section below. |
+| | Tab: `Documents` | **Key Action.** Switches the view to the "Document Register" for this project. |
+| | Tab: `Team` | (Future) A section to manage project team members. |
+| | **Project Details Section** | A read-only display of all project fields (Code, Name, Manager, Dates, etc.). |
+
+---
+
+### 4. Document Register (List/Datatable View)
+
+#### UI Layout
+
+| Component / Layout | |
+| :--- | :--- |
+| **Documents: Corporate Website Redesign** | `[ User Menu ]` |
+| `< Back to Dashboard` | **`[ + Add Document ]`** `View As: [Datatable ▼]` |
+| `[ Search: [      ] ]` `[ Filter: Discipline [Dropdown] ▼ ]` `[ Filter: Status [Dropdown] ▼ ]` | |
+| **`Doc Code ▲`** | **`Title`** | **`Rev`** | **`Status`** | **`Author`** | **`Planned Date`** |
+| `PROJ-SPEC-001` | `Functional Specification` | `B` | `Approved` | `Jane Smith` | `2024-11-15` |
+| `PROJ-DRW-001` | `Homepage Mockup` | `C` | `For Review`| `John Doe` | `2024-12-01` |
+| *... more rows ...* | | | | | |
+| `[ << Prev ] [ 1 ] [ 2 ] [ 3 ] [ Next >> ]` | |
+
+#### Component Breakdown
+
+**Purpose:** Located within a project, this view lists all documents associated with it and allows users to switch between different visualization modes.
+
+| Section | Component | Description / Purpose |
+| :--- | :--- | :--- |
+| **Header** | Title | "Documents for Project: [Project Name]" |
+| | Link: `< Back to Dashboard` | Navigates back to the project's "Overview" tab. |
+| **Toolbar** | **Button: `+ Add Document`** | **Primary Action.** Opens a form to create a new master document record. |
+| | Dropdown: `View As` | Switches the main content between `Datatable`, `Timeline`, `Kanban`, `Grid`. |
+| | Search Input | Allows users to search for documents by `docCode` or `title`. |
+| | Filter Dropdown | Filter the list by `Discipline` (e.g., Civil, Mechanical). |
+| | Filter Dropdown | Filter the list by current revision `Status` (e.g., Approved, For Review). |
+| **Main Content**| **Datatable** | The default view, showing a list of documents. |
+| | Table Columns | `Doc Code`, `Title`, `Current Revision`, `Status`, `Discipline`, `Author`, `Planned Date`. |
+| | Table Row Interaction | **Clicking on any row** navigates the user to that document's "Document Detail Page". |
+| **Footer** | Pagination Controls | Allows users to navigate through multiple pages of documents. |
+
+---
+
+### 5. Document Detail Page (View Document Details)
+
+#### UI Layout
+
+| Component / Layout | |
+| :--- | :--- |
+| **Document: PROJ-SPEC-001** | `[ User Menu ]` |
+| `< Back to Document List` | **`[ Edit Metadata ]`** **`[ Create New Revision ]`** |
+| --- | --- |
+| **Document Metadata** | |
+| `Title:` | `Functional Specification` |
+| `Discipline:` | `Software` |
+| `Doc Type:` | `Specification` |
+| --- | --- |
+| **Revision History** | |
+| **`Revision`** | **`Status`** | **`Author`** | **`Submitted On`**| **`File`** |
+| `B` | `Approved` | `Jane Smith` | `2024-11-14` | `[ Download ]` |
+| `A` | `Superseded` | `John Doe` | `2024-10-30` | `[ Download ]` |
+
+#### Component Breakdown
+
+**Purpose:** To display the complete information and version history for a single document.
+
+| Section | Component | Description / Purpose |
+| :--- | :--- | :--- |
+| **Header** | Title | Displays the `docCode` and `title`. |
+| | Link: `< Back to List` | Navigates back to the "Document Register". |
+| **Toolbar** | Button: `Edit Metadata` | Opens a form to edit the master document's details (e.g., `title`, `discipline`). |
+| | **Button: `Create New Revision`** | **Primary Action.** Opens a form to upload a new version of the file. |
+| **Metadata Section** | Read-only Fields | Displays the document's core metadata: `Doc Code`, `Title`, `Discipline`, `Doc Type`. |
+| **Revisions Section** | **Table: `Revision History`** | Lists every version of the document from newest to oldest. |
+| | Table Columns | `Revision`, `Status`, `Author`, `Reviewer`, `Planned Date`, `Actual Date`, `File`. |
+| | File Link | A link in each row to download the specific file associated with that revision. |
+
+---
+
+### 6. Create New Revision Form
+
+#### UI Layout
+
+| Component / Layout | |
+| :--- | :--- |
+| **Create New Revision for: PROJ-SPEC-001** | |
+| `< Back to Document Details` | |
+| **Revision Number** | `[ "C" (Readonly, Auto-generated) ]` |
+| **Upload File** | `[ Choose File... ]` *(Required)* |
+| **Planned Submission Date** | `[ Date Picker ]` |
+| **Planned Approval Date** | `[ Date Picker ]` |
+| | `[ Cancel ]` **`[ Save Revision ]`** |
+
+#### Component Breakdown
+
+**Purpose:** A focused form for uploading a new version of an existing document and setting its schedule.
+
+| Section | Component | Description / Purpose |
+| :--- | :--- | :--- |
+| **Header** | Title | "Create New Revision for: [Doc Code]" |
+| | Link: `< Back to Details` | Navigates back to the "Document Detail Page" without saving. |
+| **Form Fields** | Read-only Text: `Revision` | Displays the new revision number (e.g., "C"), which is automatically determined. |
+| | File Input: `Upload File` | **Required.** The primary field for uploading the document file. |
+| | Date Picker: `Planned Submission` | The target date for the author to submit this revision for review. |
+| | Date Picker: `Planned Approval` | The target date for the reviewer to complete their review. |
+| **Action Bar** | Button: `Cancel` | Discards changes and navigates back. |
+| | Button: `Save Revision` | Submits the form. Creates the new revision record and uploads the file. |
+
+
+## Wireframes ( Text Based )
 
 Okay, here are basic wireframes for the key CRUD views we've discussed, focusing on layout and core elements. These wireframes are simple sketches, not fully designed UIs. They're meant to illustrate the structure and interaction flow.
 
@@ -655,3 +874,4 @@ This view is within the Project Dashboard, under the "Documents" tab.
 * Important Input : File Upload field to put latest document version.
 
 These wireframes are starting points. The specifics of your UI will depend on your design choices, target users, and the overall look and feel you want to achieve.
+
