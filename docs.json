@@ -68,7 +68,8 @@
           {
             "group": "DMS",
             "pages": [
-              "dev/dms/project-document-control"
+              "dev/dms/project-document-control",
+              "dev/dms/project-document-control-id"
             ]
           }
         ]
