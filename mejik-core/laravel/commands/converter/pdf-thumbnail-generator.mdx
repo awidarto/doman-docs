@@ -1,0 +1,146 @@
+---
+title: "PDF Thumbnail Generator Commands"
+description: "Extracting a page of pdf file to image for thumbnail"
+---
+
+# English Documentation
+
+## Artisan Command: `pdf:thumbnail`
+
+### Description
+
+This command generates a thumbnail image from a specific page of a PDF file. It uses a two-step process for high-quality results:
+1.  **Ghostscript:** To extract a single page from the PDF and convert it into a high-resolution, lossless PNG image.
+2.  **PHP-GD Extension:** To resize this high-resolution image into a smaller, optimized JPEG thumbnail.
+
+This approach ensures that the final thumbnail is sharp and clear, even when generated from a complex PDF.
+
+### Prerequisites
+
+For this command to work, you must have the following software installed on your server and available in the system's PATH:
+
+1.  **Ghostscript:** A versatile processor for PostScript and PDF files. You can usually install it via your system's package manager (e.g., `sudo apt-get install ghostscript` on Debian/Ubuntu, `brew install ghostscript` on macOS).
+2.  **PHP-GD Extension:** A commonly used image processing module for PHP. Ensure it is enabled in your PHP installation (`php-gd`).
+
+### Usage
+
+```bash
+php artisan pdf:thumbnail --in=<path/to/input.pdf> --out=<path/to/output.jpg> [options]
+```
+
+### Options
+
+| Option        | Description                                                                 | Required? | Default |
+| :------------ | :-------------------------------------------------------------------------- | :-------- | :------ |
+| `--in`        | The full path to the source PDF file.                                       | **Yes**   | `null`  |
+| `--out`       | The full path where the final thumbnail image will be saved (e.g., `public/thumbnails/doc.jpg`). | **Yes**   | `null`  |
+| `--page`      | The page number of the PDF to create the thumbnail from.                    | No        | `1`     |
+| `--width`     | The desired width of the final thumbnail in pixels. The height will be calculated automatically to maintain the aspect ratio. | No        | `400`   |
+
+### How It Works (Workflow)
+
+1.  **Validation:** The command first checks if the input file exists and if the `page` and `width` values are valid.
+2.  **High-Resolution Conversion:** It calls Ghostscript to render the specified PDF page (`--page`) at a high resolution (300 DPI) into a temporary, lossless PNG file. Using a high DPI is crucial for a quality result when downscaling.
+3.  **Thumbnail Creation:** The command then uses the PHP-GD library to:
+*   Read the temporary PNG image.
+*   Create a new blank image with a white background.
+*   Resize and resample the high-resolution image down to the target `--width`, preserving the aspect ratio.
+*   Save the final image as a JPEG file at the specified `--out` path with a quality setting of 85.
+4.  **Cleanup:** Finally, the temporary high-resolution PNG file is deleted, regardless of whether the process succeeded or failed.
+
+### Examples
+
+**1. Basic Usage**
+
+This will generate a 400px wide thumbnail from the first page of `document.pdf` and save it as `thumbnail.jpg`.
+
+```bash
+php artisan pdf:thumbnail --in="storage/app/docs/document.pdf" --out="public/thumbnails/thumbnail.jpg"
+```
+
+**2. Specifying Page and Width**
+
+This will generate a 600px wide thumbnail from the **fifth page** of `report.pdf`.
+
+```bash
+php artisan pdf:thumbnail --in="storage/app/reports/report.pdf" --out="public/img/report_thumb.jpg" --page=5 --width=600
+```
+
+### Error Handling
+
+If the command fails, it will provide a descriptive error message. Common causes of failure include:
+*   Ghostscript is not installed or not in the system's PATH.
+*   The input file path provided with `--in` is incorrect.
+*   The command does not have permission to write to the output path (`--out`) or the system's temporary directory.
+
+---
+
+# Dokumentasi Bahasa Indonesia
+
+## Perintah Artisan: `pdf:thumbnail`
+
+### Deskripsi
+
+Perintah ini berfungsi untuk menghasilkan gambar thumbnail dari halaman tertentu sebuah file PDF. Perintah ini menggunakan proses dua langkah untuk mendapatkan hasil berkualitas tinggi:
+1.  **Ghostscript:** Untuk mengekstrak satu halaman dari PDF dan mengubahnya menjadi file gambar PNG *lossless* beresolusi tinggi.
+2.  **Ekstensi PHP-GD:** Untuk mengubah ukuran gambar beresolusi tinggi tersebut menjadi thumbnail JPEG yang lebih kecil dan teroptimasi.
+
+Pendekatan ini memastikan bahwa thumbnail akhir yang dihasilkan tetap tajam dan jelas, bahkan jika dibuat dari PDF yang kompleks.
+
+### Prasyarat
+
+Agar perintah ini dapat berjalan, Anda harus sudah menginstal perangkat lunak berikut di server Anda dan memastikan path-nya dapat diakses oleh sistem:
+
+1.  **Ghostscript:** Prosesor serbaguna untuk file PostScript dan PDF. Biasanya dapat diinstal melalui manajer paket sistem Anda (contoh: `sudo apt-get install ghostscript` di Debian/Ubuntu, `brew install ghostscript` di macOS).
+2.  **Ekstensi PHP-GD:** Modul pemrosesan gambar yang umum digunakan untuk PHP. Pastikan ekstensi ini (`php-gd`) aktif pada instalasi PHP Anda.
+
+### Penggunaan
+
+```bash
+php artisan pdf:thumbnail --in=<path/ke/input.pdf> --out=<path/ke/output.jpg> [opsi]
+```
+
+### Opsi
+
+| Opsi          | Deskripsi                                                                   | Wajib?  | Default |
+| :------------ | :-------------------------------------------------------------------------- | :------ | :------ |
+| `--in`        | Path lengkap menuju file PDF sumber.                                        | **Ya**  | `null`  |
+| `--out`       | Path lengkap untuk menyimpan file thumbnail akhir (contoh: `public/thumbnails/doc.jpg`). | **Ya**  | `null`  |
+| `--page`      | Nomor halaman dari file PDF yang akan dijadikan thumbnail.                  | Tidak   | `1`     |
+| `--width`     | Lebar thumbnail akhir yang diinginkan dalam satuan piksel. Tinggi gambar akan dihitung secara otomatis untuk menjaga rasio aspek. | Tidak   | `400`   |
+
+### Cara Kerja (Alur Proses)
+
+1.  **Validasi:** Perintah pertama-tama akan memeriksa apakah file input ada dan apakah nilai `page` dan `width` valid.
+2.  **Konversi Resolusi Tinggi:** Perintah ini memanggil Ghostscript untuk me-render halaman PDF yang ditentukan (`--page`) pada resolusi tinggi (300 DPI) menjadi sebuah file PNG *lossless* sementara. Penggunaan DPI tinggi sangat penting untuk mendapatkan hasil yang berkualitas saat ukuran gambar diperkecil.
+3.  **Pembuatan Thumbnail:** Selanjutnya, perintah ini menggunakan library PHP-GD untuk:
+*   Membaca file gambar PNG sementara.
+*   Membuat gambar kosong baru dengan latar belakang putih.
+*   Mengubah ukuran (resize dan resample) gambar resolusi tinggi menjadi sesuai dengan `--width` yang ditargetkan, sambil mempertahankan rasio aspek.
+*   Menyimpan gambar akhir sebagai file JPEG di path `--out` yang ditentukan dengan tingkat kualitas 85.
+4.  **Pembersihan:** Terakhir, file PNG sementara yang beresolusi tinggi akan dihapus, baik prosesnya berhasil maupun gagal.
+
+### Contoh
+
+**1. Penggunaan Dasar**
+
+Perintah ini akan menghasilkan thumbnail dengan lebar 400px dari halaman pertama `document.pdf` dan menyimpannya sebagai `thumbnail.jpg`.
+
+```bash
+php artisan pdf:thumbnail --in="storage/app/docs/document.pdf" --out="public/thumbnails/thumbnail.jpg"
+```
+
+**2. Menentukan Halaman dan Lebar**
+
+Perintah ini akan menghasilkan thumbnail dengan lebar 600px dari **halaman kelima** file `report.pdf`.
+
+```bash
+php artisan pdf:thumbnail --in="storage/app/reports/report.pdf" --out="public/img/report_thumb.jpg" --page=5 --width=600
+```
+
+### Penanganan Error
+
+Jika perintah gagal, pesan error yang deskriptif akan ditampilkan. Penyebab umum kegagalan antara lain:
+*   Ghostscript tidak terinstal atau path-nya tidak terdaftar di sistem.
+*   Path file input yang diberikan pada `--in` salah.
+*   Perintah tidak memiliki izin untuk menulis ke path output (`--out`) atau direktori sementara sistem.

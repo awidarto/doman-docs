@@ -1,0 +1,465 @@
+---
+title: 'DMS Project Document Control'
+---
+
+## 2025-09-05
+### 1. Project Definition Structure (MongoDB Collection: `projects`)
+
+In MongoDB, this will be your `projects` collection. Each document in this collection represents a single project.
+
+#### Proposed Project Model (`Project.php`)
+
+```php
+// app/Models/Project.php
+class Project extends Jenssegers\Mongodb\Eloquent\Model
+{
+    protected $connection = 'mongodb';
+    protected $collection = 'projects';
+
+    /**
+     * The attributes that are mass assignable.
+     *
+     * @var array
+     */
+    protected $fillable = [
+        'projectCode',
+        'projectName',
+        'description',
+        'projectManagerId',
+        'clientId',
+        'status',
+        'startDate',
+        'plannedEndDate',
+        'actualEndDate',
+t       'budget',
+        'currency',
+    ];
+
+    /**
+     * The attributes that should be cast to native types.
+     *
+     * @var array
+     */
+    protected $casts = [
+        'startDate' => 'datetime',
+        'plannedEndDate' => 'datetime',
+        'actualEndDate' => 'datetime',
+        'budget' => 'float',
+    ];
+}
+```
+
+#### Field Definition (`projects` collection)
+
+| Field Name | Data Type (MongoDB) | Description | Example |
+| :--- | :--- | :--- | :--- |
+| `_id` | ObjectId | Automatically generated unique identifier (Primary Key). | `ObjectId("63a0c2b...")` |
+| `projectCode` | String (Unique Index)| A human-readable, unique identifier for the project. | `PROJ-2024-001` |
+| `projectName` | String | The official name of the project. **(Required)** | `Corporate Website Redesign`|
+| `description` | String | A detailed description of the project's scope and goals. | `To rebuild the public-facing website...`|
+| `projectManagerId`| ObjectId | The `_id` of the user from the `users` collection. | `ObjectId("63a0d1e...")` |
+| `clientId` | ObjectId | The `_id` of the client from a `clients` collection. Nullable. | `ObjectId("63a0e4f...")` |
+| `status` | String | The project status. **(Required)** | `In Progress` |
+| `startDate` | ISODate | The planned or actual start date of the project. | `2024-09-01T00:00:00.000Z`|
+| `plannedEndDate` | ISODate | The originally planned completion date. | `2025-03-31T00:00:00.000Z`|
+| `actualEndDate` | ISODate | The actual completion date. Null until completion. | `null` |
+| `budget` | Double / Decimal128| The allocated budget for the project. Optional. | `250000.00` |
+| `currency` | String | The currency of the budget (ISO 4217). | `USD` |
+| `created_at` | ISODate | Automatically managed by Eloquent. | `...` |
+| `updated_at` | ISODate | Automatically managed by Eloquent. | `...` |
+| `isArchived` | Boolean | For soft-deleting projects. Defaults to `false`. | `false` |
+
+#### Initial CRUD (Laravel/MongoDB Context)
+
+*   **Create:** A standard `Project::create($validatedData)` call in your controller.
+*   **Read (List):** `Project::where('isArchived', false)->get()` with filters applied via additional `where()` clauses.
+*   **Read (Detail):** `Project::findOrFail($id)`.
+*   **Update:** `$project->update($validatedData)`.
+*   **Delete (Soft):** `$project->update(['isArchived' => true])`.
+
+---
+
+### 2. Organisation and Flow of Project Document Schedule & Tracking
+
+With MongoDB, you have a choice: **embed** revisions within the parent document or keep them in a **separate collection**.
+
+*   **Embedding:** Fast reads, but can lead to large documents (16MB limit) and makes querying across *all revisions* in the system difficult.
+*   **Separate Collection (Referencing):** The recommended, more scalable approach. It mimics a relational structure but with the flexibility of NoSQL. It keeps document size manageable and allows for powerful queries on the revisions themselves.
+
+Let's proceed with the **Separate Collection** approach.
+
+#### Model 1: `ProjectDocument` (Collection: `projectDocuments`)
+
+This collection holds the master record for each controlled document. It contains metadata and, crucially, a summary of its *current* state for fast lookups.
+
+| Field Name | Data Type (MongoDB) | Description |
+| :--- | :--- | :--- |
+| `_id` | ObjectId | Unique identifier. |
+| `projectId` | ObjectId | **Link** to the `projects` collection. **(Index this field)** |
+| `docCode` | String | Unique document number. **(Index this field)** |
+| `title` | String | The official title of the document. |
+| `discipline` | String | E.g., `Civil`, `Mechanical`, `Software`. |
+| `docType` | String | E.g., `Drawing`, `Specification`, `Report`. |
+| `currentRevision` | **Embedded Document**| A denormalized snapshot of the latest active revision for quick display. |
+| `created_at` | ISODate | Managed by Eloquent. |
+| `updated_at` | ISODate | Managed by Eloquent. |
+
+**Example of `currentRevision` Embedded Document:**
+This is the key for performance. When you load the document list, you don't need a second query to find the status of every document.
+
+```json
+"currentRevision": {
+  "revisionId": ObjectId("..."),
+  "revisionNumber": "B",
+  "status": "Approved",
+  "authorId": ObjectId("..."),
+  "plannedApprovalDate": ISODate("...")
+}
+```
+
+#### Model 2: `DocumentRevision` (Collection: `documentRevisions`)
+
+This collection is the auditable history—a log of every version of every document.
+
+| Field Name | Data Type (MongoDB) | Description |
+| :--- | :--- | :--- |
+| `_id` | ObjectId | Unique identifier for this revision. |
+| `documentId` | ObjectId | **Link** to the `projectDocuments` collection. **(Index this field)** |
+| `revisionNumber` | String | The revision identifier (e.g., `A`, `B`, `0`, `1`). |
+| `status` | String | `Draft`, `Submitted for Review`, `Approved`, `Resubmission Required`. |
+| `authorId` | ObjectId | The `_id` of the user who created this revision. |
+| `reviewerId` | ObjectId | The `_id` of the user assigned to review. |
+| `plannedSubmissionDate`| ISODate | The target date for submission for review. |
+| `actualSubmissionDate`| ISODate | The date the author submitted it. |
+| `plannedApprovalDate`| ISODate | The target date for the reviewer to finish. |
+| `actualApprovalDate`| ISODate | The date the reviewer set the final status. |
+| `fileReference` | Embedded Document | Metadata about the stored file. |
+| `created_at` | ISODate | Managed by Eloquent. |
+| `updated_at` | ISODate | Managed by Eloquent. |
+
+**Example of `fileReference` Embedded Document:**
+This provides flexibility for different storage providers.
+
+```json
+"fileReference": {
+  "storageDriver": "s3",
+  "path": "project_xyz/SPEC-MECH-001_RevB.pdf",
+  "filename": "SPEC-MECH-001_RevB.pdf",
+  "mimeType": "application/pdf",
+  "size": 2048576 // in bytes
+}
+```
+
+#### Flow and CRUD (Laravel/MongoDB Context)
+
+1.  **Create a New Document:**
+*   A user fills out a form for a new document (`docCode`, `title`, etc.) within a project.
+*   **Transactionally:**
+1.  Create the `ProjectDocument` record.
+2.  Create the first `DocumentRevision` record (e.g., Rev A) with `status: 'Draft'`.
+3.  Update the `ProjectDocument`'s `currentRevision` embedded document with the info from the new revision.
+
+2.  **Submit for Review (State Transition):**
+*   The author uploads a file and clicks "Submit".
+*   The backend updates the corresponding `DocumentRevision` record, changing `status` from `Draft` to `Submitted for Review` and setting `actualSubmissionDate`.
+*   The `ProjectDocument`'s `currentRevision.status` is also updated to reflect this change.
+
+3.  **Approve/Reject (State Transition):**
+*   The reviewer makes a decision.
+*   The backend updates the `DocumentRevision` record's `status` to `Approved` or `Resubmission Required`.
+*   The `ProjectDocument`'s `currentRevision.status` is updated.
+
+4.  **Create a New Revision:**
+*   A user initiates a new revision (e.g., because the previous was `Resubmission Required` or needs an update).
+*   **Transactionally:**
+1.  Find the old `DocumentRevision` and update its `status` to `Superseded`.
+2.  Create a *new* `DocumentRevision` record (e.g., Rev B) with `status: 'Draft'`.
+3.  Update the parent `ProjectDocument`'s `currentRevision` embedded document to point to this new Rev B.
+
+### Alternative Collection Views (How to Query)
+
+The frontend views remain the same, but the backend queries will leverage this MongoDB structure.
+
+#### 1. Document Register View (List-Based)
+
+*   **Query:** Simply `ProjectDocument::where('projectId', $projectId)->get()`.
+*   **Why it's fast:** All the necessary data (`docCode`, `title`, `currentRevision.status`, `currentRevision.revisionNumber`) is in the main document. No joins or lookups are needed to display the list, making it highly performant.
+
+#### 2. Timeline View (Schedule-Based)
+
+*   **Query:** `DocumentRevision::whereIn('documentId', $documentIds)->get()`. (`$documentIds` is an array of `_id`s from the project's documents).
+*   **Logic:** This query fetches all historical and current revisions for the documents in the project. You can then iterate through these in your backend or frontend to build the timeline, plotting bars based on `plannedSubmissionDate` and `plannedApprovalDate`. You can filter this query for only the "active" revisions if needed.
+
+#### 3. Kanban Board View (Workflow-Based)
+
+*   **Query:** `ProjectDocument::where('projectId', $projectId)->get()`.
+*   **Logic:** The data for the Kanban board also comes directly from the `projectDocuments` collection. The frontend logic would group the documents into columns based on the value of the `currentRevision.status` field. Drag-and-drop actions would trigger API calls to perform the state transitions described in the workflow above.
+
+### Flow & Entity Diagram
+
+Of course. Visualizing the flow and relationships is a crucial step. Here are the visualizations using Mermaid notation for both the document lifecycle flow and the data entity relationships.
+
+---
+
+### 1. Document Revision Workflow (The Flow)
+
+This diagram illustrates the lifecycle of a **single document revision**. It shows the states a revision can be in and the actions that cause it to transition from one state to another.
+
+The key concept is that actions like "Approve" or "Reject" are terminal for a specific revision (e.g., Rev A). To continue work, a *new revision* (Rev B) is created, which starts the lifecycle over again from the `Draft` state.
+
+```mermaid
+stateDiagram-v2
+    direction LR
+    [*] --> Draft
+
+    note right of Draft
+        A new revision record is created.
+        The author is working on the file.
+    end note
+
+    Draft --> Submitted_for_Review: Author submits file
+
+    state "Submitted for Review" as Submitted_for_Review
+    note right of Submitted_for_Review
+        Awaiting action from the assigned reviewer.
+        The system should notify the reviewer.
+    end note
+
+    state review_decision <<choice>>
+    Submitted_for_Review --> review_decision
+
+    review_decision --> Approved: Reviewer Approves
+    review_decision --> Approved_with_Comments: Reviewer Approves w/ Comments
+    review_decision --> Resubmission_Required: Reviewer Rejects
+
+    note right of review_decision
+        When a user decides to create a new revision
+        (e.g., Rev B after Rev A was approved or rejected):
+        1. The status of the old revision (Rev A) is set to "Superseded".
+        2. A new revision record (Rev B) is created and starts at "Draft".
+    end note
+
+    Approved --> Draft: Create New Revision
+    Approved_with_Comments --> Draft: Create New Revision
+    Resubmission_Required --> Draft: Create New Revision
+
+
+```
+
+### 2. Data Entity Relationship Diagram (The Structure)
+
+This ER diagram shows how the different MongoDB collections (`projects`, `projectDocuments`, `documentRevisions`, etc.) are related to each other. It clarifies the "one-to-many" relationships that form the backbone of your system.
+
+*   A `Project` contains many `ProjectDocuments`.
+*   A `ProjectDocument` has a history of many `DocumentRevisions`.
+*   `Users` play multiple roles (Project Manager, Author, Reviewer).
+
+```mermaid
+erDiagram
+    USERS {
+        ObjectId _id PK
+        string name
+        string email
+    }
+
+    CLIENTS {
+        ObjectId _id PK
+        string clientName
+    }
+
+    PROJECTS {
+        ObjectId _id PK
+        string projectCode "Unique"
+        string projectName
+        ObjectId projectManagerId FK
+        ObjectId clientId FK
+    }
+
+    PROJECT_DOCUMENTS {
+        ObjectId _id PK
+        ObjectId projectId FK
+        string docCode "Unique"
+        string title
+        object currentRevision "Embedded Snapshot"
+    }
+
+    DOCUMENT_REVISIONS {
+        ObjectId _id PK
+        ObjectId documentId FK
+        string revisionNumber
+        string status
+        ObjectId authorId FK
+        ObjectId reviewerId FK
+        object fileReference
+    }
+
+    PROJECTS ||--|{ PROJECT_DOCUMENTS : "contains"
+    PROJECT_DOCUMENTS ||--|{ DOCUMENT_REVISIONS : "has history of"
+
+    USERS }o--|{ PROJECTS : "manages"
+    CLIENTS }o--|{ PROJECTS : "belongs to"
+
+    USERS }o--|{ DOCUMENT_REVISIONS : "authored by"
+    USERS }o--|{ DOCUMENT_REVISIONS : "reviewed by"
+```
+
+#### How to Interpret the ER Diagram:
+
+*   **`||--|{`**: Represents a "one-to-many" relationship. For example, one `PROJECTS` record is related to many `PROJECT_DOCUMENTS` records.
+*   **`}o--|{`**: Also represents a "one-to-many" relationship, but drawn from the perspective of the "one" side. For example, one `USERS` record can be related to many `PROJECTS` as a manager.
+*   **PK**: Stands for Primary Key (in MongoDB, this is the `_id`).
+*   **FK**: Stands for Foreign Key. This indicates a field that stores the `_id` from another collection to create a relationship (e.g., `PROJECT_DOCUMENTS.projectId` stores a `PROJECTS._id`).
+
+### UI / UX
+
+Excellent request. Visualizing the user interface (UI) flow and its connection to the backend CRUD operations is key to understanding how the system will function.
+
+Here are visualizations using Mermaid's flowchart notation. I've broken it down into the two main areas as before: **Project Management** and **Project Document Management**.
+
+---
+
+### 1. Project Management CRUD Flow
+
+This diagram illustrates the user journey for managing the Project Register. It's a standard and straightforward CRUD implementation.
+
+```mermaid
+graph TD
+    subgraph "User Journey: Managing Projects"
+        A[/"Project Register (Datatable View)"/] -- "[User Action] Clicks 'New Project'" --> B["Create Project Form (UI)"]
+        B -- "[User Action] Fills form & Clicks Save" --> C([API: POST /projects])
+        C -- "Success" --> D{Redirect}
+        D -- " " --> A
+        C -- "Validation Error" --> B
+
+        A -- "[User Action] Clicks on a project row" --> E[/"Project Dashboard (View Item UI)"/]
+
+        E -- "[User Action] Clicks 'Edit'" --> F["Edit Project Form (UI)"]
+        F -- "[User Action] Modifies form & Clicks Save" --> G([API: PUT /projects/id])
+        G -- "Success" --> H{Redirect}
+        H -- " " --> E
+        G -- "Validation Error" --> F
+
+        E -- "[User Action] Clicks 'Archive'" --> I{"Confirm Archive?"}
+        I -- "Yes" --> J([API: DELETE /projects/id])
+        J -- "Success" --> A
+
+        E -- "[User Action] Clicks 'View Documents' Tab/Link" --> K[Go to Document Management Flow]
+    end
+
+    %% Styling
+    style A fill:#e3f2fd,stroke:#333,stroke-width:2px
+    style E fill:#e3f2fd,stroke:#333,stroke-width:2px
+    style B fill:#fff9c4,stroke:#333
+    style F fill:#fff9c4,stroke:#333
+```
+
+#### Explanation of the Project Flow:
+
+1.  **Collection View (`Project Register`):**
+*   The user starts at a list of all projects, presented in a **Datatable**. This is the main "Read" (List) screen.
+*   From here, they can initiate creating a new project or select an existing one to view its details.
+
+2.  **Create Form UI (`Create Project Form`):**
+*   A simple form to input the project's details (`projectName`, `projectCode`, etc.).
+*   Submitting this form makes a `POST` request to your API. On success, the user is redirected back to the register, which now shows the new project.
+
+3.  **View Item UI (`Project Dashboard`):**
+*   This is the detailed view of a single project. It displays all the project's information.
+*   This page is the hub for actions related to *this specific project*, such as editing it, archiving it, or, most importantly, navigating to its associated documents.
+
+4.  **Edit Form UI (`Edit Project Form`):**
+*   Identical to the create form but is pre-populated with the existing project's data.
+*   Submitting makes a `PUT` or `PATCH` request to update the record.
+
+---
+
+### 2. Project Document Management CRUD Flow
+
+This flow is more complex because it involves multiple view types and a workflow-driven update process (state changes).
+
+```mermaid
+graph TD
+    subgraph "User Journey: Managing Documents within a Project"
+        Start[/"Project Dashboard"/] -- "[User Action] Navigates to Documents" --> Views;
+
+        subgraph "Collection Views"
+            direction LR
+            Views(Choose View) --> V1[/"Datatable View"/];
+            Views --> V2[/"Timeline View"/];
+            Views --> V3[/"Kanban View"/];
+            Views --> V4[/"Grid View (for drawings)"/];
+            Views --> V5[/"Tree Datatable (for specs)"/];
+        end
+
+        V1 -- "[User Action] Clicks 'Add Document'" --> CreateForm;
+        V2 -- "[User Action] Clicks 'Add Document'" --> CreateForm;
+        V3 -- "[User Action] Clicks 'Add Document'" --> CreateForm;
+        V4 -- "[User Action] Clicks 'Add Document'" --> CreateForm;
+        V5 -- "[User Action] Clicks 'Add Document'" --> CreateForm;
+
+        CreateForm["Create Document Form (UI)"] -- "[User Action] Fills metadata & Clicks Save" --> CreateAPI["API: POST /documents"];
+        CreateAPI -- "Success" --> Views;
+        CreateAPI -- "Error" --> CreateForm;
+
+        V1 -- "[User Action] Clicks on a document" --> ViewItem;
+        V2 -- "[User Action] Clicks on a document" --> ViewItem;
+        V3 -- "[User Action] Clicks on a card" --> ViewItem;
+        V4 -- "[User Action] Clicks on a tile" --> ViewItem;
+        V5 -- "[User Action] Clicks on a node" --> ViewItem;
+
+        ViewItem[/"Document Detail Page (View Item UI)"/];
+        subgraph "Document Detail Actions"
+            ViewItem -- "[User Action] Clicks 'Edit Metadata'" --> EditForm["Edit Document Form (UI)"];
+            EditForm -- "Saves" --> EditAPI["API: PUT /documents/{id}"];
+            EditAPI -- "Success" --> ViewItem;
+
+            ViewItem -- "[User Action] Clicks 'Create New Revision'" --> RevForm["Create Revision Form (UI)<br/>- Upload File<br/>- Set Dates"];
+            RevForm -- "Saves" --> RevAPI["API: POST /documents/{id}/revisions"];
+            RevAPI -- "Success" --> ViewItem;
+        end
+
+        subgraph "Special Case: Kanban Workflow Update"
+            V3 -- "[User Action] Drags card from<br/>'Draft' to 'For Review'" --> KanbanUpdate["API: PATCH /revisions/{rev_id}/status"];
+            KanbanUpdate -- "Success" --> V3;
+        end
+    end
+
+    %% Styling
+    style Start fill:#c8e6c9,stroke:#333,stroke-width:2px
+    style Views fill:#b3e5fc,stroke:#333,stroke-width:2px
+    style ViewItem fill:#e3f2fd,stroke:#333,stroke-width:2px
+    style V1 fill:#f5f5f5,stroke:#333
+    style V2 fill:#f5f5f5,stroke:#333
+    style V3 fill:#f5f5f5,stroke:#333
+    style V4 fill:#f5f5f5,stroke:#333
+    style V5 fill:#f5f5f5,stroke:#333
+    style CreateForm fill:#fff9c4,stroke:#333
+    style EditForm fill:#fff9c4,stroke:#333
+    style RevForm fill:#fff9c4,stroke:#333
+```
+
+#### Explanation of the Document Flow:
+
+1.  **Entry Point (`Project Dashboard`):** The user is already looking at a specific project and chooses to manage its documents.
+
+2.  **Collection Views (The Core):**
+*   The user is presented with one or more ways to view the document register. A toggle or menu allows them to switch between views.
+*   **Datatable:** The default, information-rich view.
+*   **Timeline:** Visualizes the schedule.
+*   **Kanban:** Visualizes the workflow status.
+*   **Grid:** Best for visually-oriented documents like architectural drawings or mockups, showing thumbnails.
+*   **Tree Datatable:** Ideal for complex document sets where documents are nested, like a master specification with multiple sub-sections.
+*   All these views offer two primary actions: **Add a new document** or **View an existing document's details**.
+
+3.  **Create Form UI (`Create Document Form`):**
+*   This form is for creating the *master document record* (`ProjectDocument`). It captures metadata like the `docCode` and `title`. The initial revision is typically created automatically in the background with a `Draft` status.
+
+4.  **View Item UI (`Document Detail Page`):**
+*   This is the hub for a single document. It shows all its metadata and, most importantly, a **list of its revisions** (Rev A, Rev B, etc.).
+*   From here, the user can perform two distinct types of "updates":
+*   **Edit Metadata:** Changes the master document record (e.g., correcting a typo in the title).
+*   **Create New Revision:** This is the main workflow action. It opens a form to upload a new file, creating a new `DocumentRevision` record and starting its lifecycle.
+
+5.  **Special Case - Kanban Update:**
+*   The Kanban view offers a unique, streamlined update process. Instead of opening a form, the user can simply **drag a card** from one column (e.g., `Submitted for Review`) to another (e.g., `Approved`).
+*   This UI action triggers a direct `PATCH` request to the API to update only the `status` of that revision, providing a fast and intuitive user experience for managing workflow.

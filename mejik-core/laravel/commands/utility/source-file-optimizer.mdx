@@ -1,0 +1,479 @@
+---
+title: "File Format Optimizer Commands"
+description: "Formatter & Optimizer post processor for html, blade, js and json file"
+---
+
+## English Documentation
+
+### Artisan Command: `post:process`
+
+This command is a unified post-processor for formatting and optimizing various source files. It can read from a **local path or a remote URL** and write the output to a **local path or any configured Laravel filesystem disk** (like Amazon S3 or Minio). It acts as a single entry point to run different formatters like Laravel Pint (PHP), Tidy (HTML), Blade Formatter (Blade), and Prettier (JS, TS, Vue, etc.).
+
+---
+
+### 1. Prerequisites & Installation
+
+Before using this command, ensure all required tools are installed.
+
+#### a. Laravel Pint (for PHP files)
+Pint is included with modern Laravel installations. If missing, install it:
+```bash
+composer require laravel/pint --dev
+```
+
+#### b. Tidy CLI (for HTML files)
+This is a system command-line tool.
+*   **Linux (Ubuntu/Debian):** `sudo apt-get install tidy`
+*   **macOS (Homebrew):** `brew install tidy-html5`
+
+#### c. Node.js Tools (for Blade, JS, JSON, TS, & Vue files)
+Install the required formatters via npm:
+```bash
+# For JS, JSON, TS, and Vue files
+npm install --save-dev prettier
+
+# For Blade template files
+npm install --save-dev blade-formatter
+```
+---
+
+### 2. Usage
+
+The command can process a single file (local or remote) or an entire local directory.
+
+**Synopsis:**
+```bash
+php artisan post:process --in=<input> --out=<output> --filetype=<type> [--disk=<name>]
+```
+
+#### Options
+
+| Option       | Description                                                                 | Example                           |
+| :----------- | :-------------------------------------------------------------------------- | :-------------------------------- |
+| `--in=`      | **Required.** The input file (local path or URL) or local directory.        | `--in=resources/js` or `--in=https://.../app.js` |
+| `--out=`     | **Required.** The output file or directory path. If `--disk` is used, this is a path within that disk. | `--out=public/dist/js` or `--out=optimized/app.js` |
+| `--filetype=`| **Required.** Supported values: `php`, `blade`, `html`, `js`, `json`, `ts`, `vue`. | `--filetype=vue`                |
+| `--disk=`    | **Optional.** The Laravel filesystem disk to save the output to (e.g., `s3`, `minio`). If omitted, output is saved locally. | `--disk=s3` |
+
+---
+
+### 3. Examples
+
+#### a. Processing a Remote URL to a Local File
+Fetches a file from a URL, formats it, and saves it to the local `storage` directory.
+```bash
+php artisan post:process \
+  --in="https://raw.githubusercontent.com/laravel/laravel/10.x/config/app.php" \
+  --out="storage/processed/app.php" \
+  --filetype="php"
+```
+
+#### b. Processing a Local File to an S3 Bucket
+Formats a local JavaScript file and uploads the result to an S3 disk configured in `config/filesystems.php`.
+```bash
+php artisan post:process \
+  --in="resources/js/app.js" \
+  --out="assets/js/app.formatted.js" \
+  --filetype="js" \
+  --disk="s3"
+```
+
+#### c. Processing a Local Directory to a Minio Bucket
+Finds all `.blade.php` files in a local directory, formats them, and uploads them to a `minio` disk, preserving the original file structure.
+```bash
+php artisan post:process \
+  --in="resources/views/pages" \
+  --out="formatted-views/pages" \
+  --filetype="blade" \
+  --disk="minio"
+```
+
+#### d. Processing a Local Directory to a Local Directory (Standard Use)
+This will find all `.vue` files, format them, and save them to a different local directory.
+```bash
+php artisan post:process \
+  --in=resources/js/components \
+  --out=storage/processed/components \
+  --filetype=vue
+```
+
+***
+
+## Dokumentasi Bahasa Indonesia
+
+### Perintah Artisan: `post:process`
+
+Perintah ini adalah post-processor terpadu untuk memformat dan mengoptimalkan berbagai jenis file sumber. Ia dapat membaca dari **path lokal atau URL remote** dan menulis hasilnya ke **path lokal atau disk filesystem Laravel yang terkonfigurasi** (seperti Amazon S3 atau Minio). Perintah ini berfungsi sebagai satu pintu masuk untuk menjalankan formatter seperti Laravel Pint (PHP), Tidy (HTML), Blade Formatter (Blade), dan Prettier (JS, TS, Vue, dll.).
+
+---
+
+### 1. Prasyarat & Instalasi
+
+Sebelum menggunakan perintah ini, pastikan semua perangkat yang dibutuhkan telah terinstal.
+
+#### a. Laravel Pint (untuk file PHP)
+Pint sudah termasuk dalam instalasi Laravel modern. Jika belum ada, instal dengan:
+```bash
+composer require laravel/pint --dev
+```
+
+#### b. Tidy CLI (untuk file HTML)
+Ini adalah perangkat command-line sistem.
+*   **Linux (Ubuntu/Debian):** `sudo apt-get install tidy`
+*   **macOS (Homebrew):** `brew install tidy-html5`
+
+#### c. Perangkat Node.js (untuk file Blade, JS, JSON, TS, & Vue)
+Instal formatter yang dibutuhkan melalui npm:
+```bash
+# Untuk file JS, JSON, TS, dan Vue
+npm install --save-dev prettier
+
+# Untuk file template Blade
+npm install --save-dev blade-formatter
+```
+---
+
+### 2. Penggunaan
+
+Perintah ini dapat memproses satu file tunggal (lokal atau remote) atau seluruh direktori lokal.
+
+**Sinopsis:**
+```bash
+php artisan post:process --in=<input> --out=<output> --filetype=<jenis_file> [--disk=<nama_disk>]
+```
+
+#### Opsi
+
+| Opsi         | Deskripsi                                                                   | Contoh                            |
+| :----------- | :-------------------------------------------------------------------------- | :-------------------------------- |
+| `--in=`      | **Wajib.** File input (path lokal atau URL) atau direktori lokal.           | `--in=resources/js` atau `--in=https://.../app.js` |
+| `--out=`     | **Wajib.** Path file atau direktori output. Jika `--disk` digunakan, path ini relatif terhadap disk tersebut. | `--out=public/dist/js` atau `--out=optimized/app.js` |
+| `--filetype=`| **Wajib.** Nilai yang didukung: `php`, `blade`, `html`, `js`, `json`, `ts`, `vue`. | `--filetype=vue`                |
+| `--disk=`    | **Opsional.** Disk filesystem Laravel untuk menyimpan output (contoh: `s3`, `minio`). Jika dihilangkan, output disimpan secara lokal. | `--disk=s3` |
+
+---
+
+### 3. Contoh Penggunaan
+
+#### a. Memproses URL Remote ke File Lokal
+Mengambil file dari URL, memformatnya, dan menyimpannya di direktori `storage` lokal.
+```bash
+php artisan post:process \
+  --in="https://raw.githubusercontent.com/laravel/laravel/10.x/config/app.php" \
+  --out="storage/processed/app.php" \
+  --filetype="php"
+```
+
+#### b. Memproses File Lokal ke Bucket S3
+Memformat file JavaScript lokal dan mengunggah hasilnya ke disk S3 yang telah dikonfigurasi di `config/filesystems.php`.
+```bash
+php artisan post:process \
+  --in="resources/js/app.js" \
+  --out="assets/js/app.formatted.js" \
+  --filetype="js" \
+  --disk="s3"
+```
+
+#### c. Memproses Direktori Lokal ke Bucket Minio
+Mencari semua file `.blade.php` di direktori lokal, memformatnya, dan mengunggahnya ke disk `minio` dengan mempertahankan struktur file aslinya.
+```bash
+php artisan post:process \
+  --in="resources/views/pages" \
+  --out="formatted-views/pages" \
+  --filetype="blade" \
+  --disk="minio"
+```
+
+#### d. Memproses Direktori Lokal ke Direktori Lokal (Penggunaan Standar)
+Perintah ini akan mencari semua file `.vue`, memformatnya, dan menyimpannya ke direktori lokal yang berbeda.
+```bash
+php artisan post:process \
+  --in=resources/js/components \
+  --out=storage/processed/components \
+  --filetype=vue
+```
+
+---
+
+### Complete `app/Console/Commands/PostProcessor.php` Command
+
+This is the final, fully-functional code for your command.
+
+```php
+<?php
+
+namespace App\Console\Commands\Util;
+
+use Illuminate\Console\Command;
+use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Http\Client\RequestException;
+use Illuminate\Support\Str;
+use Symfony\Component\Process\Process;
+use Symfony\Component\Process\Exception\ProcessFailedException;
+use InvalidArgumentException;
+use RuntimeException;
+
+class PostProcessor extends Command
+{
+    /**
+     * The name and signature of the console command.
+     *
+     * @var string
+     */
+    protected $signature = 'post:process {--in= : The input file (local path or URL)}
+                                         {--out= : The output file path (local or relative to the specified disk)}
+                                         {--filetype= : The type of file to process (html, blade, php, js, json, ts, vue)}
+                                         {--disk= : (Optional) The filesystem disk for output (e.g., s3, minio). Defaults to local.}';
+
+    /**
+     * The console command description.
+     *
+     * @var string
+     */
+    protected $description = 'Optimizes and formats source files from local paths or URLs, and saves to a local path or a configured filesystem disk.';
+
+    /**
+     * The list of supported file types.
+     *
+     * @var array
+     */
+    protected const SUPPORTED_TYPES = ['html', 'blade', 'php', 'js', 'json', 'ts', 'vue'];
+
+    /**
+     * Execute the console command.
+     */
+    public function handle(): int
+    {
+        try {
+            $inPath = $this->option('in');
+            $outPath = $this->option('out');
+            $fileType = $this->getValidatedFileType();
+            $diskName = $this->option('disk');
+
+            if (!$inPath || !$outPath) {
+                throw new InvalidArgumentException('Both --in and --out options are required.');
+            }
+
+            // --- Validate the disk if provided ---
+            if ($diskName && !config("filesystems.disks.{$diskName}")) {
+                throw new InvalidArgumentException("The specified disk '{$diskName}' is not configured in your filesystems.php file.");
+            }
+
+            $this->line("🚀 Starting post-processing for '{$fileType}' files...");
+            $this->line("   - Input:  {$inPath}");
+            $this->line("   - Output: {$outPath}" . ($diskName ? " (on disk: {$diskName})" : " (local)"));
+
+            // --- Updated Logic to handle URL or local file/directory ---
+            if ($this->isUrl($inPath)) {
+                $this->processSingleFile($inPath, $outPath, $fileType, $diskName);
+            } elseif (File::exists($inPath)) {
+                if (File::isFile($inPath)) {
+                    $this->processSingleFile($inPath, $outPath, $fileType, $diskName);
+                } else {
+                    $this->processDirectory($inPath, $outPath, $fileType, $diskName);
+                }
+            } else {
+                throw new InvalidArgumentException("The specified input path does not exist or is not a valid URL: {$inPath}");
+            }
+
+            $this->info("\n✅ Processing complete!");
+            return Command::SUCCESS;
+
+        } catch (InvalidArgumentException | RuntimeException | RequestException $e) {
+            $this->error($e->getMessage());
+            return Command::FAILURE;
+        }
+    }
+
+    /**
+     * Determines if a given path is a URL.
+     */
+    protected function isUrl(string $path): bool
+    {
+        return Str::startsWith($path, ['http://', 'https://']);
+    }
+
+    /**
+     * Gets content from a local file path or a remote URL.
+     *
+     * @throws RequestException
+     */
+    protected function getContent(string $path): string
+    {
+        if ($this->isUrl($path)) {
+            $response = Http::get($path);
+            $response->throw(); // Throws exception for 4xx/5xx errors
+            return $response->body();
+        }
+        return File::get($path);
+    }
+
+    /**
+     * Puts content to a local file or a specified filesystem disk.
+     */
+    protected function putContent(string $path, string $content, ?string $disk): void
+    {
+        if ($disk) {
+            Storage::disk($disk)->put($path, $content);
+        } else {
+            File::ensureDirectoryExists(dirname($path));
+            File::put($path, $content);
+        }
+    }
+
+    protected function processSingleFile(string $inputFile, string $outputFile, string $fileType, ?string $disk): void
+    {
+        $this->info("Processing single file...");
+        $this->line("   - Reading from: {$inputFile}");
+
+        $content = $this->getContent($inputFile);
+        $processedContent = $this->formatContent($content, $fileType);
+        
+        $this->line("   - Writing to:   {$outputFile}");
+        $this->putContent($outputFile, $processedContent, $disk);
+    }
+
+    protected function processDirectory(string $inputDir, string $outputDir, string $fileType, ?string $disk): void
+    {
+        $extension = $this->getExtensionForType($fileType);
+        $files = File::allFiles($inputDir);
+
+        $targetFiles = collect($files)->filter(
+            fn ($file) => Str::endsWith($file->getFilename(), $extension)
+        );
+
+        if ($targetFiles->isEmpty()) {
+            $this->warn("No '{$extension}' files found in the input directory.");
+            return;
+        }
+
+        $progressBar = $this->output->createProgressBar($targetFiles->count());
+        $progressBar->start();
+
+        foreach ($targetFiles as $file) {
+            $relativePath = $file->getRelativePathname();
+            // Use forward slashes for cross-platform compatibility on storage disks
+            $outputFilePath = rtrim($outputDir, '/') . '/' . $relativePath;
+
+            $content = $file->getContents();
+            $processedContent = $this->formatContent($content, $fileType);
+            $this->putContent($outputFilePath, $processedContent, $disk);
+            $progressBar->advance();
+        }
+        $progressBar->finish();
+    }
+
+    protected function formatContent(string $content, string $fileType): string
+    {
+        return match ($fileType) {
+            'php'   => $this->formatWithPint($content),
+            'blade' => $this->formatWithBladeFormatter($content),
+            'html'  => $this->formatWithTidy($content),
+            'js', 'json', 'ts', 'vue' => $this->formatWithPrettier($content, $fileType),
+            default => $content,
+        };
+    }
+
+    protected function formatWithPint(string $content): string
+    {
+        $pintPath = base_path('vendor/bin/pint');
+        if (!File::exists($pintPath)) {
+            throw new RuntimeException("Laravel Pint not found. Please run 'composer require laravel/pint --dev'.");
+        }
+        $tempFile = tempnam(sys_get_temp_dir(), 'pint_') . '.php';
+        File::put($tempFile, $content);
+        try {
+            (new Process([$pintPath, $tempFile]))->mustRun();
+            return File::get($tempFile);
+        } finally {
+            File::delete($tempFile);
+        }
+    }
+
+    protected function formatWithBladeFormatter(string $content): string
+    {
+        $formatterPath = base_path('node_modules/.bin/blade-formatter');
+        if (!File::exists($formatterPath)) {
+            throw new RuntimeException("blade-formatter not found. Please run 'npm install --save-dev blade-formatter'.");
+        }
+        $process = new Process([$formatterPath, '--stdin', '--indent-size', '4', '--wrap-attributes', 'auto']);
+        $process->setInput($content);
+        try {
+            $process->mustRun();
+            return $process->getOutput();
+        } catch (ProcessFailedException $exception) {
+            $process = $exception->getProcess();
+            $errorOutput = trim($process->getErrorOutput());
+            if (empty($errorOutput)) {
+                $errorOutput = trim($process->getOutput());
+            }
+            if (empty($errorOutput)) {
+                $errorOutput = 'The command exited with status code ' . $process->getExitCode() . ' but provided no output.';
+            }
+            throw new RuntimeException("Blade Formatter failed: \n" . $errorOutput);
+        }
+    }
+
+    protected function formatWithTidy(string $content): string
+    {
+        if (empty(shell_exec('command -v tidy'))) {
+            throw new RuntimeException("The 'Tidy' CLI tool is not installed or not in your system's PATH.");
+        }
+        $command = ['tidy', '-q', '--indent', 'auto', '--indent-spaces', '4', '--wrap', '200', '--output-xhtml', 'yes', '--tidy-mark', 'no', '--force-output', 'yes'];
+        $process = new Process($command);
+        $process->setInput($content);
+        try {
+            if ($process->run() > 1) {
+                throw new ProcessFailedException($process);
+            }
+            return $process->getOutput();
+        } catch (ProcessFailedException $e) {
+            throw new RuntimeException("Tidy CLI failed: \n" . $e->getProcess()->getErrorOutput());
+        }
+    }
+
+    protected function formatWithPrettier(string $content, string $type): string
+    {
+        $prettierPath = base_path('node_modules/.bin/prettier');
+        if (!File::exists($prettierPath)) {
+            throw new RuntimeException("Prettier not found. Please run 'npm install --save-dev prettier'.");
+        }
+        $parser = match ($type) {
+            'js'   => 'babel', 'json' => 'json', 'ts' => 'typescript', 'vue' => 'vue',
+            default => throw new InvalidArgumentException("No Prettier parser for type '{$type}'."),
+        };
+        $process = new Process([$prettierPath, '--parser', $parser]);
+        $process->setInput($content);
+        try {
+            $process->mustRun();
+            return $process->getOutput();
+        } catch (ProcessFailedException $e) {
+            throw new RuntimeException("Prettier failed: \n" . $e->getProcess()->getErrorOutput());
+        }
+    }
+
+    protected function getValidatedFileType(): string
+    {
+        $fileType = $this->option('filetype');
+        if (!$fileType) {
+            throw new InvalidArgumentException('The --filetype option is required.');
+        }
+        if (!in_array($fileType, self::SUPPORTED_TYPES)) {
+            throw new InvalidArgumentException("Unsupported file type '{$fileType}'. Supported types are: " . implode(', ', self::SUPPORTED_TYPES));
+        }
+        return $fileType;
+    }
+
+    protected function getExtensionForType(string $fileType): string
+    {
+        return match ($fileType) {
+            'blade' => '.blade.php',
+            'ts'    => '.ts',
+            'vue'   => '.vue',
+            default => '.' . $fileType,
+        };
+    }
+}
+```

@@ -63,6 +63,111 @@
         ]
       },
       {
+        "tab": "App Dev",
+        "groups": [
+          {
+            "group": "DMS",
+            "pages": [
+              "dev/dms/project-document-control"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Mejik Core",
+        "groups": [
+          {
+            "group": "Installation",
+            "pages": [
+              "mejik-core/installation/index",
+              "mejik-core/installation/quickstart",
+              "mejik-core/installation/development"
+            ]
+          },
+          {
+            "group": "Performance",
+            "pages": [
+              "mejik-core/test-tools/db-analysis-tool",
+              "mejik-core/test-tools/process-analysis-tool"
+            ]
+          },
+          {
+            "group": "Use Case",
+            "pages": [
+              "mejik-core/laravel/commands/converter/case/invoice-generator-with-template.mdx"
+            ]
+          },
+          {
+            "group": "Converter",
+            "pages": [
+              "mejik-core/laravel/commands/converter/pdf-thumbnail-generator",
+              "mejik-core/laravel/commands/converter/pdf-convert-from-office",
+              "mejik-core/laravel/commands/converter/images-convert-from-office",
+              "mejik-core/laravel/commands/converter/docx-tpl-generate-command",
+              "mejik-core/laravel/commands/converter/xlsx-generate-command"
+            ]
+          },
+          {
+            "group": "Utility",
+            "pages": [
+              "mejik-core/laravel/commands/utility/source-file-optimizer"
+            ]
+          },
+          {
+            "group": "Commands",
+            "pages": [
+              "mejik-core/laravel/commands/xlsxconverter",
+              "mejik-core/laravel/commands/docx-data-merge",
+              "mejik-core/laravel/commands/docx-merge-convert",
+              "mejik-core/laravel/commands/xlsx-template-example",
+              "mejik-core/laravel/commands/docx-template-example",
+              "mejik-core/laravel/commands/xlsx-merge-convert"
+            ]
+          },
+          {
+            "group": "Commands ( v2 )",
+            "pages": [
+              "mejik-core/laravel/v2/commands/make-inertia-crud-and-form",
+              "mejik-core/laravel/v2/commands/make-inertia-columns",
+              "mejik-core/laravel/v2/commands/make-inertia-form",
+              "mejik-core/laravel/v2/stubs/route-and-model-stubs"
+            ]
+          },
+          {
+            "group": "MVC ( v2 )",
+            "pages": [
+              "mejik-core/laravel/v2/admin-controller-guide-en",
+              "mejik-core/laravel/v2/admin-controller-guide-id",
+              "mejik-core/laravel/v2/layout-navigation-en",
+              "mejik-core/laravel/v2/layout-navigation-id",
+              "mejik-core/laravel/v2/navigation-config-guide-en"
+            ]
+          },
+          {
+            "group": "Laravel",
+            "pages": [
+              "mejik-core/laravel/index",
+              "mejik-core/laravel/quickstart",
+              "mejik-core/laravel/development",
+              "mejik-core/laravel/tools/id/xlsxconverter",
+              "mejik-core/laravel/tools/module-gen/generator",
+              "mejik-core/laravel/tools/module-gen/subgenerator",
+              "mejik-core/laravel/tools/module-gen/guide"
+
+            ]
+          },
+          {
+            "group": "Vue",
+            "pages": [
+              "mejik-core/vue/index",
+              "mejik-core/vue/quickstart",
+              "mejik-core/vue/development",
+              "mejik-core/vue/components/inlineediting"
+            ]
+          }
+        ]
+      },
+      {
         "tab": "Guides",
         "groups": [
           {

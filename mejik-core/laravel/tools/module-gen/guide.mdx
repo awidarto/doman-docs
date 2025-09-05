@@ -1,0 +1,253 @@
+---
+title: "CRUD Generator Guide"
+description: "Example & Guide for Generator Commands for YAML Based Inertia CRUD"
+---
+
+
+### Comprehensive Usage Example: Building a "Support Ticket" Module
+
+**Goal:** Scaffold a full CRUD interface for managing support tickets.
+
+**1. The All-in-One YAML Definition File**
+
+Create a file named `support_ticket_module.yml` somewhere in your project (e.g., in a `crud_definitions/` directory).
+
+```yaml
+# crud_definitions/support_ticket_module.yml
+
+# --- Module-level Info (used by `make:module-crud`) ---
+name: Ticket
+namespace: Support
+
+inertia_crud: # Options for make:inertia-crud
+  softDeletes: true
+
+vue_form: # Options for make:vue-form
+  formName: TicketForm
+  withLayout: true # Use sections for form layout
+
+vue_dataview: # Options for make:vue-dataview
+  componentName: TicketDetailView
+
+zod_schema: # Options for make:zod-schema
+  yamlKey: schema_fields # The key in *this file* holding the Zod schema definition
+
+#-------------------------------------------------------------------------------
+# ZOD SCHEMA FIELDS DEFINITION
+#-------------------------------------------------------------------------------
+schema_fields:
+  - { model: id, type: string }
+  - { model: subject, type: string, required: true }
+  - { model: content, type: string, optional: true, nullable: true }
+  - { model: priority, type: enum, options: [low, medium, high], default: "medium" }
+  - { model: status, type: string, default: "open" }
+  - { model: isResolved, type: boolean, default: false }
+  - { model: assignedAgentId, type: string, nullable: true, optional: true }
+  - { model: satisfactionRating, type: number, min: 1, max: 5, optional: true, nullable: true }
+  - { model: reportedAt, type: datetime, default: "now" }
+  - { model: deadline, type: date, optional: true, nullable: true }
+  - { model: attachments, type: attachmentupload, optional: true }
+  - { model: customerSignature, type: signature, optional: true, nullable: true }
+  - { model: issueLocation, type: location, optional: true, nullable: true }
+  - { model: affectedArea, type: geofence, optional: true, nullable: true }
+  - { model: relatedTasks, type: array_object_manager, optional: true }
+
+#-------------------------------------------------------------------------------
+# TABLE COLUMN DEFINITIONS (for Index.vue)
+#-------------------------------------------------------------------------------
+table:
+  - { name: id, label: "Ticket ID", show: true, sort: true, search: true }
+  - { name: subject, label: "Subject", show: true, search: true, sort: true }
+  - { name: status, label: "Status", show: true, filter: true, sort: true, datatype: "statusBadge" }
+  - { name: priority, label: "Priority", show: true, filter: true, sort: true, datatype: "badge" }
+  - { name: isResolved, label: "Resolved", show: true, sort: true, datatype: "booleanIcon" }
+  - { name: assignedAgentName, label: "Agent", show: true, search: true, sort: true } # A related field
+  - { name: reportedAt, label: "Reported At", show: true, sort: true, datatype: "datetime" }
+
+#-------------------------------------------------------------------------------
+# FORM DEFINITION (for Create.vue / Edit.vue)
+#-------------------------------------------------------------------------------
+form:
+  - label: "Ticket Details"
+    name: ticketDetailsSection
+    type: card
+    children:
+      - { label: "Subject", name: subject, model: subject, type: text, validator: "required|min:5", placeholder: "Briefly describe the issue..." }
+      - { label: "Status", name: status, model: status, type: select, default: "open", param: { options: [{value: 'open', label: 'Open'}, {value: 'in_progress', label: 'In Progress'}, {value: 'closed', label: 'Closed'}] } }
+      - { label: "Priority", name: priority, model: priority, type: radio, default: "medium", param: { options: [{value: 'low', label: 'Low'}, {value: 'medium', label: 'Medium'}, {value: 'high', label: 'High'}] } }
+      - { label: "Is Resolved?", name: isResolved, model: isResolved, type: switch }
+      - { label: "Deadline", name: deadline, model: deadline, type: datepicker }
+
+  - label: "Issue Description & Attachments"
+    name: descriptionSection
+    type: card
+    children:
+      - { label: "Full Description", name: content, model: content, type: textarea, param: { rows: 8 }, placeholder: "Provide a detailed description of the problem, including steps to reproduce." }
+      - { label: "Attachments", name: attachments, model: attachments, type: attachmentupload, param: { uploadUrl: "/api/upload/ticket-attachments" } }
+      - { label: "Customer Signature", name: customerSignature, model: customerSignature, type: signature-modal, param: { uploadUrl: "/api/upload/signatures", modalTitle: "Confirm with Signature" } }
+
+  - label: "Location & Area"
+    name: locationSection
+    type: div
+    class: "grid grid-cols-1 lg:grid-cols-2 gap-6"
+    children:
+      - label: "Issue Location"
+        name: issueLocation
+        model: issueLocation
+        type: location
+        param: { mapHeight: '300px' }
+      - label: "Affected Area"
+        name: affectedArea
+        model: affectedArea
+        type: geofence
+        param: { mapHeight: '300px', allowedShapes: ['polygon', 'circle'] }
+
+  - label: "Related Tasks"
+    name: relatedTasksSection
+    type: card
+    children:
+      - label: "Sub-Tasks"
+        name: relatedTasks
+        model: relatedTasks
+        type: array_object_manager
+        param:
+          title: "Manage Sub-Tasks"
+          itemKey: "uid"
+          newItemTemplate: { uid: "", title: "", completed: false }
+          columns:
+            - { key: "title", label: "Task Title" }
+            - { key: "completed", label: "Completed", formatter: "formatBoolean" }
+
+#-------------------------------------------------------------------------------
+# DATA VIEW DEFINITION (for View.vue)
+#-------------------------------------------------------------------------------
+view:
+  - label: "Ticket Overview"
+    name: ticketOverview
+    type: card-stacked
+    children:
+      - { label: "Subject", model: subject, class: "text-lg font-semibold" }
+      - { label: "Status", model: status, type: statusBadge }
+      - { label: "Priority", model: priority, type: badge, param: { variant: "outline" } }
+      - { label: "Agent", model: assignedAgent.name } # Example of nested data
+      - { label: "Reported At", model: reportedAt, type: datetime }
+      - { label: "Deadline", model: deadline, type: date }
+      - { label: "Resolved", model: isResolved, type: booleanIcon }
+
+  - label: "Full Description"
+    name: descriptionView
+    type: card
+    children:
+      - { label: "", model: content, type: markdown }
+
+  - label: "Visual Information"
+    name: visualInfo
+    type: div
+    class: "grid grid-cols-1 lg:grid-cols-2 gap-6"
+    children:
+      - label: "Issue Location"
+        name: issueLocationView
+        type: map-point
+        model: issueLocation
+        param: { mapHeight: "300px" }
+      - label: "Affected Area"
+        name: affectedAreaView
+        type: map-geofence
+        model: affectedArea
+        param: { mapHeight: "300px", fitBounds: true }
+
+  - label: "Attachments & Signature"
+    name: attachmentsView
+    type: card-stacked
+    children:
+      - { label: "Attachments", model: attachments, type: attachmentlist }
+      - { label: "Customer Signature", model: customerSignature, type: image, param: { imageClass: "h-24 w-auto border p-2 bg-white rounded" } }
+
+  - label: "Analytics (Chart)"
+    name: analyticsView
+    type: chart
+    model: analyticsData
+    param:
+      chartType: bar
+      xAxis: { dataKey: "day" }
+      series:
+        - { dataKey: "interactions", name: "Agent Interactions" }
+      yAxis: { label: "Count" }
+```
+
+**2. The Artisan Command to Run**
+
+Open your terminal in the root of your Laravel project and run the single `make:module-crud` command:
+
+```bash
+php artisan make:module-crud crud_definitions/support_ticket_module.yml --single-yml
+```
+
+*   **`crud_definitions/support_ticket_module.yml`**: The path to the file you just created.
+*   **`--single-yml`**: This is the crucial flag that tells the command to look for `form:`, `view:`, `table:`, etc., inside this one file.
+
+**3. Expected Output**
+
+After running the command, you will see output from the orchestrator and each of its sub-commands. The following file structure will be created/updated:
+
+```
+your-laravel-project/
+├── app/
+│   ├── Http/
+│   │   └── Controllers/
+│   │       └── Support/
+│   │           └── TicketController.php  <-- From make:inertia-crud
+│   └── Models/
+│       └── Support/
+│           └── Ticket.php            <-- From make:inertia-crud
+├── resources/
+│   └── js/
+│       └── Pages/
+│           └── Support/
+│               └── Ticket/
+│                   ├── Index.vue         <-- From make:inertia-crud
+│                   ├── Create.vue        <-- From make:vue-form
+│                   ├── Edit.vue          <-- From make:vue-form
+│                   ├── View.vue          <-- From make:vue-dataview
+│                   ├── components/
+│                   │   ├── forms/
+│                   │   │   └── TicketForm.vue <-- From make:vue-form
+│                   │   └── views/
+│                   │       └── TicketDetailView.vue <-- From make:vue-dataview
+│                   └── data/
+│                       ├── columns.ts      <-- From make:table-columns
+│                       └── schema.ts       <-- From make:zod-schema
+```
+
+**4. Post-Generation Steps (Developer's TODO List)**
+
+1.  **Define Routes:** Open `routes/web.php` and add the resourceful route:
+```php
+use App\Http\Controllers\Support\TicketController;
+
+// ...
+Route::resource('support/tickets', TicketController::class)->names('support.tickets');
+// Add any custom action routes, e.g., for modals
+    ```
+
+2.  **Run Migrations:** Create a migration for your `tickets` table/collection that includes all the fields defined in the `schema_fields` section.
+
+3.  **Implement Controller Logic:**
+*   Open `app/Http/Controllers/Support/TicketController.php`.
+*   Fill in the `$validator_create` and `$validator_update` arrays with proper Laravel validation rules (the generator makes a guess, but you should refine it).
+*   In the `additionalQuery` method, add any necessary Eloquent `with()` clauses to eager-load relationships (e.g., `->with('assignedAgent')`).
+*   In `index()`, `view()`, `edit()`, pass any necessary extra data to the Inertia pages (e.g., a list of agents for a select dropdown).
+*   Implement the actual database saving logic in `store()` and `update()` if you override them from the `AdminController` base.
+
+4.  **Implement Page Logic:**
+*   Open `resources/js/Pages/Support/Ticket/Create.vue` and `Edit.vue`.
+*   Inside the `<TicketForm>` component slot, implement the UI for the `array_object_manager` (`#form_relatedTasks`).
+*   Provide the `formatters` object for the `ArrayObjectManager` via the form props if needed.
+*   Open `resources/js/Pages/Support/Ticket/View.vue`.
+*   Provide the `formatters` object with functions for `statusBadge`, `booleanIcon`, `markdown`, `starRating`, `attachmentList` etc., to be passed to `<TicketDetailView>`.
+*   Implement handlers for `@onPointClick` and `@map_viewport_change` if you plan to use them.
+
+5.  **Create Helper Files:**
+*   Ensure your `resources/js/utils/formatters.ts` file exists and contains the formatter functions (`statusBadge`, `booleanIcon`, etc.) referenced in your YAML.
+
+This example provides a concrete workflow, from a single comprehensive YAML file to a nearly complete, functional CRUD module, showcasing the power and efficiency of the generator system you've built.

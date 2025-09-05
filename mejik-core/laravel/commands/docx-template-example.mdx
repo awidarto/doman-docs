@@ -1,0 +1,188 @@
+---
+title: "DOCX Template Example"
+description: "DOCX template example & guide"
+---
+
+## English Documentation
+
+### **Guide to Creating a DOCX Invoice Template for `docx:generate`**
+
+This guide provides a step-by-step walkthrough for creating a powerful and flexible `.docx` invoice template. This template is specifically designed to work with the `docx:generate` command, utilizing its features for simple text replacement, conditional blocks, table looping, and mode-aware image handling.
+
+#### **Prerequisites**
+*   A word processing application (e.g., Microsoft Word, Google Docs, LibreOffice Writer).
+*   The `docx:generate` command from the previous guide, including the updated logic for image handling.
+
+#### **Visual Template Layout & Step-by-Step Guide**
+
+Create a new `.docx` document and lay it out as described below. All text in `${...}` format are placeholders that the command will replace.
+
+**1. Header Section**
+Place your logo placeholder at the top. Below it, add the placeholders for your company's information.
+
+```
+${logo}
+
+INVOICE
+
+${company_name}
+${company_address}
+${company_phone}
+${company_email}
+```
+
+**2. Invoice Details Section**
+For right-aligned content, it's often easiest to use a borderless table.
+
+| | |
+| :--- | :--- |
+| **Invoice Number:** | `${invoice_number}` |
+| **Invoice Date:** | `${invoice_date}` |
+| **Payment Date:** | `${invoice_payment}` |
+
+**3. Conditional "Bill To" Section**
+This entire block will only appear if the `bill_present` key in your JSON is `true`.
+
+```
+${if_bill}
+Bill to:
+${bill_name}
+${bill_addr1}
+${bill_addr2}
+${bill_phone}
+${bill_email}
+${/if_bill}
+```
+
+**4. Items Table**
+Create a table with a header row and **only one** data row. This single data row will serve as the template for the loop. Apply any desired formatting (borders, background colors, text alignment) to this row, and it will be duplicated for every item.
+
+| **No** | **Item Description** | **Quantity** | **Amount** |
+| :--- | :--- | :--- | :--- |
+| `${item.no}` | `${item.name}` | `${item.quantity}` | `${item.amount}` |
+
+**5. Summary Section**
+Again, a right-aligned, borderless table is perfect for the totals. Apply formatting like **bold** or larger font sizes directly to the placeholders.
+
+| | |
+| :--- | :--- |
+| **Subtotal** | `${invoice_subtotal}` |
+| **Tax (${company_tax_name})** | `${invoice_tax}` |
+| **TOTAL** | **`${invoice_total}`** |
+
+
+#### **Detailed Placeholder Tag Explanation**
+
+**1. Simple Variable Placeholder**
+*   **Syntax**: `${variable_name}`
+*   **Usage**: Replaces the placeholder with a value from the JSON data. Supports dot notation for nested objects (e.g., `${bill_to.name}`).
+*   **Example**: `${company_name}` is replaced by the value of the `company_name` key in the JSON.
+
+**2. Image Placeholder (`${logo}` - Special Handling)**
+*   **Syntax**: `${logo}`
+*   **Behavior**: The command handles this placeholder differently based on the `--mode` option:
+*   `--mode=merge` or `--mode=pdf`: The image from the URL in your JSON is downloaded and **embedded** directly into the document. The resulting file is self-contained.
+*   `--mode=html` or `--mode=blade`: The placeholder is replaced with a standard HTML `<img>` tag. The `src` attribute will point to the URL from your JSON. This is ideal for web pages.
+
+**3. Conditional Block**
+*   **Syntax**: `${block_name} ... ${/block_name}`
+*   **Usage**: Encloses a section of the document that should only appear if a corresponding boolean key in the JSON is `true`.
+*   **Example**: The content between `${if_bill}` and `${/if_bill}` will only be included in the final document if `"bill_present": true` exists in the JSON file.
+
+**4. Table Row Loop**
+*   **Syntax**: Place placeholders like `${item.key}` in the cells of a single table row.
+*   **Usage**: The `cloneRow` function in the command identifies this row and duplicates it for every object in the specified array (e.g., `item_list` in the JSON).
+*   **Example**: The row containing `${item.no}` will be repeated for each item in the `item_list` array. The `${item.name}` placeholder will be replaced with the `name` key from the corresponding array object.
+
+---
+
+## Dokumentasi Bahasa Indonesia
+
+### **Panduan Membuat Templat Faktur DOCX untuk `docx:generate`**
+
+Panduan ini menyediakan langkah-langkah untuk membuat templat faktur `.docx` yang andal dan fleksibel. Templat ini dirancang khusus untuk bekerja dengan perintah `docx:generate`, memanfaatkan fiturnya untuk penggantian teks sederhana, blok kondisional, perulangan baris tabel, dan penanganan gambar yang cerdas sesuai mode.
+
+#### **Prasyarat**
+*   Aplikasi pengolah kata (misalnya, Microsoft Word, Google Docs, LibreOffice Writer).
+*   Perintah `docx:generate` dari panduan sebelumnya, termasuk pembaruan logika untuk penanganan gambar.
+
+#### **Tata Letak Visual Templat & Panduan Langkah-demi-Langkah**
+
+Buat dokumen `.docx` baru dan atur tata letaknya seperti yang dijelaskan di bawah. Semua teks dalam format `${...}` adalah *placeholder* yang akan diganti oleh perintah.
+
+**1. Bagian Header**
+Letakkan placeholder logo Anda di bagian paling atas. Di bawahnya, tambahkan placeholder untuk informasi perusahaan Anda.
+
+```
+${logo}
+
+INVOICE
+
+${company_name}
+${company_address}
+${company_phone}
+${company_email}
+```
+
+**2. Bagian Detail Faktur**
+Untuk konten yang rata kanan, cara termudah adalah menggunakan tabel tanpa garis batas.
+
+| | |
+| :--- | :--- |
+| **Nomor Faktur:** | `${invoice_number}` |
+| **Tanggal Faktur:** | `${invoice_date}` |
+| **Tanggal Pembayaran:** | `${invoice_payment}` |
+
+**3. Bagian Kondisional "Tagihan Untuk"**
+Seluruh blok ini hanya akan muncul jika kunci `bill_present` di JSON Anda bernilai `true`.
+
+```
+${if_bill}
+Tagihan untuk:
+${bill_name}
+${bill_addr1}
+${bill_addr2}
+${bill_phone}
+${bill_email}
+${/if_bill}
+```
+
+**4. Tabel Item**
+Buat tabel dengan satu baris header dan **hanya satu** baris data. Baris data tunggal ini akan berfungsi sebagai templat untuk perulangan. Terapkan format apa pun yang diinginkan (garis batas, warna latar, perataan teks) pada baris ini, dan format tersebut akan diduplikasi untuk setiap item.
+
+| **No** | **Deskripsi Item** | **Jumlah** | **Total** |
+| :--- | :--- | :--- | :--- |
+| `${item.no}` | `${item.name}` | `${item.quantity}` | `${item.amount}` |
+
+**5. Bagian Ringkasan**
+Sekali lagi, tabel tanpa batas yang rata kanan sangat cocok untuk bagian total. Terapkan format seperti teks **tebal** atau ukuran font yang lebih besar langsung pada placeholder.
+
+| | |
+| :--- | :--- |
+| **Subtotal** | `${invoice_subtotal}` |
+| **Pajak (${company_tax_name})** | `${invoice_tax}` |
+| **TOTAL** | **`${invoice_total}`** |
+
+
+#### **Penjelasan Detail Tag Placeholder**
+
+**1. Placeholder Variabel Sederhana**
+*   **Sintaks**: `${nama_variabel}`
+*   **Penggunaan**: Mengganti placeholder dengan nilai dari data JSON. Mendukung notasi titik untuk objek bersarang (misalnya, `${bill_to.name}`).
+*   **Contoh**: `${company_name}` diganti dengan nilai dari kunci `company_name` di JSON.
+
+**2. Placeholder Gambar (`${logo}` - Penanganan Khusus)**
+*   **Sintaks**: `${logo}`
+*   **Perilaku**: Perintah menangani placeholder ini secara berbeda berdasarkan opsi `--mode`:
+*   `--mode=merge` atau `--mode=pdf`: Gambar dari URL di JSON Anda akan diunduh dan **disematkan (embedded)** langsung ke dalam dokumen. File yang dihasilkan mandiri dan tidak memerlukan koneksi internet untuk menampilkan gambar.
+*   `--mode=html` atau `--mode=blade`: Placeholder diganti dengan tag HTML standar `<img>`. Atribut `src` akan menunjuk ke URL dari JSON Anda. Ini adalah perilaku yang ideal untuk halaman web.
+
+**3. Blok Kondisional**
+*   **Sintaks**: `${nama_blok} ... ${/nama_blok}`
+*   **Penggunaan**: Melingkupi bagian dokumen yang hanya boleh muncul jika kunci boolean yang sesuai di JSON bernilai `true`.
+*   **Contoh**: Konten di antara `${if_bill}` dan `${/if_bill}` hanya akan disertakan dalam dokumen akhir jika terdapat `"bill_present": true` di file JSON.
+
+**4. Perulangan Baris Tabel**
+*   **Sintaks**: Letakkan placeholder seperti `${item.key}` di dalam sel-sel dari satu baris tabel tunggal.
+*   **Penggunaan**: Fungsi `cloneRow` dalam perintah akan mengidentifikasi baris ini dan menduplikasinya untuk setiap objek dalam array yang ditentukan (misalnya, `item_list` di JSON).
+*   **Contoh**: Baris yang berisi `${item.no}` akan diulang untuk setiap item dalam array `item_list`. Placeholder `${item.name}` akan diganti dengan kunci `name` dari objek array yang bersangkutan.

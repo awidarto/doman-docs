@@ -1,0 +1,249 @@
+---
+title: "Invoice Generator with DOCX Template"
+description: "From DOCX template to invoice with data merge"
+---
+
+## English Documentation
+
+### Documentation for `generate:invoice` Artisan Command
+
+#### 1. Overview
+
+This Artisan command generates professional, styled DOCX invoices by merging data from a JSON file into a pre-formatted DOCX template. It uses the `PHPWord` library to handle the document processing, preserving all styling (fonts, colors, tables, headers) from your template.
+
+This is ideal for automating the creation of invoices, reports, or any other templated document within your Laravel application.
+
+#### 2. Prerequisites
+
+Before using the command, you must have the `phpoffice/phpword` library installed in your project. If you haven't installed it yet, run:
+
+```bash
+composer require phpoffice/phpword
+```
+
+#### 3. Setup
+
+The command requires two input files: a DOCX template and a JSON data file.
+
+##### 3.1. The DOCX Template File (`--tpl`)
+
+This is a standard Word document where you define the layout and styling. You use special text placeholders that the command will replace with your data.
+
+**Key Concepts for Creating the Template:**
+
+*   **Simple Placeholders:** For single values, use the format `${variable_name}`.
+*   Examples: `${company_name}`, `${invoice_id}`, `${customer.address}`.
+
+*   **Image Placeholders:** Use a simple placeholder for the logo. The code will handle replacing it with an image.
+*   Example: `${company_logo}`
+
+*   **Table with Repeating Rows (for Invoice Items):**
+1.  Create a table with a static header row (e.g., "Description", "Quantity").
+2.  The **second row** of the table must be your *template row*. It should contain the placeholders for a single item.
+3.  You can have a static footer row for totals.
+*   **Example Structure:**
+| Description     | Quantity     | Unit Price     | Total Price     |
+| :-------------- | :----------- | :------------- | :-------------- |
+| `${item.desc}`  | `${item.qty}`| `${item.price}`| `${item.total}` |
+| *(Merge cells)* |              | **GRAND TOTAL**| **`${grand_total}`** |
+
+*   **List with Repeating Items (for Terms & Conditions):**
+1.  Define a "block" that will be cloned for each list item.
+2.  The block starts with a tag like `${block_name}` and ends with `${/block_name}`.
+3.  Inside the block, define the placeholders for a single list item.
+*   **Example Structure (Copy this exactly):**
+```text
+${terms_block}
+${term.seq}. ${term.text}
+${/terms_block}
+        ```
+
+> **Crucial Note:** The command uses `cloneBlock('terms_block', ..., true, true)`. The fourth parameter `true` activates a special mode where placeholders inside the cloned block are automatically numbered (e.g., `term.text#1`, `term.text#2`). This is why you **must not** put the `#` symbol in your template file.
+
+##### 3.2. The JSON Data File (`--data`)
+
+This file contains all the dynamic information for the invoice. Its structure must match the placeholders in your template.
+
+*   **Example `invoice_data.json`:**
+```json
+{
+  "company": {
+    "name": "Innovate Solutions Inc.",
+    "address": "123 Tech Avenue, Silicon Valley, CA 94043",
+    "phone": "+1-202-555-0191",
+    "email": "contact@innovatesolutions.com",
+    "logo_url": "https://i.imgur.com/g1D48p8.png"
+  },
+  "customer": {
+    "name": "John Doe",
+    "company": "Doe Construction",
+    "address": "456 Builder's Way, Metropolis, NY 10001"
+  },
+  "invoice_id": "INV-2023-001",
+  "issue_date": "2023-11-15",
+  "due_date": "2023-12-15",
+  "items": [
+    { "description": "Website Development & Design", "quantity": 1, "unit_price": "2500.00", "total": "2500.00" },
+    { "description": "Hosting Services (1 Year)", "quantity": 1, "unit_price": "300.00", "total": "300.00" }
+  ],
+  "grand_total": "2800.00",
+  "terms": [
+    { "text": "Payment is due within 30 days of the issue date." },
+    { "text": "A late fee of 1.5% per month will be applied to any overdue accounts." }
+  ]
+}
+    ```
+
+#### 4. Command Usage
+
+##### 4.1. Syntax
+
+```bash
+php artisan generate:invoice --data=<path_to_json> --tpl=<path_to_template> --out=<path_to_output>
+```
+
+##### 4.2. Example
+
+Assuming your files are in the `storage/app/invoices/` directory:
+
+```bash
+php artisan generate:invoice \
+--data="storage/app/invoices/data/invoice_data.json" \
+--tpl="storage/app/invoices/templates/invoice_template.docx" \
+--out="storage/app/invoices/output/Invoice-INV-2023-001.docx"
+```
+
+#### 5. Expected Output
+
+The command will provide step-by-step feedback in the console and, upon success, will create the final DOCX file at the specified output path.
+
+```
+$ php artisan generate:invoice ...
+Starting invoice generation...
+...
+Populating terms and conditions...
+Saving the generated invoice...
+✅ Invoice generated successfully: storage/app/invoices/output/Invoice-INV-2023-001.docx
+```
+
+---
+---
+
+## Bahasa Indonesia Documentation
+
+### Dokumentasi Perintah Artisan `generate:invoice`
+
+#### 1. Gambaran Umum
+
+Perintah Artisan ini menghasilkan faktur (invoice) DOCX yang profesional dan bergaya dengan menggabungkan data dari file JSON ke dalam template DOCX yang sudah diformat. Perintah ini menggunakan library `PHPWord` untuk memproses dokumen, sehingga semua gaya (font, warna, tabel, header) dari template Anda akan tetap dipertahankan.
+
+Ini sangat ideal untuk mengotomatiskan pembuatan faktur, laporan, atau dokumen berbasis template lainnya di dalam aplikasi Laravel Anda.
+
+#### 2. Prasyarat
+
+Sebelum menggunakan perintah ini, Anda harus sudah menginstal library `phpoffice/phpword` di proyek Anda. Jika belum, jalankan:
+
+```bash
+composer require phpoffice/phpword
+```
+
+#### 3. Pengaturan
+
+Perintah ini memerlukan dua file input: template DOCX dan file data JSON.
+
+##### 3.1. File Template DOCX (`--tpl`)
+
+Ini adalah dokumen Word standar tempat Anda mendefinisikan tata letak dan gaya. Anda menggunakan placeholder teks khusus yang akan digantikan oleh data dari file JSON.
+
+**Konsep Kunci Membuat Template:**
+
+*   **Placeholder Sederhana:** Untuk nilai tunggal, gunakan format `${nama_variabel}`.
+*   Contoh: `${company_name}`, `${invoice_id}`, `${customer.address}`.
+
+*   **Placeholder Gambar:** Gunakan placeholder sederhana untuk logo. Kode akan menanganinya sebagai gambar.
+*   Contoh: `${company_logo}`
+
+*   **Tabel dengan Baris Berulang (untuk Item Faktur):**
+1.  Buat tabel dengan baris header statis (misalnya, "Deskripsi", "Jumlah").
+2.  Baris **kedua** dari tabel harus menjadi *baris template* Anda. Baris ini harus berisi placeholder untuk satu item.
+3.  Anda dapat memiliki baris footer statis untuk total.
+*   **Contoh Struktur:**
+| Deskripsi       | Jumlah       | Harga Satuan   | Total Harga     |
+| :-------------- | :----------- | :------------- | :-------------- |
+| `${item.desc}`  | `${item.qty}`| `${item.price}`| `${item.total}` |
+| *(Gabungkan sel)*|              | **GRAND TOTAL**| **`${grand_total}`** |
+
+*   **Daftar dengan Item Berulang (untuk Syarat & Ketentuan):**
+1.  Definisikan sebuah "blok" yang akan di-kloning untuk setiap item daftar.
+2.  Blok dimulai dengan tag seperti `${nama_blok}` dan diakhiri dengan `${/nama_blok}`.
+3.  Di dalam blok, definisikan placeholder untuk satu item daftar.
+*   **Contoh Struktur (Salin persis seperti ini):**
+```text
+${terms_block}
+${term.seq}. ${term.text}
+${/terms_block}
+        ```
+
+> **Catatan Penting:** Perintah ini menggunakan `cloneBlock('terms_block', ..., true, true)`. Parameter keempat `true` mengaktifkan mode khusus di mana placeholder di dalam blok yang di-kloning secara otomatis diberi nomor (misalnya, `term.text#1`, `term.text#2`). Inilah sebabnya Anda **tidak boleh** menempatkan simbol `#` di dalam file template Anda.
+
+##### 3.2. File Data JSON (`--data`)
+
+File ini berisi semua informasi dinamis untuk faktur. Strukturnya harus cocok dengan placeholder di template Anda.
+
+*   **Contoh `invoice_data.json`:**
+```json
+{
+  "company": {
+    "name": "Innovate Solutions Inc.",
+    "address": "123 Tech Avenue, Silicon Valley, CA 94043",
+    "phone": "+1-202-555-0191",
+    "email": "contact@innovatesolutions.com",
+    "logo_url": "https://i.imgur.com/g1D48p8.png"
+  },
+  "customer": { "name": "John Doe", "company": "Doe Construction", "address": "456 Builder's Way, Metropolis, NY 10001" },
+  "invoice_id": "INV-2023-001",
+  "issue_date": "2023-11-15",
+  "due_date": "2023-12-15",
+  "items": [
+    { "description": "Pengembangan & Desain Situs Web", "quantity": 1, "unit_price": "2500.00", "total": "2500.00" },
+    { "description": "Layanan Hosting (1 Tahun)", "quantity": 1, "unit_price": "300.00", "total": "300.00" }
+  ],
+  "grand_total": "2800.00",
+  "terms": [
+    { "text": "Pembayaran jatuh tempo dalam 30 hari sejak tanggal penerbitan." },
+    { "text": "Denda keterlambatan sebesar 1.5% per bulan akan dikenakan pada akun yang telah jatuh tempo." }
+  ]
+}
+    ```
+
+#### 4. Penggunaan Perintah
+
+##### 4.1. Sintaks
+
+```bash
+php artisan generate:invoice --data=<jalur_ke_json> --tpl=<jalur_ke_template> --out=<jalur_ke_output>
+```
+
+##### 4.2. Contoh
+
+Dengan asumsi file Anda berada di direktori `storage/app/invoices/`:
+
+```bash
+php artisan generate:invoice \
+--data="storage/app/invoices/data/invoice_data.json" \
+--tpl="storage/app/invoices/templates/invoice_template.docx" \
+--out="storage/app/invoices/output/Invoice-INV-2023-001.docx"
+```
+
+#### 5. Hasil yang Diharapkan
+
+Perintah akan memberikan umpan balik langkah-demi-langkah di konsol dan, jika berhasil, akan membuat file DOCX akhir di jalur output yang ditentukan.
+
+```
+$ php artisan generate:invoice ...
+Starting invoice generation...
+...
+Populating terms and conditions...
+Saving the generated invoice...
+✅ Invoice generated successfully: storage/app/invoices/output/Invoice-INV-2023-001.docx
+```

@@ -1,0 +1,180 @@
+---
+title: "DOCX Generator by Template Commands"
+description: "From DOCX template to docx and pdf"
+---
+
+### English Documentation
+
+#### **Overview**
+This Artisan command is a powerful, generic document generator. It creates a styled DOCX file by merging data from a JSON source into a DOCX template. It fully supports a cloud-native workflow, allowing inputs (data and template) to be URLs and outputs to be saved to local paths or S3-compatible cloud storage (like Minio). It can also optionally trigger a PDF conversion of the final document.
+
+#### **Prerequisites**
+*   **PHPWord Library:** `composer require phpoffice/phpword`
+*   **S3/Minio Driver (for remote output):** `composer require league/flysystem-aws-s3-v3 "^3.0"`
+*   **LibreOffice (if using `--pdf` option):** Must be installed on the server and accessible in the system's `PATH`.
+
+#### **Command Usage**
+
+##### **Syntax**
+```bash
+php artisan generate:from-docx \
+--data=<path_or_url> \
+--tpl=<path_or_url> \
+--out=<destination_path> \
+[--disk=<disk_name>] \
+[--pdf]
+```
+
+##### **Options**
+*   `--data`: The source for the JSON data. Can be a local file path (`storage/data.json`) or a full URL to a file or API endpoint.
+*   `--tpl`: The source for the DOCX template. Can be a local file path (`storage/template.docx`) or a full URL.
+*   `--out`: The destination path for the output file. If `--disk` is not used, this is a local file path. If `--disk` is used, this is the path within that disk's bucket.
+*   `--disk`: (Optional) The name of the Laravel filesystem disk to use for output (e.g., `s3`, `minio`).
+*   `--pdf`: (Optional) If present, the command will also generate a PDF version of the document and save it to the same destination.
+
+##### **Example Usage**
+
+**1. Local to Local**
+```bash
+php artisan generate:from-docx \
+--data="storage/app/data/invoice_data.json" \
+--tpl="storage/app/templates/invoice_template.docx" \
+--out="public/output/MyInvoice.docx"
+```
+
+**2. URL Inputs to Local Output with PDF**
+```bash
+php artisan generate:from-docx \
+--data="http://api.example.com/invoices/123" \
+--tpl="https://my-storage.s3.amazonaws.com/templates/invoice_template.docx" \
+--out="public/output/Invoice-123.docx" \
+--pdf
+```
+
+**3. URL Inputs to S3/Minio Output**
+```bash
+php artisan generate:from-docx \
+--data="http://api.example.com/invoices/123" \
+--tpl="https://my-storage.s3.amazonaws.com/templates/invoice_template.docx" \
+--out="invoices/2024/Invoice-123.docx" \
+--disk="minio"
+```
+
+#### **Template and Data Conventions**
+
+To ensure the generator works correctly, your files must follow these conventions:
+
+1.  **Simple & Nested Data:** A JSON object like `"customer": { "name": "John" }` corresponds to a placeholder `${customer.name}` in the template.
+
+2.  **Images:** The placeholder in the template **must exactly match** the full key path in the JSON.
+*   **Example:** If your JSON has `"company": { "logo_url": "http://..." }`, your template **must** use the placeholder `${company.logo_url}`.
+*   The code automatically detects an image if the key ends in `_url` (case-insensitive) or if the value is a URL ending in `.png`, `.jpg`, etc.
+
+3.  **Repeating Data: Tables (e.g., Invoice Items)**
+*   **Data Format:** An array of objects with any keys (e.g., `description`, `quantity`).
+*   **Template Convention:** Placeholders in the repeating table row **must** be prefixed with `item.`.
+*   **Example:** For a JSON key `"items"`, the template must use `${item.description}`, `${item.quantity}`, etc.
+
+4.  **Repeating Data: Lists (e.g., Terms & Conditions)**
+*   **Data Format:** An array of objects, where each object **must** have a `"text"` key: `[{ "text": "First point." }, { "text": "Second point." }]`.
+*   **Template Convention:**
+1.  Create a block named after your JSON key, with a `_block` suffix. Example: for the `"terms"` key, use `${terms_block}` and `${/terms_block}`.
+2.  Inside the block, define the template for one list item. Placeholders **must** be prefixed with `<key>_item.`.
+3.  The command automatically provides a sequence number via the `.seq` placeholder.
+*   **Example:** For the `"terms"` key, the template block must be:
+```text
+${terms_block}
+${terms_item.seq}. ${terms_item.text}
+${/terms_block}
+        ```
+*   **Best Practice:** To avoid document corruption, it is highly recommended to use **Shift+Enter** for line breaks inside the `_block` definition in your Word document.
+
+---
+
+### Bahasa Indonesia Documentation
+
+#### **Gambaran Umum**
+Perintah Artisan ini adalah generator dokumen generik yang canggih. Perintah ini membuat file DOCX bergaya dengan menggabungkan data dari sumber JSON ke dalam sebuah template DOCX. Perintah ini sepenuhnya mendukung alur kerja berbasis cloud, memungkinkan input (data dan template) berupa URL dan output dapat disimpan ke path lokal atau penyimpanan cloud yang kompatibel dengan S3 (seperti Minio). Perintah ini juga dapat secara opsional memicu konversi PDF dari dokumen akhir.
+
+#### **Prasyarat**
+*   **Library PHPWord:** `composer require phpoffice/phpword`
+*   **Driver S3/Minio (untuk output jarak jauh):** `composer require league/flysystem-aws-s3-v3 "^3.0"`
+*   **LibreOffice (jika menggunakan opsi `--pdf`):** Harus terinstal di server dan dapat diakses melalui `PATH` sistem.
+
+#### **Penggunaan Perintah**
+
+##### **Sintaks**
+```bash
+php artisan generate:from-docx \
+--data=<path_atau_url> \
+--tpl=<path_atau_url> \
+--out=<path_tujuan> \
+[--disk=<nama_disk>] \
+[--pdf]
+```
+
+##### **Opsi**
+*   `--data`: Sumber untuk data JSON. Bisa berupa path file lokal (`storage/data.json`) atau URL lengkap ke sebuah file atau endpoint API.
+*   `--tpl`: Sumber untuk template DOCX. Bisa berupa path file lokal (`storage/template.docx`) atau URL lengkap.
+*   `--out`: Path tujuan untuk file output. Jika `--disk` tidak digunakan, ini adalah path file lokal. Jika `--disk` digunakan, ini adalah path di dalam bucket disk tersebut.
+*   `--disk`: (Opsional) Nama disk filesystem Laravel yang akan digunakan untuk output (misalnya, `s3`, `minio`).
+*   `--pdf`: (Opsional) Jika ada, perintah juga akan menghasilkan versi PDF dari dokumen dan menyimpannya ke tujuan yang sama.
+
+##### **Contoh Penggunaan**
+
+**1. Lokal ke Lokal**
+```bash
+php artisan generate:from-docx \
+--data="storage/app/data/data_faktur.json" \
+--tpl="storage/app/templates/template_faktur.docx" \
+--out="public/output/FakturSaya.docx"
+```
+
+**2. Input URL ke Output Lokal dengan PDF**
+```bash
+php artisan generate:from-docx \
+--data="http://api.contoh.com/faktur/123" \
+--tpl="https://storage-saya.s3.amazonaws.com/templates/template_faktur.docx" \
+--out="public/output/Faktur-123.docx" \
+--pdf
+```
+
+**3. Input URL ke Output S3/Minio**
+```bash
+php artisan generate:from-docx \
+--data="http://api.contoh.com/faktur/123" \
+--tpl="https://storage-saya.s3.amazonaws.com/templates/template_faktur.docx" \
+--out="faktur/2024/Faktur-123.docx" \
+--disk="minio"
+```
+
+#### **Konvensi Template dan Data**
+
+Anda harus mengikuti konvensi berikut agar generator berfungsi dengan benar:
+
+1.  **Data Sederhana & Bertingkat:** Objek JSON seperti `"pelanggan": { "nama": "John" }` berkorespondensi dengan placeholder `${pelanggan.nama}` di dalam template.
+
+2.  **Gambar:** Placeholder di dalam template **harus sama persis** dengan path key lengkap di dalam JSON.
+*   **Contoh:** Jika JSON Anda memiliki `"company": { "logo_url": "http://..." }`, template Anda **harus** menggunakan placeholder `${company.logo_url}`.
+*   Kode akan secara otomatis mendeteksi gambar jika key diakhiri dengan `_url` (tidak sensitif huruf besar/kecil) atau jika nilai URL diakhiri dengan ekstensi gambar umum (`.png`, `.jpg`, dll.).
+
+3.  **Data Berulang: Tabel (misalnya, Rincian Faktur)**
+*   **Format Data:** Sebuah array objek dengan key apa pun (misalnya, `description`, `quantity`).
+*   **Konvensi Template:** Placeholder di dalam baris tabel yang berulang **harus** diawali dengan `item.`.
+*   **Contoh:** Untuk key JSON `"items"`, template harus menggunakan `${item.description}`, `${item.quantity}`, dll.
+
+4.  **Data Berulang: Daftar/List (misalnya, Syarat & Ketentuan)**
+*   **Format Data:** Sebuah array objek, di mana setiap objek **harus** memiliki key `"text"`: `[{ "text": "Poin pertama." }, { "text": "Poin kedua." }]`.
+*   **Konvensi Template:**
+1.  Buat sebuah blok yang dinamai sesuai key JSON Anda, dengan akhiran `_block`. Contoh: untuk key `"terms"`, gunakan `${terms_block}` dan `${/terms_block}`.
+2.  Di dalam blok, definisikan template untuk satu item daftar. Placeholder **harus** diawali dengan `<key>_item.`.
+3.  Perintah ini secara otomatis menyediakan nomor urut melalui placeholder `.seq`.
+*   **Contoh:** Untuk key `"terms"`, blok template harus seperti ini:
+```text
+${terms_block}
+${terms_item.seq}. ${terms_item.text}
+${/terms_block}
+        ```
+*   **Praktik Terbaik:** Untuk menghindari kerusakan dokumen, sangat disarankan untuk menggunakan **Shift+Enter** untuk membuat baris baru di dalam definisi `_block` pada dokumen Word Anda.
+
+---

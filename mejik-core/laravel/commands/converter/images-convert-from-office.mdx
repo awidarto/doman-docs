@@ -1,0 +1,221 @@
+---
+title: "Office Documents to Image Sequence Converter Commands"
+description: "Converting Office documents to image sequence of pages, supports docx, xlsx, pptx, etc."
+---
+
+## English Documentation
+
+### Documentation for `image:convert-from` Artisan Command
+
+#### 1. Overview
+
+This Artisan command provides a powerful utility to convert office documents and PDFs into a series of JPG images. It can process a source file from a **local path or a remote URL** and save the resulting images to a **local directory or any configured Laravel filesystem disk** (e.g., Amazon S3, Minio). Each page of the source document is rendered as a separate, sequentially numbered image.
+
+The command operates using an automated, multi-stage process:
+1.  **Input Handling:** If the input is a URL, the file is downloaded to a temporary local location.
+2.  **PDF Conversion (via LibreOffice):** If the input file is not a PDF, it uses LibreOffice in headless mode to convert the document into a temporary PDF.
+3.  **Image Rendering (via Ghostscript):** It then uses Ghostscript to process the PDF and render each page as an individual JPG image in a temporary local directory.
+4.  **Output Handling:** If a `--disk` is specified, the generated images are uploaded from the temporary directory to the specified disk. Otherwise, they are moved to the designated local output path.
+
+#### 2. System Requirements (Prerequisites)
+
+Before using this command, you must install two essential command-line tools on your server and ensure they are accessible from the system's `PATH`.
+
+*   **LibreOffice (or OpenOffice):** Required for converting office documents to PDF.
+*   **Installation on Debian/Ubuntu:**
+```bash
+sudo apt-get update
+sudo apt-get install libreoffice --no-install-recommends
+        ```
+*   **Ghostscript:** Required for converting PDF pages into images.
+*   **Installation on Debian/Ubuntu:**
+```bash
+sudo apt-get install ghostscript
+        ```
+
+> **Note:** The command script uses `soffice`. On some systems, the executable is `libreoffice`. You may need to edit the `ImageConvertCommand.php` file to change `soffice` to `libreoffice` if you encounter an error.
+
+#### 3. Command Syntax
+
+```bash
+php artisan image:convert-from --in=<input> --out=<output> --filetype=<type> [--disk=<name>]
+```
+
+**Options:**
+*   `--in`: **(Required)** The source document to convert. Can be a local file path or a public URL.
+*   `--out`: **(Required)** The destination path for the output images. If a `--disk` is used, this is a path within that disk. Otherwise, it's a local directory.
+*   `--filetype`: **(Required)** The file extension of the input file (e.g., `docx`, `pdf`, `xlsx`).
+*   `--disk`: **(Optional)** The Laravel filesystem disk to save the output to (e.g., `s3`, `minio`). If omitted, output is saved to the local filesystem.
+
+#### 4. Example Usage
+
+##### Example 1: Converting a Local DOCX file to a Local Directory
+```bash
+php artisan image:convert-from \
+--in="storage/app/documents/annual_report.docx" \
+--out="public/converted/annual_report" \
+--filetype="docx"
+```
+
+##### Example 2: Converting a Remote PDF to a Local Directory
+```bash
+php artisan image:convert-from \
+--in="https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf" \
+--out="storage/app/converted/dummy_pdf" \
+--filetype="pdf"
+```
+
+##### Example 3: Converting a Local Excel File to an S3 Bucket
+```bash
+php artisan image:convert-from \
+--in="storage/app/financials/q4_data.xlsx" \
+--out="converted-images/financials/q4_data" \
+--filetype="xlsx" \
+--disk="s3"
+```
+*   **Process:** The command converts the local Excel file to images and uploads them to the `converted-images/financials/q4_data` path on your configured `s3` disk.
+
+##### Example 4: Converting a Remote PPTX File to a Minio Bucket
+```bash
+php artisan image:convert-from \
+--in="https://example.com/presentations/new_product.pptx" \
+--out="presentations/new_product/slides" \
+--filetype="pptx" \
+--disk="minio"
+```
+*   **Process:** The command downloads the PPTX, converts it to images, and uploads them to the specified path on your `minio` disk.
+
+#### 5. Expected Output
+
+When converting a remote file to a disk, you will see a more detailed progress log:
+```
+$ php artisan image:convert-from --in="https://example.com/report.docx" --out="reports/2023" --filetype="docx" --disk="s3"
+
+Input is a URL. Downloading file...
+Processing local file: /tmp/convert_in_..._report.docx
+Using temporary output directory: /var/www/html/storage/app/temp/conversions/out_...
+Step 1/3: Converting document to a temporary PDF...
+Temporary PDF created: /var/www/html/storage/app/temp/conversions/report.pdf
+Step 2/3: Converting PDF pages to images...
+Images generated in temporary directory.
+Step 3/3: Uploading images to disk 's3'...
+[Progress bar shows here]
+Upload complete.
+
+🧹 Cleaning up temporary assets...
+- Removed temporary input file: ...
+- Removed temporary PDF file: ...
+- Removed temporary output directory: ...
+
+✅ Success! Conversion complete.
+```
+
+---
+---
+
+## Bahasa Indonesia Documentation
+
+### Dokumentasi Perintah Artisan `image:convert-from`
+
+#### 1. Gambaran Umum
+
+Perintah Artisan ini menyediakan utilitas untuk mengonversi dokumen office dan PDF menjadi serangkaian gambar JPG. Perintah ini dapat memproses file sumber dari **path lokal atau URL remote** dan menyimpan hasilnya ke **direktori lokal atau disk filesystem Laravel** yang terkonfigurasi (misalnya, Amazon S3, Minio). Setiap halaman dari dokumen sumber akan di-render sebagai gambar terpisah dengan nomor urut.
+
+Perintah ini bekerja menggunakan proses otomatis multi-tahap:
+1.  **Penanganan Input:** Jika input adalah URL, file akan diunduh ke lokasi temporer lokal.
+2.  **Konversi ke PDF (melalui LibreOffice):** Jika file input bukan PDF, LibreOffice dalam mode *headless* akan digunakan untuk mengubahnya menjadi PDF temporer.
+3.  **Render Gambar (melalui Ghostscript):** Ghostscript kemudian memproses PDF dan me-render setiap halaman menjadi gambar JPG di direktori temporer lokal.
+4.  **Penanganan Output:** Jika `--disk` ditentukan, gambar yang dihasilkan akan diunggah ke disk tersebut. Jika tidak, gambar akan dipindahkan ke path output lokal yang ditentukan.
+
+#### 2. Persyaratan Sistem (Prasyarat)
+
+Sebelum menggunakan perintah ini, Anda harus menginstal dua perangkat lunak command-line pada server Anda dan memastikan keduanya dapat diakses melalui `PATH` sistem.
+
+*   **LibreOffice (atau OpenOffice):** Dibutuhkan untuk mengonversi dokumen office ke PDF.
+*   **Instalasi pada Debian/Ubuntu:**
+```bash
+sudo apt-get update
+sudo apt-get install libreoffice --no-install-recommends
+        ```
+*   **Ghostscript:** Dibutuhkan untuk mengonversi halaman PDF menjadi gambar.
+*   **Instalasi pada Debian/Ubuntu:**
+```bash
+sudo apt-get install ghostscript
+        ```
+
+> **Catatan:** Skrip perintah ini menggunakan `soffice`. Pada beberapa sistem, nama eksekusinya adalah `libreoffice`. Anda mungkin perlu mengubah file `ImageConvertCommand.php` dan mengganti `soffice` menjadi `libreoffice` jika terjadi galat.
+
+#### 3. Sintaks Perintah
+
+```bash
+php artisan image:convert-from --in=<input> --out=<output> --filetype=<jenis> [--disk=<nama_disk>]
+```
+
+**Opsi:**
+*   `--in`: **(Wajib)** Dokumen sumber yang akan dikonversi. Bisa berupa path file lokal atau URL publik.
+*   `--out`: **(Wajib)** Path tujuan untuk gambar hasil konversi. Jika `--disk` digunakan, ini adalah path di dalam disk tersebut. Jika tidak, ini adalah direktori lokal.
+*   `--filetype`: **(Wajib)** Ekstensi file dari file input (contoh: `docx`, `pdf`, `xlsx`).
+*   `--disk`: **(Opsional)** Disk filesystem Laravel untuk menyimpan output (contoh: `s3`, `minio`). Jika dihilangkan, output disimpan di filesystem lokal.
+
+#### 4. Contoh Penggunaan
+
+##### Contoh 1: Mengonversi file DOCX lokal ke Direktori Lokal
+```bash
+php artisan image:convert-from \
+--in="storage/app/documents/laporan_tahunan.docx" \
+--out="public/converted/laporan_tahunan" \
+--filetype="docx"
+```
+
+##### Contoh 2: Mengonversi PDF Remote ke Direktori Lokal
+```bash
+php artisan image:convert-from \
+--in="https://www.w3.org/WAI/ER/tests/xhtml/testfiles/resources/pdf/dummy.pdf" \
+--out="storage/app/converted/dummy_pdf" \
+--filetype="pdf"
+```
+
+##### Contoh 3: Mengonversi file Excel Lokal ke Bucket S3
+```bash
+php artisan image:convert-from \
+--in="storage/app/financials/data_q4.xlsx" \
+--out="converted-images/financials/data_q4" \
+--filetype="xlsx" \
+--disk="s3"
+```
+*   **Proses:** Perintah akan mengonversi file Excel lokal menjadi gambar dan mengunggahnya ke path `converted-images/financials/data_q4` pada disk `s3` yang telah Anda konfigurasikan.
+
+##### Contoh 4: Mengonversi file PPTX Remote ke Bucket Minio
+```bash
+php artisan image:convert-from \
+--in="https://example.com/presentations/new_product.pptx" \
+--out="presentations/new_product/slides" \
+--filetype="pptx" \
+--disk="minio"
+```
+*   **Proses:** Perintah akan mengunduh file PPTX, mengonversinya menjadi gambar, dan mengunggah hasilnya ke path yang ditentukan pada disk `minio`.
+
+#### 5. Hasil yang Diharapkan
+
+Saat mengonversi file remote ke sebuah disk, Anda akan melihat log proses yang lebih detail:
+```
+$ php artisan image:convert-from --in="https://example.com/laporan.docx" --out="laporan/2023" --filetype="docx" --disk="s3"
+
+Input is a URL. Downloading file...
+Processing local file: /tmp/convert_in_..._laporan.docx
+Using temporary output directory: /var/www/html/storage/app/temp/conversions/out_...
+Step 1/3: Converting document to a temporary PDF...
+Temporary PDF created: /var/www/html/storage/app/temp/conversions/laporan.pdf
+Step 2/3: Converting PDF pages to images...
+Images generated in temporary directory.
+Step 3/3: Uploading images to disk 's3'...
+[Progress bar akan tampil di sini]
+Upload complete.
+
+🧹 Cleaning up temporary assets...
+- Removed temporary input file: ...
+- Removed temporary PDF file: ...
+- Removed temporary output directory: ...
+
+✅ Success! Conversion complete.
+```

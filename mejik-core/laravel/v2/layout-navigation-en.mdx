@@ -1,0 +1,247 @@
+# Layout and Navigation System Documentation
+
+## Overview
+
+The application uses a hierarchical layout system with multiple navigation components working together to provide a consistent user experience across all pages.
+
+## Architecture
+
+### Component Hierarchy
+```
+AppLayout (Main Wrapper)
+├── AppTopSidebarLayout
+    ├── AppShell (variant="sidebar")
+        ├── AppSidebar (Left Navigation)
+        │   ├── Sidebar Toggle
+        │   ├── Menu Items (from YAML)
+        │   └── Active State Highlighting
+        └── AppContent
+            ├── TopBar (Top Navigation)
+            │   ├── Sidebar Toggle Button
+            │   ├── NavTopMenubar (Contextual Menu)
+            │   ├── Language Switcher
+            │   └── Theme Toggle
+            ├── Breadcrumb Bar
+            └── Page Content
+```
+
+## Navigation Components
+
+### 1. AppSidebar (Left Navigation)
+**Location**: `resources/js/components/AppSidebar.vue`
+
+**Purpose**: Primary navigation menu showing all main sections and sub-sections.
+
+**Features**:
+- Collapsible/expandable
+- Multi-level menu support
+- Active state highlighting
+- Icon support
+- Authorization-based visibility
+
+**Data Source**: 
+- Main: YAML files defined in `config/core/app.php`
+- Default: `resources/views/partials/app/dms/navnext.yml`
+- Additional: Directory, Core, Parameter menus
+
+### 2. TopBar (Top Navigation)
+**Location**: `resources/js/components/TopBar.vue`
+
+**Purpose**: Contextual navigation and utility controls.
+
+**Components**:
+- **Sidebar Toggle**: Collapse/expand left sidebar
+- **NavTopMenubar**: Context-aware menu items
+- **Language Switcher**: Multi-language support
+- **Theme Toggle**: Light/dark mode switching
+
+### 3. NavTopMenubar (Contextual Menu)
+**Location**: `resources/js/components/NavTopMenubar.vue`
+
+**Purpose**: Shows menu items relevant to the current active section.
+
+**Logic**:
+- Displays children of the currently active main menu group
+- Falls back to main menu if no top_menu is provided
+- Supports dropdown menus for items with children
+
+## Menu Data Flow
+
+### 1. Backend Processing (AdminController)
+```php
+// Load menu files
+$this->menu = MenuUtil::loadResYaml($nav_file, $nav_path)->toArray();
+$dir_menu = MenuUtil::loadResYaml('nav', 'views/partials/app/directory')->toArray();
+// ... load other menus
+
+// Merge all menus
+$this->menu = array_merge($this->menu, $dir_menu, $core_menu, $parameter_menu);
+
+// Process menus
+$this->menu = MenuUtil::normalizeMenuUrls($this->menu);
+$this->menu = MenuUtil::translateMenu($this->menu);
+$this->menu = MenuUtil::markActiveMenuItems($this->menu);
+
+// Generate contextual top menu
+$this->generateTopMenu(); // Creates $this->top_menu
+```
+
+### 2. Frontend Prop Passing
+```typescript
+// Page Component (e.g., Directory/Member/Index.vue)
+interface Props {
+    menu?: NavItem[];           // Main sidebar menu
+    icons?: {};                // Menu icons
+    top_menu?: NavItem[];       // Contextual top menu
+    top_menu_icons?: {};       // Top menu icons
+    // ... other props
+}
+
+// Pass to AppLayout
+<AppLayout 
+    :menu="menu" 
+    :icons="icons" 
+    :top_menu="top_menu" 
+    :top_menu_icons="top_menu_icons"
+>
+```
+
+### 3. Component Usage
+```vue
+<!-- AppLayout.vue -->
+<AppLayout 
+    :menu="menu" 
+    :icons="icons" 
+    :top_menu="top_menu" 
+    :top_menu_icons="top_menu_icons"
+>
+
+<!-- TopBar.vue -->
+<NavTopMenubar 
+    :menu="props.top_menu || props.menu" 
+    :icons="props.top_menu_icons || props.icons"
+/>
+```
+
+## Menu Configuration
+
+### YAML Menu Structure
+```yaml
+- title: "Document Management"
+  auth: "dms-menu"
+  icon: "File"
+  url: "dms/main/dashboard"
+  children:
+    - title: Dashboard
+      auth: dms-repository
+      url: "dms/main/dashboard"
+      icon: "ChartPie"
+    - title: Repository
+      auth: dms-repository
+      url: "dms/repository"
+      icon: "FileStack"
+```
+
+### Menu Properties
+- **title**: Display name (translatable)
+- **auth**: Permission requirement
+- **icon**: Lucide icon name
+- **url**: Navigation path
+- **children**: Sub-menu items
+- **isActive**: Set automatically based on current URL
+
+## Active State Detection
+
+### How It Works
+1. **Current Path Extraction**: Gets current request path
+2. **URL Normalization**: Ensures consistent path format
+3. **Path Matching**: Compares menu item URLs with current path
+4. **Hierarchy Marking**: Marks parents as active if children are active
+
+### Implementation
+```php
+// MenuUtil::markActiveMenuItems()
+$currentPath = Request::path();
+if (!str_starts_with($currentPath, '/')) {
+    $currentPath = '/' . $currentPath;
+}
+
+// Compare normalized paths
+if ($itemPath === $currentPath) {
+    $item['isActive'] = true;
+}
+```
+
+## Customization Options
+
+### 1. Sidebar Configuration
+**Rail Mode**: Collapsed sidebar showing only icons
+```php
+// In controller or component
+$sidebarState = 'collapsed'; // or 'expanded'
+```
+
+### 2. Top Navigation Toggle
+Enable/disable top navigation contextual menu:
+```php
+// Generate top menu (level 1 = children of active group)
+$this->generateTopMenu(1);
+
+// Or disable top menu
+$this->generateTopMenu(0); // Shows main groups instead
+```
+
+### 3. Menu Sources
+Configure which YAML files to load:
+```php
+// config/core/app.php
+'app_nav_path' => 'views/partials/app/dms',
+'app_nav_file' => 'navnext',
+
+// In AdminController constructor
+$core_menu = MenuUtil::loadResYaml('user', 'views/partials/app/sys')->toArray();
+$dir_menu = MenuUtil::loadResYaml('nav', 'views/partials/app/directory')->toArray();
+```
+
+## Responsive Behavior
+
+### Mobile/Tablet
+- Sidebar becomes overlay instead of persistent
+- Top navigation adapts to smaller screens
+- Menu items may stack or become dropdowns
+
+### Desktop
+- Sidebar can be toggled between rail and full modes
+- Full top navigation with all contextual items visible
+- Hover states and smooth transitions
+
+## Troubleshooting
+
+### Common Issues
+
+**1. Top menu shows wrong items**
+- Check if page component passes `top_menu` prop to AppLayout
+- Verify `generateTopMenu()` is called in controller
+- Ensure menu active states are correctly set
+
+**2. Menu highlighting not working**
+- Check URL normalization in MenuUtil
+- Verify path matching logic
+- Ensure menu URLs are consistent format
+
+**3. Icons not displaying**
+- Verify icon names match Lucide Vue Next components
+- Check icon registry in NavTopMenubar component
+- Ensure icons are properly loaded in MenuUtil::getIcons()
+
+**4. Permission-based menu items not showing**
+- Check AuthUtil::checkItem() implementation
+- Verify user permissions
+- Ensure 'auth' property is correctly set in YAML
+
+### Debug Steps
+1. Check browser console for errors
+2. Verify menu data structure in Vue DevTools
+3. Test URL normalization with debug logging
+4. Validate YAML syntax and structure
+5. Check controller menu processing flow

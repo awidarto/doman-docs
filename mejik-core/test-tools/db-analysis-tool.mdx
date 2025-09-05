@@ -1,0 +1,241 @@
+---
+
+### **Comprehensive Guide: Asynchronous Database Query Logging**
+### **Panduan Komprehensif: Logging Kueri Database Secara Asinkron**
+
+---
+
+### **1. The Database Event Listener Code**
+### **1. Kode untuk Event Listener Database**
+
+This is the core component that listens for every query event. We will place this logic inside a dedicated Service Provider.
+
+*Ini adalah komponen inti yang akan mendengarkan setiap event kueri. Kita akan menempatkan logika ini di dalam sebuah Service Provider khusus.*
+
+**A. Create the Service Provider / Buat Service Provider**
+Run this command in your terminal:
+*Jalankan perintah ini di terminal Anda:*
+```bash
+php artisan make:provider QueryLoggingServiceProvider
+```
+
+**B. Implement the Listener / Implementasikan Listener**
+Open `app/Providers/QueryLoggingServiceProvider.php` and paste the following code. This code listens for queries and dispatches a Job to handle the logging, ensuring it doesn't slow down the user's request.
+
+*Buka file `app/Providers/QueryLoggingServiceProvider.php` dan salin kode berikut. Kode ini mendengarkan kueri dan mengirimkan sebuah Job untuk menangani proses logging, memastikan proses ini tidak memperlambat permintaan dari pengguna.*
+
+```php
+<?php
+
+namespace App\Providers;
+
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\ServiceProvider;
+use Illuminate\Support\Str;
+use App\Jobs\LogQueryToMongo; // Import the Job we will create next
+
+class QueryLoggingServiceProvider extends ServiceProvider
+{
+    public function boot()
+    {
+        // Only enable this when APP_DEBUG is true to avoid accidental logging in production if not intended.
+        // Aktifkan hanya ketika APP_DEBUG bernilai true untuk menghindari logging yang tidak disengaja di production.
+        if (config('app.debug')) {
+
+            // Add a unique ID to each web request to easily group queries.
+            // Tambahkan ID unik untuk setiap request agar mudah mengelompokkan kueri.
+            if (!app()->runningInConsole()) {
+                request()->attributes->set('request_id', Str::uuid()->toString());
+            }
+
+            DB::listen(function ($query) {
+                // IMPORTANT: Prevent an infinite loop.
+                // If the query being logged is from our logging connection, ignore it.
+                // PENTING: Mencegah perulangan tak terbatas (infinite loop).
+                // Jika kueri yang tercatat berasal dari koneksi logging kita, abaikan.
+                if ($query->connectionName === 'mongodb_logging') {
+                    return;
+                }
+
+                // Prepare the data to be logged.
+                // Siapkan data yang akan di-log.
+                $logData = [
+                    'request_id' => request()->attributes->get('request_id', 'console'),
+                    'url'        => request()->fullUrl() ?? 'console',
+                    'connection' => $query->connectionName,
+                    'query'      => $query->sql,
+                    'bindings'   => $query->bindings,
+                    'time_ms'    => $query->time,
+                    'created_at' => now()->toDateTimeString(),
+                ];
+
+                // Dispatch the job to the queue. This is non-blocking and very fast.
+                // Kirim job ke dalam antrian (queue). Proses ini non-blocking dan sangat cepat.
+                LogQueryToMongo::dispatch($logData);
+            });
+        }
+    }
+}
+```
+
+**C. Register the Service Provider / Daftarkan Service Provider**
+Open `config/app.php` and add your provider to the `providers` array.
+*Buka `config/app.php` dan tambahkan provider Anda ke dalam array `providers`.*
+```php
+'providers' => [
+    // ...
+    App\Providers\QueryLoggingServiceProvider::class,
+],
+```
+---
+
+### **2. Asynchronous Logging to a Separate MongoDB Instance**
+### **2. Logging Asinkron ke Instans MongoDB Terpisah**
+
+We will use Laravel's queue system to process logs in the background.
+
+*Kita akan menggunakan sistem antrian (queue) Laravel untuk memproses log di latar belakang.*
+
+**A. Configure the Logging Database Connection / Konfigurasi Koneksi Database Logging**
+In `config/database.php`, add a new connection for your logging database.
+*Di file `config/database.php`, tambahkan koneksi baru untuk database logging Anda.*
+```php
+// config/database.php
+'connections' => [
+    // ... your existing connections
+
+    'mongodb_logging' => [
+        'driver'   => 'mongodb',
+        'host'     => env('LOG_DB_HOST', '127.0.0.1'),
+        'port'     => env('LOG_DB_PORT', 27017),
+        'database' => env('LOG_DB_DATABASE', 'application_logs'),
+        'username' => env('LOG_DB_USERNAME', ''),
+        'password' => env('LOG_DB_PASSWORD', ''),
+        'options'  => [],
+    ],
+],
+```
+Then, add the corresponding variables to your `.env` file.
+*Kemudian, tambahkan variabel yang sesuai ke file `.env` Anda.*
+```ini
+# .env file
+LOG_DB_HOST=127.0.0.1
+LOG_DB_PORT=27017
+LOG_DB_DATABASE=application_logs
+LOG_DB_USERNAME=
+LOG_DB_PASSWORD=
+```
+
+**B. Create the Logging Job / Buat Job untuk Logging**
+This Job will contain the logic to insert the log into the database.
+*Job ini akan berisi logika untuk memasukkan log ke dalam database.*
+
+Run the command:
+*Jalankan perintah:*
+```bash
+php artisan make:job LogQueryToMongo
+```
+Open `app/Jobs/LogQueryToMongo.php` and modify it like this:
+*Buka `app/Jobs/LogQueryToMongo.php` dan ubah menjadi seperti ini:*
+```php
+<?php
+
+namespace App\Jobs;
+
+use Illuminate\Bus\Queueable;
+use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Foundation\Bus\Dispatchable;
+use Illuminate\Queue\InteractsWithQueue;
+use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\DB;
+
+class LogQueryToMongo implements ShouldQueue
+{
+    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+
+    protected array $logData;
+
+    public function __construct(array $logData)
+    {
+        $this->logData = $logData;
+    }
+
+    public function handle()
+    {
+        // This code runs in a background worker process.
+        // Kode ini berjalan di proses worker di latar belakang.
+        DB::connection('mongodb_logging')
+            ->collection('query_logs')
+            ->insert($this->logData);
+    }
+}
+```
+
+---
+
+### **3. Setting up the Queue Driver (Alternative to Redis)**
+### **3. Mengatur Driver Queue (Alternatif Selain Redis)**
+
+Since you don't have Redis set up yet, the easiest and quickest alternative is to use your existing database (MySQL, PostgreSQL, or even another MongoDB collection) to manage the queue jobs.
+
+*Karena Anda belum memiliki Redis, alternatif termudah dan tercepat adalah menggunakan database Anda yang sudah ada (MySQL, PostgreSQL, atau bahkan koleksi MongoDB lain) untuk mengelola antrian job.*
+
+We will use the `database` queue driver.
+*Kita akan menggunakan driver queue `database`.*
+
+**A. Create the Queue Tables / Buat Tabel untuk Queue**
+Laravel needs tables to keep track of jobs. Run these two commands:
+*Laravel membutuhkan tabel untuk mencatat job. Jalankan dua perintah ini:*
+```bash
+php artisan queue:table
+php artisan migrate
+```
+This will create `jobs` and `failed_jobs` tables in your **default** database connection.
+
+*Perintah ini akan membuat tabel `jobs` dan `failed_jobs` di koneksi database **default** Anda.*
+
+**B. Configure the Queue Driver / Konfigurasi Driver Queue**
+In your `.env` file, change the `QUEUE_CONNECTION` from `sync` to `database`.
+*Di file `.env` Anda, ubah `QUEUE_CONNECTION` dari `sync` menjadi `database`.*
+```ini
+# .env file
+QUEUE_CONNECTION=database
+```
+
+**C. Run the Queue Worker / Jalankan Queue Worker**
+To process the jobs, you need to run a worker process in your terminal. This process will listen for new jobs and execute them.
+
+*Untuk memproses job, Anda perlu menjalankan proses worker di terminal Anda. Proses ini akan mendengarkan job baru dan mengeksekusinya.*
+
+For development:
+*Untuk development:*
+```bash
+php artisan queue:work
+```
+For production, you should use a process manager like Supervisor to ensure the worker is always running.
+
+*Untuk production, Anda sebaiknya menggunakan process manager seperti Supervisor untuk memastikan worker selalu berjalan.*
+
+---
+
+### **Summary of the Workflow**
+### **Ringkasan Alur Kerja**
+
+1.  A user visits a page on your Laravel site.
+*Seorang pengguna mengunjungi halaman di situs Laravel Anda.*
+2.  Your application code (e.g., a model) executes a database query.
+*Kode aplikasi Anda (misalnya, sebuah model) mengeksekusi kueri database.*
+3.  The `DB::listen` event in your `QueryLoggingServiceProvider` automatically catches this query.
+*Event `DB::listen` di dalam `QueryLoggingServiceProvider` Anda secara otomatis menangkap kueri ini.*
+4.  The listener immediately dispatches `LogQueryToMongo` job onto the queue (a new row in the `jobs` table). This is extremely fast.
+*Listener segera mengirimkan job `LogQueryToMongo` ke dalam antrian (baris baru di tabel `jobs`). Proses ini sangat cepat.*
+5.  The controller finishes its work and sends the response back to the user without any delay.
+*Controller menyelesaikan tugasnya dan mengirimkan respons kembali ke pengguna tanpa penundaan.*
+6.  In the background, the `php artisan queue:work` process sees the new job, picks it up, and executes its `handle()` method.
+*Di latar belakang, proses `php artisan queue:work` melihat job baru, mengambilnya, dan mengeksekusi method `handle()`-nya.*
+7.  The job connects to the separate `mongodb_logging` database and inserts the query details.
+*Job tersebut terhubung ke database terpisah `mongodb_logging` dan memasukkan detail kueri.*
+
+This setup successfully logs all your queries for analysis without affecting the user-perceived speed of your site.
+
+*Pengaturan ini berhasil mencatat semua kueri Anda untuk dianalisis tanpa memengaruhi kecepatan situs yang dirasakan oleh pengguna.*

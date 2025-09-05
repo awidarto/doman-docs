@@ -1,0 +1,358 @@
+# MakeInertiaForm Command Documentation / Dokumentasi Command MakeInertiaForm
+
+## English Documentation
+
+### Overview
+The `MakeInertiaForm` command is a custom Laravel Artisan command that generates Inertia form components from YAML configuration files. This command has been enhanced to utilize the `form`, `view`, and `vue` sections of YAML files to create comprehensive form components with TypeScript interface support.
+
+### Command Signature
+```bash
+php artisan make:inertia-form {yamlFile} [options]
+```
+
+### Required Arguments
+- **yamlFile**: Path to the YAML configuration file (relative to project root)
+
+### Available Options
+- `--output-path=`: Path where the generated Vue components will be saved (required)
+- `--route-prefix=`: Sets the route prefix for form submission routes
+- `--model-variable=`: Sets the variable name for the model object
+- `--entity-name=`: Sets the entity name for the generated components
+- `--entity-name-lower=`: Sets the lowercase entity name for routes
+
+### YAML Configuration Structure
+
+The command now processes three sections of the YAML file:
+
+```yaml
+form:
+  - name: "title"
+    label: "Title"
+    model: "title"
+    type: "text"
+    validator: "required|string|max:255"
+    create: true
+    edit: true
+  - name: "content"
+    label: "Content"
+    model: "content" 
+    type: "textarea"
+    validator: "nullable|string"
+    create: true
+    edit: true
+
+view:
+  - name: "title"
+    label: "Title"
+    model: "title"
+    type: "text"
+    visible: true
+  - name: "content"
+    label: "Content"
+    model: "content"
+    type: "textarea"
+    visible: true
+
+vue:
+  - name: "title"
+    type: "string"
+    nullable: false
+  - name: "content" 
+    type: "string"
+    nullable: true
+  - name: "created_at"
+    type: "datetime"
+    nullable: true
+  - name: "status"
+    type: "string"
+    nullable: false
+```
+
+#### Section Details
+
+**Form Section:**
+- `name`: Field identifier
+- `label`: Display label for the field
+- `model`: Model property name for v-model binding
+- `type`: Input type (text, textarea, email, password, number, etc.)
+- `validator`: Laravel validation rules
+- `create`: Whether to include in create forms
+- `edit`: Whether to include in edit forms
+
+**View Section:**
+- `name`: Field identifier
+- `label`: Display label for the field
+- `model`: Model property name
+- `type`: Display type (text, textarea, date, boolean, image, etc.)
+- `visible`: Whether to show in view components
+
+**Vue Section (New Enhancement):**
+- `name`: TypeScript interface field name
+- `type`: Data type for TypeScript mapping
+- `nullable`: Whether the field can be null/undefined
+
+### Enhanced Features
+
+#### TypeScript Interface Generation
+The `vue` section now generates TypeScript interface fields:
+
+```typescript
+interface EntityInterface {
+  title: string;
+  content?: string;
+  created_at?: string;
+  status: string;
+}
+```
+
+#### Type Mapping
+YAML types are mapped to TypeScript types:
+- `string`, `text`, `textarea`, `email` → `string`
+- `integer`, `int`, `number` → `number`  
+- `boolean`, `bool` → `boolean`
+- `datetime`, `date`, `time`, `timestamp` → `string`
+- `json`, `object` → `any`
+- `array` → `any[]`
+
+#### Additional Field Generation
+Fields defined in the `vue` section but not in the `form` section are generated as additional form fields that can be conditionally displayed.
+
+### Generated Components
+
+The command generates three Vue components:
+
+1. **CreateForm.vue**: Form for creating new entities
+2. **EditForm.vue**: Form for editing existing entities  
+3. **ShowView.vue**: Read-only view component for displaying entity data
+
+### Placeholder Replacements
+
+The generated components use the following placeholders:
+
+- `{{{pl_form_fields}}}`: Generated form input fields
+- `{{{pl_form_models}}}`: Generated form model definitions
+- `{{{pl_view_fields}}}`: Generated view display fields
+- `{{{pl_vue_interface_fields}}}`: TypeScript interface field definitions
+- `{{{pl_vue_additional_fields}}}`: Additional fields from vue section
+- `{{pl_store_route}}`: Route for creating entities
+- `{{pl_update_route}}`: Route for updating entities
+- `{{pl_model_variable}}`: Variable name for the model object
+
+### Usage Examples
+
+#### Basic Usage
+```bash
+php artisan make:inertia-form resources/models/controllers/directory/manager_controller.yml \
+  --output-path="resources/js/Pages/Manager/Components" \
+  --route-prefix="admin.manager" \
+  --model-variable="manager" \
+  --entity-name="Manager" \
+  --entity-name-lower="manager"
+```
+
+#### Real-World Example with Project YAML
+Using the existing project YAML configuration:
+
+```bash
+# Generate manager form components
+php artisan make:inertia-form resources/models/controllers/directory/manager_controller.yml \
+  --output-path="resources/js/Pages/Directory/Manager/Components" \
+  --route-prefix="directory.manager" \
+  --model-variable="manager" \
+  --entity-name="Manager" \
+  --entity-name-lower="manager"
+```
+
+This will generate:
+- `CreateForm.vue`: Manager creation form
+- `EditForm.vue`: Manager editing form
+- `ShowView.vue`: Manager display component
+
+### Field Type Support
+
+#### Input Field Types
+- `text`: Standard text input
+- `textarea`: Multi-line text input
+- `email`: Email input with validation
+- `password`: Password input (masked)
+- `number`/`integer`: Numeric input
+- `boolean`/`simpleswitch`: Boolean toggle
+
+#### View Component Types
+- `text`: Simple text display
+- `textarea`: Multi-line text with whitespace preservation
+- `boolean`: Badge display (Yes/No)
+- `date`/`datetime`: Formatted date display
+- `image`/`imagecardview`: Image display with fallback
+
+### Error Handling
+
+The command includes comprehensive error handling:
+- Validates YAML file existence and format
+- Validates required options (output-path)
+- Creates output directories if they don't exist
+- Provides clear error messages for missing stub files
+- Returns appropriate exit codes (0 for success, 1 for error)
+
+### Dependencies
+
+This command requires:
+- `symfony/yaml` package for YAML parsing
+- Laravel's Console Command base class
+- Properly formatted stub templates:
+  - `resources/views/stubs/inertia/js/CreateForm.vue.stub`
+  - `resources/views/stubs/inertia/js/EditForm.vue.stub`
+  - `resources/views/stubs/inertia/js/ShowView.vue.stub`
+
+### Integration with Other Commands
+
+This enhanced command now works seamlessly with:
+- `MakeInertiaColumns`: Uses the same `vue` section for TypeScript interface consistency
+- `MakeInertiaCrud`: Provides form components that integrate with generated CRUD interfaces
+
+### Best Practices
+
+1. **Consistent Naming**: Use consistent field names across `form`, `view`, and `vue` sections
+2. **Type Safety**: Define proper types in the `vue` section for better TypeScript support
+3. **Validation**: Include proper validation rules in the `form` section
+4. **Visibility Control**: Use the `visible`, `create`, and `edit` flags to control field display
+5. **Nullable Fields**: Mark optional fields as nullable in the `vue` section
+
+---
+
+## Dokumentasi Bahasa Indonesia
+
+### Gambaran Umum
+Command `MakeInertiaForm` adalah perintah Laravel Artisan kustom yang menghasilkan komponen form Inertia dari file konfigurasi YAML. Command ini telah ditingkatkan untuk memanfaatkan seksi `form`, `view`, dan `vue` dari file YAML untuk membuat komponen form yang komprehensif dengan dukungan interface TypeScript.
+
+### Tanda Tangan Command
+```bash
+php artisan make:inertia-form {yamlFile} [opsi]
+```
+
+### Argumen Wajib
+- **yamlFile**: Path ke file konfigurasi YAML (relatif terhadap root proyek)
+
+### Opsi yang Tersedia
+- `--output-path=`: Path tempat komponen Vue yang dihasilkan akan disimpan (wajib)
+- `--route-prefix=`: Mengatur prefix route untuk route pengiriman form
+- `--model-variable=`: Mengatur nama variabel untuk objek model
+- `--entity-name=`: Mengatur nama entitas untuk komponen yang dihasilkan
+- `--entity-name-lower=`: Mengatur nama entitas huruf kecil untuk route
+
+### Struktur Konfigurasi YAML
+
+Command ini sekarang memproses tiga seksi dari file YAML:
+
+```yaml
+form:
+  - name: "title"
+    label: "Judul"
+    model: "title"
+    type: "text"
+    validator: "required|string|max:255"
+    create: true
+    edit: true
+
+view:
+  - name: "title"
+    label: "Judul"
+    model: "title"
+    type: "text"
+    visible: true
+
+vue:
+  - name: "title"
+    type: "string"
+    nullable: false
+```
+
+#### Detail Seksi
+
+**Seksi Form:**
+- `name`: Identifier field
+- `label`: Label tampilan untuk field
+- `model`: Nama properti model untuk binding v-model
+- `type`: Tipe input (text, textarea, email, password, number, dll.)
+- `validator`: Aturan validasi Laravel
+- `create`: Apakah disertakan dalam form create
+- `edit`: Apakah disertakan dalam form edit
+
+**Seksi View:**
+- `name`: Identifier field
+- `label`: Label tampilan untuk field
+- `model`: Nama properti model
+- `type`: Tipe tampilan (text, textarea, date, boolean, image, dll.)
+- `visible`: Apakah ditampilkan dalam komponen view
+
+**Seksi Vue (Peningkatan Baru):**
+- `name`: Nama field interface TypeScript
+- `type`: Tipe data untuk mapping TypeScript
+- `nullable`: Apakah field bisa null/undefined
+
+### Fitur yang Ditingkatkan
+
+#### Generasi Interface TypeScript
+Seksi `vue` sekarang menghasilkan field interface TypeScript:
+
+```typescript
+interface EntityInterface {
+  title: string;
+  content?: string;
+  created_at?: string;
+  status: string;
+}
+```
+
+#### Mapping Tipe
+Tipe YAML dipetakan ke tipe TypeScript:
+- `string`, `text`, `textarea`, `email` → `string`
+- `integer`, `int`, `number` → `number`
+- `boolean`, `bool` → `boolean`
+- `datetime`, `date`, `time`, `timestamp` → `string`
+- `json`, `object` → `any`
+- `array` → `any[]`
+
+### Komponen yang Dihasilkan
+
+Command ini menghasilkan tiga komponen Vue:
+
+1. **CreateForm.vue**: Form untuk membuat entitas baru
+2. **EditForm.vue**: Form untuk mengedit entitas yang ada
+3. **ShowView.vue**: Komponen view read-only untuk menampilkan data entitas
+
+### Contoh Penggunaan
+
+#### Penggunaan Dasar
+```bash
+php artisan make:inertia-form resources/models/controllers/directory/manager_controller.yml \
+  --output-path="resources/js/Pages/Manager/Components" \
+  --route-prefix="admin.manager" \
+  --model-variable="manager" \
+  --entity-name="Manager" \
+  --entity-name-lower="manager"
+```
+
+### Penanganan Error
+
+Command ini mencakup penanganan error yang komprehensif:
+- Memvalidasi keberadaan dan format file YAML
+- Memvalidasi opsi yang diperlukan (output-path)
+- Membuat direktori output jika belum ada
+- Menyediakan pesan error yang jelas untuk file stub yang hilang
+- Mengembalikan kode keluar yang sesuai (0 untuk sukses, 1 untuk error)
+
+### Dependencies
+
+Command ini membutuhkan:
+- Package `symfony/yaml` untuk parsing YAML
+- Kelas base Laravel Console Command
+- Template stub yang terformat dengan benar
+
+### Best Practice
+
+1. **Penamaan Konsisten**: Gunakan nama field yang konsisten di seluruh seksi `form`, `view`, dan `vue`
+2. **Type Safety**: Definisikan tipe yang tepat di seksi `vue` untuk dukungan TypeScript yang lebih baik
+3. **Validasi**: Sertakan aturan validasi yang tepat di seksi `form`
+4. **Kontrol Visibilitas**: Gunakan flag `visible`, `create`, dan `edit` untuk mengontrol tampilan field
+5. **Field Nullable**: Tandai field opsional sebagai nullable di seksi `vue`

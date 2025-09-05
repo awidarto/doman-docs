@@ -1,0 +1,429 @@
+# Navigation Configuration Guide
+
+## Overview
+
+This guide covers how to configure different navigation layouts, sidebar modes, and top navigation options in the application.
+
+## Sidebar Configuration
+
+### Basic Sidebar States
+
+The sidebar supports multiple states that can be configured through the sidebar utilities:
+
+```typescript
+// Available sidebar states
+type SidebarState = 'expanded' | 'collapsed';
+```
+
+### 1. Rail Mode (Collapsed Sidebar)
+
+Rail mode shows a collapsed sidebar with only icons visible.
+
+**Configuration in Component**:
+```vue
+<script setup>
+import { useSidebar } from '@/components/ui/sidebar/utils';
+
+const { state, toggleSidebar, setState } = useSidebar();
+
+// Set to rail mode
+const enableRailMode = () => {
+    setState('collapsed');
+};
+
+// Toggle between states
+const toggleMode = () => {
+    toggleSidebar();
+};
+</script>
+
+<template>
+    <AppShell variant="sidebar">
+        <AppSidebar 
+            :collapsed="state === 'collapsed'"
+            :menu="menu" 
+            :icons="icons" 
+        />
+        <!-- Content -->
+    </AppShell>
+</template>
+```
+
+**Configuration in Backend**:
+```php
+// In AdminController or specific controller
+public function index(Request $request)
+{
+    // Force rail mode for specific pages
+    $this->extra_props['sidebarState'] = 'collapsed';
+    
+    return parent::index($request);
+}
+```
+
+### 2. Full Sidebar Mode
+
+Full sidebar shows expanded menu with text labels and icons.
+
+```typescript
+// Enable full sidebar
+const enableFullMode = () => {
+    setState('expanded');
+};
+```
+
+### 3. Persistent vs. Overlay Sidebar
+
+**Desktop (Persistent)**:
+- Sidebar remains visible alongside content
+- Content area adjusts width accordingly
+- Smooth transitions between rail and full modes
+
+**Mobile/Tablet (Overlay)**:
+- Sidebar appears as overlay over content
+- Backdrop dims the main content
+- Automatically collapses on navigation
+
+## Top Navigation Configuration
+
+### 1. Enable/Disable Top Navigation
+
+**Method 1: Controller Level**
+```php
+// In AdminController
+public function index(Request $request)
+{
+    // Enable contextual top menu (default)
+    $this->generateTopMenu(1); // Shows children of active group
+    
+    // Show main groups instead
+    // $this->generateTopMenu(0);
+    
+    // Disable top navigation entirely
+    // $this->top_menu = [];
+    
+    return parent::index($request);
+}
+```
+
+**Method 2: Layout Configuration**
+```vue
+<!-- In your page component -->
+<template>
+    <AppLayout 
+        :menu="menu"
+        :icons="icons"
+        :top_menu="showTopNav ? top_menu : []"
+        :top_menu_icons="showTopNav ? top_menu_icons : {}"
+    >
+        <!-- Page content -->
+    </AppLayout>
+</template>
+
+<script setup>
+const showTopNav = computed(() => {
+    // Logic to determine when to show top navigation
+    return route().current()?.startsWith('directory.');
+});
+</script>
+```
+
+### 2. Top Navigation Menu Levels
+
+**Level 0: Main Groups**
+```php
+$this->generateTopMenu(0);
+```
+Shows: Document Management, Directory, Setup, etc.
+
+**Level 1: Children of Active Group (Default)**
+```php
+$this->generateTopMenu(1);
+```
+Shows: Dashboard, Customer, Member, Distributor, Vendor (when in Directory)
+
+### 3. Conditional Top Navigation
+
+**Show different top menu based on section**:
+```php
+public function index(Request $request)
+{
+    $currentSection = $this->getCurrentSection();
+    
+    switch ($currentSection) {
+        case 'directory':
+            $this->generateTopMenu(1); // Show directory children
+            break;
+        case 'dms':
+            $this->generateTopMenu(1); // Show DMS children
+            break;
+        default:
+            $this->generateTopMenu(0); // Show main groups
+    }
+    
+    return parent::index($request);
+}
+
+private function getCurrentSection(): string
+{
+    $path = request()->path();
+    return explode('/', $path)[0] ?? 'main';
+}
+```
+
+## Layout Variants
+
+### 1. Sidebar Layout (Default)
+```vue
+<AppShell variant="sidebar">
+    <AppSidebar :menu="menu" :icons="icons" />
+    <AppContent variant="sidebar">
+        <TopBar :menu="menu" :top_menu="top_menu" />
+        <!-- Page content -->
+    </AppContent>
+</AppShell>
+```
+
+### 2. Full-width Layout (No Sidebar)
+```vue
+<AppShell variant="full">
+    <AppContent variant="full">
+        <TopBar :menu="top_menu" /> <!-- Only top navigation -->
+        <!-- Page content -->
+    </AppContent>
+</AppShell>
+```
+
+### 3. Minimal Layout (No Navigation)
+```vue
+<AppShell variant="minimal">
+    <AppContent variant="minimal">
+        <!-- Pure content, no navigation -->
+    </AppContent>
+</AppShell>
+```
+
+## Menu Configuration
+
+### 1. YAML Menu Files
+
+**Main Configuration** (`config/core/app.php`):
+```php
+return [
+    'app_nav_path' => env('APP_NAV_PATH', 'views/partials/app/dms'),
+    'app_nav_file' => env('APP_NAV_FILE', 'navnext'),
+];
+```
+
+**Environment Variables** (`.env`):
+```env
+APP_NAV_PATH="views/partials/app/dms"
+APP_NAV_FILE="navnext"
+```
+
+### 2. Multiple Menu Sources
+
+**Load Different Menu Sets**:
+```php
+// In AdminController constructor
+public function __construct()
+{
+    // Load primary menu
+    $this->menu = MenuUtil::loadResYaml($this->nav_file, $this->nav_path)->toArray();
+    
+    // Load additional menus based on context
+    if ($this->shouldLoadDirectoryMenu()) {
+        $dir_menu = MenuUtil::loadResYaml('nav', 'views/partials/app/directory')->toArray();
+        $this->menu = array_merge($this->menu, $dir_menu);
+    }
+    
+    if ($this->shouldLoadSystemMenu()) {
+        $sys_menu = MenuUtil::loadResYaml('user', 'views/partials/app/sys')->toArray();
+        $this->menu = array_merge($this->menu, $sys_menu);
+    }
+    
+    // Continue with menu processing...
+}
+
+private function shouldLoadDirectoryMenu(): bool
+{
+    return in_array($this->namespace, ['Directory', 'User', 'Customer']);
+}
+```
+
+### 3. Dynamic Menu Configuration
+
+**Role-Based Menu Loading**:
+```php
+public function __construct()
+{
+    parent::__construct();
+    
+    $user = auth()->user();
+    $userRole = $user->role ?? 'guest';
+    
+    // Load different menus based on user role
+    switch ($userRole) {
+        case 'admin':
+            $this->loadAdminMenus();
+            break;
+        case 'manager':
+            $this->loadManagerMenus();
+            break;
+        default:
+            $this->loadBasicMenus();
+    }
+}
+
+private function loadAdminMenus()
+{
+    $admin_menu = MenuUtil::loadResYaml('admin', 'views/partials/app/admin')->toArray();
+    $this->menu = array_merge($this->menu, $admin_menu);
+}
+```
+
+## Responsive Behavior Configuration
+
+### 1. Breakpoint Configuration
+```typescript
+// In composables/useBreakpoints.ts
+export const breakpoints = {
+    sm: 640,
+    md: 768,
+    lg: 1024,
+    xl: 1280,
+    '2xl': 1536,
+};
+
+// Usage in components
+const { isMobile, isTablet, isDesktop } = useBreakpoints();
+
+// Sidebar behavior based on screen size
+const sidebarBehavior = computed(() => {
+    if (isMobile.value) return 'overlay';
+    if (isTablet.value) return 'overlay';
+    return 'persistent';
+});
+```
+
+### 2. Mobile-Specific Configuration
+```vue
+<script setup>
+import { useSidebar } from '@/components/ui/sidebar/utils';
+import { useBreakpoints } from '@/composables/useBreakpoints';
+
+const { isMobile } = useBreakpoints();
+const { state, setState } = useSidebar();
+
+// Auto-collapse on mobile
+watch(isMobile, (mobile) => {
+    if (mobile) {
+        setState('collapsed');
+    }
+});
+</script>
+```
+
+## Advanced Configuration Examples
+
+### 1. Context-Aware Navigation
+```php
+class AdvancedController extends AdminController
+{
+    public function index(Request $request)
+    {
+        $this->configureNavigation($request);
+        return parent::index($request);
+    }
+    
+    private function configureNavigation(Request $request)
+    {
+        $context = $this->determineContext($request);
+        
+        switch ($context) {
+            case 'dashboard':
+                $this->generateTopMenu(0); // Show all main sections
+                $this->extra_props['sidebarState'] = 'expanded';
+                break;
+                
+            case 'workflow':
+                $this->generateTopMenu(1); // Show workflow steps
+                $this->extra_props['sidebarState'] = 'collapsed';
+                break;
+                
+            case 'reports':
+                $this->top_menu = []; // Hide top navigation
+                $this->extra_props['sidebarState'] = 'expanded';
+                break;
+        }
+    }
+}
+```
+
+### 2. User Preference Storage
+```typescript
+// Store user navigation preferences
+const navigationPreferences = {
+    sidebarState: 'expanded',
+    showTopNav: true,
+    menuLevel: 1
+};
+
+// Save to localStorage
+const savePreferences = (prefs: NavigationPreferences) => {
+    localStorage.setItem('navigation-prefs', JSON.stringify(prefs));
+};
+
+// Load preferences on app initialization
+const loadPreferences = (): NavigationPreferences => {
+    const stored = localStorage.getItem('navigation-prefs');
+    return stored ? JSON.parse(stored) : defaultPreferences;
+};
+```
+
+### 3. Route-Based Configuration
+```php
+// In RouteServiceProvider or middleware
+public function configureNavigationForRoute(Request $request)
+{
+    $route = $request->route();
+    $routeName = $route->getName();
+    
+    // Configure navigation based on route patterns
+    if (Str::startsWith($routeName, 'admin.')) {
+        session(['nav_config' => [
+            'sidebar_state' => 'expanded',
+            'top_menu_level' => 1,
+            'show_breadcrumbs' => true
+        ]]);
+    }
+    
+    if (Str::startsWith($routeName, 'api.')) {
+        session(['nav_config' => [
+            'sidebar_state' => 'collapsed',
+            'top_menu_level' => 0,
+            'show_breadcrumbs' => false
+        ]]);
+    }
+}
+```
+
+## Configuration Summary
+
+| Configuration | Options | Default | Description |
+|---------------|---------|---------|-------------|
+| Sidebar State | `expanded`, `collapsed` | `expanded` | Sidebar display mode |
+| Top Menu Level | `0`, `1` | `1` | Menu hierarchy level |
+| Layout Variant | `sidebar`, `full`, `minimal` | `sidebar` | Overall layout structure |
+| Menu Sources | YAML file paths | `dms/navnext` | Menu data sources |
+| Responsive Mode | `persistent`, `overlay` | Auto | Mobile behavior |
+
+## Best Practices
+
+1. **Use consistent naming** for navigation states across components
+2. **Store user preferences** in localStorage or database
+3. **Configure navigation contextually** based on user roles and current section
+4. **Test responsive behavior** across different screen sizes
+5. **Provide smooth transitions** between navigation states
+6. **Consider accessibility** when hiding/showing navigation elements
+7. **Document custom configurations** for team members

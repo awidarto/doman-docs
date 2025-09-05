@@ -1,0 +1,228 @@
+---
+title: "CRUD Generator Commands"
+description: "Orchestrating Generator Commands for YAML Based Inertia CRUD"
+---
+
+
+## CRUD Generator Commands Documentation
+
+This document outlines the usage of a suite of Artisan commands designed to rapidly scaffold complete CRUD (Create, Read, Update, Delete) modules within a Laravel Inertia.js application using Vue 3, TypeScript, and shadcn-vue.
+
+The system is orchestrated by a main command, `make:module-crud`, which in turn calls specialized sub-generator commands.
+
+### Table of Contents
+1.  **Orchestrator Command: `make:module-crud`**
+*   Purpose & Workflow
+*   Command Signature
+*   YAML Configuration (Single & Multi-File)
+2.  **Sub-Generator Commands**
+*   `make:inertia-crud` (Controller, Model, Index Page)
+*   `make:vue-form` (Form Component, Create/Edit Pages)
+*   `make:vue-dataview` (Data View Component, View Page)
+*   `make:table-columns` (TanStack Table Columns)
+*   `make:zod-schema` (Zod Schema & TypeScript Type)
+3.  **YAML Field Reference**
+*   Form & Data View Field Properties
+*   Layout Section Properties
+*   Chart, Map, and other Complex Component Parameters
+
+---
+
+### 1. Orchestrator Command: `make:module-crud`
+
+This is the primary command used to generate a full CRUD module from a single YAML configuration.
+
+#### **Purpose & Workflow**
+
+The `make:module-crud` command reads a central YAML file that defines all aspects of a CRUD entity. Based on this configuration, it intelligently calls the other specialized generator commands (`make:inertia-crud`, `make:vue-form`, etc.) to create all the necessary PHP and Vue/TypeScript files. This provides a single-command workflow for scaffolding new features.
+
+#### **Command Signature**
+
+```bash
+php artisan make:module-crud {targetDefinitionFile} {--name=} {--ns=} {--single-yml} {--force} {--skip-format}
+```
+
+*   `targetDefinitionFile`: The path to the main YAML file.
+*   If `--single-yml` is used, this file contains all definitions (`form`, `view`, `table`, etc.).
+*   If `--single-yml` is NOT used, this file is an orchestrator that points to other YAML files.
+*   `--name`: (Optional) The name of the entity (e.g., `Product`, `SalesOrder`). Overrides any `name` defined in the YAML. If not provided, the command will prompt for it interactively.
+*   `--ns`: (Optional) The module namespace (e.g., `Inventory/Catalog`). Overrides any `namespace` defined in the YAML. If not provided, the command will prompt for it interactively.
+*   `--single-yml`: (Flag) Must be included if `targetDefinitionFile` is a single, comprehensive YAML file.
+*   `--force`: (Flag) Overwrites existing files without prompting.
+*   `--skip-format`: (Flag) Skips running Prettier (for JS/TS/Vue) and Pint (for PHP) on the generated files.
+
+#### **YAML Configuration**
+
+**A) Single-File Mode (`--single-yml`)**
+
+A single YAML file contains multiple top-level keys (`module_info`, `form`, `view`, `table`, etc.).
+
+**Example (`product_module.yml`):**
+```yaml
+# Can be at the root or under 'module_info'
+name: Product
+namespace: Inventory/Catalog
+
+# Optional: Override generator options
+inertia_crud:
+  softDeletes: true
+vue_form:
+  formName: ProductEditorForm
+  withLayout: true
+
+# Zod schema fields
+# The key 'product_schema_fields' should be specified in module_info.zod_schema.yamlKey
+product_schema_fields:
+  - { model: name, type: string, required: true }
+  # ... other schema fields
+
+# Form layout and fields
+form:
+  - type: card
+    label: "Product Details"
+    children:
+      - { type: text, model: name, label: "Product Name" }
+      # ... other form fields
+
+# Data View layout and elements
+view:
+  - type: card-stacked
+    label: "Product Overview"
+    children:
+      - { type: text, model: name, label: "Name" }
+      # ... other view elements
+
+# Table columns for Index page
+table:
+  - { name: name, label: "Product Name", show: true, search: true }
+  # ... other table columns
+```
+
+**B) Multi-File (Orchestrator) Mode**
+
+The main YAML file points to other specialized YAML files.
+
+**Example (`product_orchestrator.yml`):**
+```yaml
+# Module Info
+name: Product
+namespace: Inventory/Catalog
+
+# Paths to definition files (relative to this file)
+form_yaml: "./forms/product_form.yml"
+dataview_yaml: "./views/product_view.yml"
+table_columns_yaml: "./tables/product_columns.yml"
+zod_schema_yaml: "./schemas/product_schema.yml"
+
+# Generator Options
+inertia_crud:
+  softDeletes: true
+vue_form:
+  formName: ProductEditorForm
+  withLayout: true
+zod_schema:
+  yamlKey: schema # The key in product_schema.yml that holds the fields
+```
+
+---
+---
+
+### 1. Perintah Orkestrator: `make:module-crud` (Bahasa Indonesia)
+
+Ini adalah perintah utama yang digunakan untuk menghasilkan modul CRUD lengkap dari satu file konfigurasi YAML.
+
+#### **Tujuan & Alur Kerja**
+
+Perintah `make:module-crud` membaca file YAML pusat yang mendefinisikan semua aspek dari sebuah entitas CRUD. Berdasarkan konfigurasi ini, ia secara cerdas memanggil perintah generator khusus lainnya (`make:inertia-crud`, `make:vue-form`, dll.) untuk membuat semua file PHP dan Vue/TypeScript yang diperlukan. Ini menyediakan alur kerja satu-perintah untuk membangun fitur baru.
+
+#### **Struktur Perintah**
+
+```bash
+php artisan make:module-crud {targetDefinitionFile} {--name=} {--ns=} {--single-yml} {--force} {--skip-format}
+```
+
+*   `targetDefinitionFile`: Path ke file YAML utama.
+*   Jika `--single-yml` digunakan, file ini berisi semua definisi (`form`, `view`, `table`, dll.).
+*   Jika `--single-yml` TIDAK digunakan, file ini adalah orkestrator yang menunjuk ke file YAML lainnya.
+*   `--name`: (Opsional) Nama entitas (contoh: `Product`, `SalesOrder`). Menggantikan `name` yang didefinisikan di YAML. Jika tidak diberikan, perintah akan meminta secara interaktif.
+*   `--ns`: (Opsional) Namespace modul (contoh: `Inventory/Catalog`). Menggantikan `namespace` yang didefinisikan di YAML. Jika tidak diberikan, perintah akan meminta secara interaktif.
+*   `--single-yml`: (Flag) Harus disertakan jika `targetDefinitionFile` adalah file YAML tunggal yang komprehensif.
+*   `--force`: (Flag) Menimpa file yang sudah ada tanpa meminta konfirmasi.
+*   `--skip-format`: (Flag) Melewatkan proses format kode dengan Prettier (untuk JS/TS/Vue) dan Pint (untuk PHP).
+
+#### **Konfigurasi YAML**
+
+**A) Mode File Tunggal (`--single-yml`)**
+
+Satu file YAML berisi beberapa kunci tingkat atas (`module_info`, `form`, `view`, `table`, dll.).
+
+**Contoh (`product_module.yml`):**
+```yaml
+# Bisa di root atau di bawah 'module_info'
+name: Product
+namespace: Inventory/Catalog
+
+# Opsional: Mengganti opsi generator
+inertia_crud:
+  softDeletes: true
+vue_form:
+  formName: ProductEditorForm
+  withLayout: true
+
+# Definisi field untuk Zod schema
+# Kunci 'product_schema_fields' harus dispesifikasikan di module_info.zod_schema.yamlKey
+product_schema_fields:
+  - { model: name, type: string, required: true }
+  # ... field schema lainnya
+
+# Layout dan field untuk Form
+form:
+  - type: card
+    label: "Product Details"
+    children:
+      - { type: text, model: name, label: "Product Name" }
+      # ... field form lainnya
+
+# Layout dan elemen untuk Data View
+view:
+  - type: card-stacked
+    label: "Product Overview"
+    children:
+      - { type: text, model: name, label: "Name" }
+      # ... elemen view lainnya
+
+# Definisi kolom untuk halaman Index
+table:
+  - { name: name, label: "Product Name", show: true, search: true }
+  # ... kolom tabel lainnya
+```
+
+**B) Mode Multi-File (Orkestrator)**
+
+File YAML utama menunjuk ke file YAML khusus lainnya.
+
+**Contoh (`product_orchestrator.yml`):**
+```yaml
+# Info Modul
+name: Product
+namespace: Inventory/Catalog
+
+# Path ke file definisi (relatif terhadap file ini)
+form_yaml: "./forms/product_form.yml"
+dataview_yaml: "./views/product_view.yml"
+table_columns_yaml: "./tables/product_columns.yml"
+zod_schema_yaml: "./schemas/product_schema.yml"
+
+# Opsi Generator
+inertia_crud:
+  softDeletes: true
+vue_form:
+  formName: ProductEditorForm
+  withLayout: true
+zod_schema:
+  yamlKey: schema # Kunci di dalam product_schema.yml yang berisi daftar field
+```
+
+---
+
+**(The documentation for the sub-generators and YAML field reference would follow in a similar bilingual format. Due to the length, I'll provide them if you ask for the next part.)**

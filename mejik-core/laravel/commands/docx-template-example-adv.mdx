@@ -1,0 +1,196 @@
+---
+title: "DOCX Template Example - Advanced"
+description: "DOCX template example & guide"
+---
+
+## English Documentation
+
+### **Guide to Creating Advanced DOCX Templates for `docx:generate`**
+
+This guide explains the enhanced syntax for creating powerful, generic templates for the `docx:generate` command. It covers generic image placeholders, advanced conditional logic, and support for images inside table loops.
+
+#### **1. Setup**
+Your project must include the Symfony ExpressionLanguage component for the advanced conditional logic to work. If you haven't installed it, run:
+```bash
+composer require symfony/expression-language
+```
+
+#### **2. Template Tag Reference**
+
+**2.1. Generic Image Placeholders**
+The image tag is now generic, allowing you to place multiple different images anywhere in your template.
+
+*   **Syntax**: `${img_fieldname}`
+*   **How it Works**: The command looks for placeholders starting with `img_`. It takes the `fieldname` part (e.g., `logo` from `${img_logo}`) and looks for a corresponding key in your JSON data. The value for that key must be a URL to the image or a local file path.
+*   **Mode Behavior**:
+*   `--mode=merge` or `--mode=pdf`: The image is downloaded (if URL) and **embedded** in the document.
+*   `--mode=html` or `--mode=blade`: An HTML `<img src="...">` tag is generated.
+*   **Example Template**:
+```
+${img_logo}
+...
+Product Image: ${img_product_photo}
+    ```
+*   **Example JSON**:
+```json
+{
+  "logo": "https://example.com/logo.png",
+  "product_photo": "/path/to/local/image.jpg"
+}
+    ```
+
+**2.2. Advanced Conditional Blocks**
+Conditional blocks are now more flexible. All conditional blocks must be closed with **`${endif}`**. **Note**: Nesting conditional blocks (`if` inside another `if`) is not supported.
+
+*   **Variable Existence Check (Shorthand)**
+*   **Syntax**: `${if_fieldname} ... ${endif}`
+*   **Usage**: Shows the content only if the `fieldname` key exists in your JSON and its value is not empty, null, or false.
+*   **Example**: The block below will only be displayed if a non-empty `notes` key exists.
+```
+${if_notes}
+Special Notes:
+${notes}
+${endif}
+        ```
+
+*   **Expression-Based Conditionals**
+*   **Syntax**: `${if: expression} ... ${endif}`
+*   **Usage**: Evaluates a logical expression. You can use variables from your JSON directly by name, with standard operators (`>`, `<`, `==`, `!=`, `and`, `or`, `not`).
+*   **Example**: Show a warning for high-value orders.
+```
+${if: invoice_total > 5000 and customer.tier != 'premium'}
+A 10% prepayment is required for this order.
+${endif}
+        ```
+
+**2.3. Table Loops with Text and Images**
+The command now supports both text and image placeholders within a repeating table row, which is perfect for product catalogs or detailed invoices.
+
+*   **Syntax for Table Rows**:
+*   **Text Placeholder**: `${item.fieldname}`
+*   **Image Placeholder**: `${img_item.fieldname}`
+*   **Anchor Placeholder**: One text column must serve as the "anchor" for cloning. We use `${item.no}` by convention.
+
+*   **Visual Template Example for an Item Table**:
+Create this table in your `.docx` template. Apply any formatting you wish to this single row.
+
+| **No** | **Product Image** | **Description** | **Price** |
+| :--- | :--- | :--- | :--- |
+| `${item.no}` | `${img_item.pictureUrl}` | `${item.name}` | `${item.price}` |
+
+*   **Example JSON for the Table Loop**:
+The keys in your JSON objects must match the `fieldname` in your placeholders.
+
+```json
+{
+  "item_list": [
+    {
+      "name": "Pro Web Development Package",
+      "price": "4,500.00",
+      "pictureUrl": "https://example.com/images/web-dev.png"
+    },
+    {
+      "name": "Cloud Hosting (1 Year)",
+      "price": "600.00",
+      "pictureUrl": "https://example.com/images/cloud.png"
+    }
+  ]
+}
+```
+
+---
+
+## Dokumentasi Bahasa Indonesia
+
+### **Panduan Membuat Templat DOCX Tingkat Lanjut**
+
+Panduan ini menjelaskan sintaks yang telah disempurnakan untuk perintah `docx:generate`, termasuk placeholder gambar generik, logika kondisional tingkat lanjut, dan dukungan untuk gambar di dalam perulangan baris tabel.
+
+#### **1. Pengaturan**
+Proyek Anda harus menyertakan komponen Symfony ExpressionLanguage agar logika kondisional tingkat lanjut dapat berfungsi. Jika Anda belum menginstalnya, jalankan:
+```bash
+composer require symfony/expression-language
+```
+
+#### **2. Referensi Tag Templat**
+
+**2.1. Placeholder Gambar Generik**
+Tag gambar sekarang bersifat generik, memungkinkan Anda menempatkan beberapa gambar yang berbeda di mana pun di dalam templat Anda.
+
+*   **Sintaks**: `${img_namavariabel}`
+*   **Cara Kerja**: Perintah akan mencari placeholder yang diawali dengan `img_`. Bagian `namavariabel` (misalnya, `logo` dari `${img_logo}`) akan digunakan untuk mencari kunci yang sesuai di data JSON Anda. Nilai dari kunci tersebut harus berupa URL gambar atau path file lokal.
+*   **Perilaku Mode**:
+*   `--mode=merge` atau `--mode=pdf`: Gambar akan diunduh (jika URL) dan **disematkan (embedded)** ke dalam dokumen.
+*   `--mode=html` atau `--mode=blade`: Tag HTML `<img src="...">` akan dibuat.
+*   **Contoh Templat**:
+```
+${img_logo}
+...
+Gambar Produk: ${img_foto_produk}
+    ```
+*   **Contoh JSON**:
+```json
+{
+  "logo": "https://example.com/logo.png",
+  "foto_produk": "/path/ke/gambar/lokal.jpg"
+}
+    ```
+
+**2.2. Blok Kondisional Tingkat Lanjut**
+Blok kondisional sekarang lebih fleksibel. Semua blok kondisional harus ditutup dengan **`${endif}`**. **Catatan**: Blok kondisional bersarang (`if` di dalam `if` lain) tidak didukung.
+
+*   **Pengecekan Keberadaan Variabel (Shorthand)**
+*   **Sintaks**: `${if_namavariabel} ... ${endif}`
+*   **Penggunaan**: Menampilkan konten hanya jika kunci `namavariabel` ada di JSON Anda dan nilainya tidak kosong, null, atau false.
+*   **Contoh**: Blok di bawah ini hanya akan ditampilkan jika kunci `catatan` ada dan tidak kosong.
+```
+${if_catatan}
+Catatan Khusus:
+${catatan}
+${endif}
+        ```
+
+*   **Kondisional Berbasis Ekspresi**
+*   **Sintaks**: `${if: ekspresi} ... ${endif}`
+*   **Penggunaan**: Mengevaluasi ekspresi logika. Anda dapat menggunakan variabel dari JSON langsung berdasarkan namanya, dengan operator standar (`>`, `<`, `==`, `!=`, `and`, `or`, `not`).
+*   **Contoh**: Menampilkan peringatan untuk pesanan bernilai tinggi.
+```
+${if: total_faktur > 5000000 and pelanggan.level != 'premium'}
+Pembayaran di muka sebesar 10% diperlukan untuk pesanan ini.
+${endif}
+        ```
+
+**2.3. Perulangan Tabel dengan Teks dan Gambar**
+Perintah sekarang mendukung placeholder teks dan gambar di dalam baris tabel yang berulang, sempurna untuk katalog produk atau faktur detail.
+
+*   **Sintaks untuk Baris Tabel**:
+*   **Placeholder Teks**: `${item.namavariabel}`
+*   **Placeholder Gambar**: `${img_item.namavariabel}`
+*   **Placeholder Jangkar (Anchor)**: Salah satu kolom teks harus berfungsi sebagai "jangkar" untuk proses duplikasi. Secara konvensi, kita menggunakan `${item.no}`.
+
+*   **Contoh Visual Templat untuk Tabel Item**:
+Buat tabel ini di dalam templat `.docx` Anda. Terapkan format apa pun yang Anda inginkan pada baris tunggal ini.
+
+| **No** | **Gambar Produk** | **Deskripsi** | **Harga** |
+| :--- | :--- | :--- | :--- |
+| `${item.no}` | `${img_item.pictureUrl}` | `${item.name}` | `${item.price}` |
+
+*   **Contoh JSON untuk Perulangan Tabel**:
+Kunci dalam objek JSON Anda harus cocok dengan `namavariabel` pada placeholder Anda.
+
+```json
+{
+  "item_list": [
+    {
+      "name": "Paket Web Development Pro",
+      "price": "4.500.000",
+      "pictureUrl": "https://example.com/images/web-dev.png"
+    },
+    {
+      "name": "Cloud Hosting (1 Tahun)",
+      "price": "600.000",
+      "pictureUrl": "https://example.com/images/cloud.png"
+    }
+  ]
+}
+```

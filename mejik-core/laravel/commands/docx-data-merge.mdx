@@ -1,0 +1,477 @@
+---
+title: "DOCX Template Data Merge Commands"
+description: "Merging json data with docx template"
+---
+
+### Final Code: `app/Console/Commands/GenerateInvoiceFromTemplate.php`
+
+This is the complete and final code for your Artisan command. It includes logic to handle images from both URLs and local file paths.
+
+```php
+<?php
+
+namespace App\Console\Commands;
+
+use Illuminate\Console\Command;
+use Illuminate\Support\Facades\File;
+use Illuminate\Support\Str;
+use PhpOffice\PhpWord\TemplateProcessor;
+
+class GenerateInvoiceFromTemplate extends Command
+{
+    /**
+     * The name and signature of the console command.
+     * @var string
+     */
+    protected $signature = 'invoice:generate
+                            {--data=invoice_data.json : The path to the JSON data file}
+                            {--template=storage/app/templates/invoice_template.docx : The path to the DOCX template file}
+                            {--output=storage/app/invoices/invoice_output.docx : The path for the generated DOCX file}';
+
+    /**
+     * The console command description.
+     * @var string
+     */
+    protected $description = 'Generate a DOCX invoice from a template and a JSON data file';
+
+    /**
+     * Execute the console command.
+     */
+    public function handle()
+    {
+        // 1. Get file paths from options
+        $dataPath = $this->option('data');
+        $templatePath = $this->option('template');
+        $outputPath = $this->option('output');
+
+        // 2. Validate inputs
+        if (!File::exists($dataPath)) {
+            $this->error("Data file not found at: {$dataPath}");
+            return 1;
+        }
+        if (!File::exists($templatePath)) {
+            $this->error("Template file not found at: {$templatePath}");
+            return 1;
+        }
+
+        // 3. Load and parse JSON data
+        $data = json_decode(File::get($dataPath), true);
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            $this->error("Invalid JSON in data file. Error: " . json_last_error_msg());
+            return 1;
+        }
+
+        try {
+            // 4. Load the DOCX template
+            $templateProcessor = new TemplateProcessor($templatePath);
+
+            // 5. Handle Image Replacement
+            if (isset($data['logo']) && !empty($data['logo'])) {
+                $localImagePath = $this->getLocalImagePath($data['logo'], $data['logo_is_url'] ?? false);
+
+                if ($localImagePath) {
+                    $templateProcessor->setImageValue('logo', [
+                        'path' => $localImagePath,
+                        'width' => 150,
+                        'ratio' => true
+                    ]);
+                    // Clean up temporary image if it was downloaded
+                    if ($data['logo_is_url'] ?? false) {
+                        File::delete($localImagePath);
+                    }
+                } else {
+                    $this->warn("Could not process image for 'logo'. Removing placeholder.");
+                    $templateProcessor->setValue('logo', ''); // Remove placeholder if image fails
+                }
+            }
+
+
+            // 6. Handle Conditional Block (Bill To)
+            if (isset($data['bill_present']) && $data['bill_present']) {
+                $templateProcessor->cloneBlock('if_bill', 1, true, false, [
+                    ['bill_name' => $data['bill_to']['name'] ?? ''],
+                    ['bill_addr1' => $data['bill_to']['addr1'] ?? ''],
+                    ['bill_addr2' => $data['bill_to']['addr2'] ?? ''],
+                    ['bill_phone' => $data['bill_to']['phone'] ?? ''],
+                    ['bill_email' => $data['bill_to']['email'] ?? ''],
+                ]);
+            } else {
+                $templateProcessor->deleteBlock('if_bill');
+            }
+
+            // 7. Handle Simple Value Replacements
+            $templateProcessor->setValues([
+                'company_name' => $data['company_name'] ?? '',
+                'company_address' => $data['company_address'] ?? '',
+                'company_phone' => $data['company_phone'] ?? '',
+                'company_email' => $data['company_email'] ?? '',
+                'invoice_number' => $data['invoice_number'] ?? '',
+                'invoice_date' => $data['invoice_date'] ?? '',
+                'invoice_payment' => $data['invoice_payment'] ?? '',
+                'invoice_subtotal' => number_format($data['invoice_subtotal'] ?? 0, 2),
+                'company_tax_name' => $data['company_tax_name'] ?? 'Tax',
+                'invoice_tax' => number_format($data['invoice_tax'] ?? 0, 2),
+                'invoice_fees' => number_format($data['invoice_fees'] ?? 0, 2),
+                'invoice_total' => number_format($data['invoice_total'] ?? 0, 2),
+                'department' => $data['department'] ?? '',
+                'cc_list' => isset($data['cc_list']) ? implode(', ', $data['cc_list']) : ''
+            ]);
+
+            // 8. Handle Table (Loop)
+            $items = $data['item_list'] ?? [];
+            if (!empty($items)) {
+                $templateProcessor->cloneRow('item.no', count($items));
+                foreach ($items as $index => $item) {
+                    $rowNumber = $index + 1;
+                    $templateProcessor->setValue('item.no#' . $rowNumber, $rowNumber);
+                    $templateProcessor->setValue('item.name#' . $rowNumber, $item['name'] ?? '');
+                    $templateProcessor->setValue('item.quantity#' . $rowNumber, $item['quantity'] ?? 0);
+                    $templateProcessor->setValue('item.total#' . $rowNumber, number_format($item['total'] ?? 0, 2));
+                    $templateProcessor->setValue('item.amount#' . $rowNumber, number_format($item['amount'] ?? 0, 2));
+                }
+            } else {
+                // If there are no items, you might want to remove the template row
+                $templateProcessor->cloneRow('item.no', 0);
+            }
+
+            // 9. Save the final document
+            File::ensureDirectoryExists(dirname($outputPath));
+            $templateProcessor->saveAs($outputPath);
+
+            $this->info("Invoice generated successfully at: {$outputPath}");
+            return 0;
+
+        } catch (\Exception $e) {
+            $this->error("An error occurred: " . $e->getMessage());
+            return 1;
+        }
+    }
+
+    /**
+     * Get the local file path for an image, downloading it if it's a URL.
+     *
+     * @param string $path
+     * @param bool $isUrl
+     * @return string|null
+     */
+    private function getLocalImagePath(string $path, bool $isUrl): ?string
+    {
+        if ($isUrl) {
+            $contents = @file_get_contents($path);
+            if ($contents === false) {
+                $this->warn("Could not download image from URL: {$path}");
+                return null;
+            }
+            $tempPath = storage_path('app/temp/' . Str::random(16));
+            File::ensureDirectoryExists(dirname($tempPath));
+            File::put($tempPath, $contents);
+            return $tempPath;
+        }
+
+        if (File::exists($path)) {
+            return $path;
+        }
+
+        $this->warn("Local image file not found at: {$path}");
+        return null;
+    }
+}
+```
+
+---
+
+## English Documentation
+
+### **DOCX Invoice Generator Guide**
+
+This guide explains how to use the Laravel Artisan command to generate `.docx` invoices from a template and a JSON data file.
+
+#### **1. Setup and Installation**
+
+1.  **Prerequisites**:
+*   A working Laravel project.
+*   Composer installed.
+*   The `php-zip` PHP extension must be enabled on your server.
+
+2.  **Install PHPWord**:
+Navigate to your project's root and run:
+```bash
+composer require phpoffice/phpword
+    ```
+
+3.  **File Structure**:
+*   **Command**: `app/Console/Commands/GenerateInvoiceFromTemplate.php` (place the code above here).
+*   **Template**: `storage/app/templates/invoice_template.docx`
+*   **Data**: `invoice_data.json` (in the project root, or specify a path).
+*   **Output**: `storage/app/invoices/` (will be created automatically).
+
+#### **2. Command Usage**
+
+The command signature defines how you run the command and what options are available.
+
+**Command Signature:**
+```bash
+php artisan invoice:generate {--data=} {--template=} {--output=}
+```
+
+**Options:**
+*   `--data`: Path to the JSON data file. **Default**: `invoice_data.json`.
+*   `--template`: Path to the `.docx` template file. **Default**: `storage/app/templates/invoice_template.docx`.
+*   `--output`: Path where the final `.docx` will be saved. **Default**: `storage/app/invoices/invoice_output.docx`.
+
+**Examples:**
+*   **Run with defaults:**
+```bash
+php artisan invoice:generate
+    ```
+*   **Specify custom paths:**
+```bash
+php artisan invoice:generate --data="data/client-A.json" --output="invoices/INV-001.docx"
+    ```
+
+#### **3. Template Tag Reference**
+
+Use these tags inside your `.docx` template file. **Important:** All formatting (bold, color, size) applied to a tag in the template will be inherited by the replacement data.
+
+**3.1. Simple Variables**
+Replaces a tag with a string value.
+
+*   **Syntax**: `${variable_name}`
+*   **Example Template**: `Invoice Number: ${invoice_number}`
+*   **Example JSON**:
+```json
+{
+  "invoice_number": "INV-2023-00123"
+}
+    ```
+
+**3.2. Image Insertion**
+Replaces a tag with an image.
+
+*   **Syntax**: `${image_placeholder}`
+*   **Example Template**: Place a `${logo}` tag at the top of your document.
+*   **Usage (from URL)**: The system downloads the image and places it.
+```json
+{
+  "logo": "https://upload.wikimedia.org/wikipedia/commons/a/ab/Laravel-logo.png",
+  "logo_is_url": true
+}
+    ```
+*   **Usage (from Local File)**: The system uses an image from your server's filesystem. Use an absolute path.
+```json
+{
+  "logo": "/var/www/my-project/storage/app/logos/company_logo.png",
+  "logo_is_url": false
+}
+    ```
+
+**3.3. Conditional Blocks**
+Shows or hides a block of content based on a boolean value.
+
+*   **Syntax**:
+```javascript
+${block_name}
+Content to show/hide. Can contain other variables like `${some_var}`.
+${/block_name}
+    ```
+*   **Example Template**:
+```javascript
+${if_bill}
+Bill to:
+${bill_name}
+${bill_addr1}
+${/if_bill}
+    ```
+*   **Example JSON**: If `bill_present` is `true`, the block is shown and its internal tags are processed. If `false` or missing, the entire block is removed.
+```json
+{
+  "bill_present": true,
+  "bill_to": {
+    "name": "Acme Corp",
+    "addr1": "123 Main St"
+  }
+}
+    ```
+
+**3.4. Table Row Looping**
+Dynamically creates table rows from an array of objects.
+
+*   **Syntax**: Create a table in your `.docx` file with a single row meant for templating. Place tags like `${item.name}` inside its cells.
+*   **Example Template Table Row**:
+
+| No | Item | Quantity | Amount |
+| :--- | :--- | :--- | :--- |
+| `${item.no}` | `${item.name}` | `${item.quantity}` | `${item.amount}` |
+
+*   **How it Works**: The code finds the row containing `${item.no}` (or any variable you choose as the anchor) and duplicates it for every object in the `item_list` array.
+*   **Example JSON**:
+```json
+{
+  "item_list": [
+    { "name": "Web Development", "quantity": 1, "amount": 4500.00 },
+    { "name": "Monthly Support", "quantity": 5, "amount": 750.00 }
+  ]
+}
+    ```
+
+**3.5. Simple Lists (from Array)**
+Converts a simple array of strings into a single comma-separated string.
+
+*   **Syntax**: `${variable_name}`
+*   **Example Template**: `CC: ${cc_list}`
+*   **How it Works**: The code takes the array and joins its elements with ", ".
+*   **Example JSON**:
+```json
+{
+  "cc_list": ["manager@acme.corp", "project.lead@laravelsolutions.com"]
+}
+    ```
+
+---
+
+## Dokumentasi Bahasa Indonesia
+
+### **Panduan Generator Faktur DOCX**
+
+Panduan ini menjelaskan cara menggunakan perintah Artisan Laravel untuk menghasilkan faktur `.docx` dari sebuah templat dan file data JSON.
+
+#### **1. Pengaturan dan Instalasi**
+
+1.  **Prasyarat**:
+*   Proyek Laravel yang sudah berjalan.
+*   Composer sudah terinstal.
+*   Ekstensi PHP `php-zip` harus diaktifkan di server Anda.
+
+2.  **Instal PHPWord**:
+Masuk ke direktori root proyek Anda dan jalankan:
+```bash
+composer require phpoffice/phpword
+    ```
+
+3.  **Struktur File**:
+*   **Perintah (Command)**: `app/Console/Commands/GenerateInvoiceFromTemplate.php` (letakkan kode di atas di sini).
+*   **Templat**: `storage/app/templates/invoice_template.docx`
+*   **Data**: `invoice_data.json` (di root proyek, atau tentukan path lain).
+*   **Output**: `storage/app/invoices/` (folder akan dibuat secara otomatis).
+
+#### **2. Penggunaan Perintah**
+
+Struktur perintah (command signature) mendefinisikan cara Anda menjalankan perintah dan opsi apa saja yang tersedia.
+
+**Struktur Perintah:**
+```bash
+php artisan invoice:generate {--data=} {--template=} {--output=}
+```
+
+**Opsi:**
+*   `--data`: Path ke file data JSON. **Default**: `invoice_data.json`.
+*   `--template`: Path ke file templat `.docx`. **Default**: `storage/app/templates/invoice_template.docx`.
+*   `--output`: Path tempat file `.docx` akhir akan disimpan. **Default**: `storage/app/invoices/invoice_output.docx`.
+
+**Contoh:**
+*   **Jalankan dengan nilai default:**
+```bash
+php artisan invoice:generate
+    ```
+*   **Tentukan path kustom:**
+```bash
+php artisan invoice:generate --data="data/klien-A.json" --output="faktur/INV-001.docx"
+    ```
+
+#### **3. Referensi Tag Templat**
+
+Gunakan tag-tag ini di dalam file templat `.docx` Anda. **Penting:** Semua format (tebal, warna, ukuran) yang diterapkan pada sebuah tag di templat akan diwarisi oleh data penggantinya.
+
+**3.1. Variabel Sederhana**
+Mengganti sebuah tag dengan nilai string.
+
+*   **Sintaks**: `${nama_variabel}`
+*   **Contoh Templat**: `Nomor Faktur: ${invoice_number}`
+*   **Contoh JSON**:
+```json
+{
+  "invoice_number": "INV-2023-00123"
+}
+    ```
+
+**3.2. Penyisipan Gambar**
+Mengganti sebuah tag dengan gambar.
+
+*   **Sintaks**: `${penanda_gambar}`
+*   **Contoh Templat**: Letakkan tag `${logo}` di bagian atas dokumen Anda.
+*   **Penggunaan (dari URL)**: Sistem akan mengunduh gambar dan menempatkannya.
+```json
+{
+  "logo": "https://upload.wikimedia.org/wikipedia/commons/a/ab/Laravel-logo.png",
+  "logo_is_url": true
+}
+    ```
+*   **Penggunaan (dari File Lokal)**: Sistem akan menggunakan gambar dari filesystem server Anda. Gunakan path absolut.
+```json
+{
+  "logo": "/var/www/proyek-saya/storage/app/logos/logo_perusahaan.png",
+  "logo_is_url": false
+}
+    ```
+
+**3.3. Blok Kondisional**
+Menampilkan atau menyembunyikan sebuah blok konten berdasarkan nilai boolean.
+
+*   **Sintaks**:
+```javascript
+${nama_blok}
+Konten yang akan ditampilkan/disembunyikan. Bisa berisi variabel lain seperti `${var_lain}`.
+${/nama_blok}
+    ```
+*   **Contoh Templat**:
+```javascript
+${if_bill}
+Tagihan untuk:
+${bill_name}
+${bill_addr1}
+${/if_bill}
+    ```
+*   **Contoh JSON**: Jika `bill_present` bernilai `true`, blok akan ditampilkan dan tag di dalamnya akan diproses. Jika `false` atau tidak ada, seluruh blok akan dihapus.
+```json
+{
+  "bill_present": true,
+  "bill_to": {
+    "name": "PT. Acme",
+    "addr1": "Jl. Utama 123"
+  }
+}
+    ```
+
+**3.4. Perulangan Baris Tabel**
+Membuat baris tabel secara dinamis dari sebuah array objek.
+
+*   **Sintaks**: Buat sebuah tabel di file `.docx` Anda dengan satu baris tunggal yang ditujukan sebagai templat. Letakkan tag seperti `${item.name}` di dalam sel-selnya.
+*   **Contoh Baris Templat Tabel**:
+
+| No | Barang | Jumlah | Total |
+| :--- | :--- | :--- | :--- |
+| `${item.no}` | `${item.name}` | `${item.quantity}` | `${item.amount}` |
+
+*   **Cara Kerja**: Kode akan menemukan baris yang berisi `${item.no}` (atau variabel apa pun yang Anda pilih sebagai jangkar) dan menduplikasinya untuk setiap objek di dalam array `item_list`.
+*   **Contoh JSON**:
+```json
+{
+  "item_list": [
+    { "name": "Jasa Web Development", "quantity": 1, "amount": 4500.00 },
+    { "name": "Dukungan Bulanan", "quantity": 5, "amount": 750.00 }
+  ]
+}
+    ```
+
+**3.5. Daftar Sederhana (dari Array)**
+Mengubah sebuah array string sederhana menjadi satu string yang dipisahkan koma.
+
+*   **Sintaks**: `${nama_variabel}`
+*   **Contoh Templat**: `Tembusan (CC): ${cc_list}`
+*   **Cara Kerja**: Kode akan mengambil array dan menggabungkan elemen-elemennya dengan ", ".
+*   **Contoh JSON**:
+```json
+{
+  "cc_list": ["manager@acme.corp", "project.lead@laravelsolutions.com"]
+}
+    ```

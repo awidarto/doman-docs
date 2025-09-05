@@ -1,0 +1,483 @@
+---
+title: "DOCX Generator Commands"
+description: "From DOCX template to blade template, and data merge to html and pdf"
+---
+
+### 1. Comprehensive Documentation (English & Bahasa Indonesia)
+
+## English Documentation
+
+### **Guide to Creating Advanced DOCX Templates for `docx:generate`**
+
+This guide explains the full syntax for the `docx:generate` command, a powerful tool for generating documents from `.docx` templates.
+
+#### **1. Setup**
+Requires `composer require symfony/expression-language`.
+
+#### **2. Template Tag Reference**
+
+**2.1. Simple & Nested Variables**
+*   **Syntax**: `${variable}` or `${object.key}`
+*   **Example**: `${order.customer.name}`
+
+**2.2. Generic Image Placeholders**
+*   **Syntax**: `${img_fieldname}` or `${img_object.key}`
+*   **Example**: `${img_logo}`
+
+**2.3. Advanced Conditional Blocks**
+*   **Syntax**: `${if_fieldname} ... ${endif}` or `${if: expression} ... ${endif}`
+*   **Note**: Supports dot notation. Nesting is not supported.
+
+**2.4. Bulleted and Numbered Lists**
+Generates native Word lists from a simple array of strings.
+*   **Syntax**: `${ul_fieldname}` (bulleted) or `${ol_fieldname}` (numbered).
+*   **Required Template Setup**: You must pre-define bullet and number styles in your template by creating and then deleting dummy lists. The command will then use these registered styles.
+
+**2.5. Generic Foreach Blocks**
+This is the most powerful feature, allowing you to loop over any block of content, from paragraphs to complex table rows.
+
+*   **Syntax**:
+```
+${foreach_arrayname as item}
+  Content to be repeated, using ${item.fieldname}.
+${endforeach}
+    ```
+*   **`arrayname`**: The key in your JSON that holds an array of objects (e.g., `item_list`). Supports dot notation (e.g., `order.products`).
+*   **`item`**: The variable name you will use for each element inside the loop.
+*   **Multiple Placeholders in a Cell**: You can combine multiple placeholders and text in the same paragraph or table cell, and they will be rendered correctly. Example: `**${item.name}** (SKU: ${item.sku})`
+*   **Note**: Nesting `foreach` blocks is not currently supported.
+
+## Bahasa Indonesia
+
+### **Panduan Membuat Templat DOCX Tingkat Lanjut**
+
+Panduan ini menjelaskan sintaks lengkap untuk perintah `docx:generate`, sebuah alat canggih untuk menghasilkan dokumen dari templat `.docx`.
+
+#### **1. Pengaturan**
+Membutuhkan `composer require symfony/expression-language`.
+
+#### **2. Referensi Tag Templat**
+
+**2.1. Variabel Sederhana & Bersarang**
+*   **Sintaks**: `${variabel}` atau `${objek.key}`
+*   **Contoh**: `${pesanan.pelanggan.nama}`
+
+**2.2. Placeholder Gambar Generik**
+*   **Sintaks**: `${img_namavariabel}` atau `${img_objek.key}`
+*   **Contoh**: `${img_logo}`
+
+**2.3. Blok Kondisional Tingkat Lanjut**
+*   **Sintaks**: `${if_namavariabel} ... ${endif}` atau `${if: ekspresi} ... ${endif}`
+*   **Catatan**: Mendukung notasi titik. Perulangan bersarang tidak didukung.
+
+**2.4. Daftar Berpoin (Bulleted) dan Bernomor**
+Menghasilkan daftar Word asli dari sebuah array string sederhana.
+*   **Sintaks**: `${ul_namavariabel}` (poin) atau `${ol_namavariabel}` (nomor).
+*   **Pengaturan Templat (Wajib)**: Anda harus mendefinisikan gaya daftar terlebih dahulu di templat Anda dengan cara membuat lalu menghapus daftar dummy. Perintah akan menggunakan gaya yang terdaftar tersebut.
+
+**2.5. Blok Foreach Generik**
+Ini adalah fitur paling kuat, memungkinkan Anda melakukan perulangan pada blok konten apa pun, dari paragraf hingga baris tabel yang kompleks.
+
+*   **Sintaks**:
+```
+${foreach_namaarray as item}
+  Konten yang akan diulang, menggunakan ${item.namavariabel}.
+${endforeach}
+    ```
+*   **`namaarray`**: Kunci di JSON Anda yang berisi array objek (mis., `item_list`). Mendukung notasi titik (mis., `pesanan.produk`).
+*   **`item`**: Nama variabel yang akan Anda gunakan untuk setiap elemen di dalam perulangan.
+*   **Beberapa Placeholder dalam Satu Sel**: Anda dapat menggabungkan beberapa placeholder dan teks dalam paragraf atau sel tabel yang sama, dan semuanya akan dirender dengan benar. Contoh: `**${item.nama}** (SKU: ${item.sku})`
+*   **Catatan**: `foreach` bersarang saat ini tidak didukung.
+
+---
+### 3. Example DOCX Template (Text to Copy)
+
+This template is designed to test every feature.
+
+**Instructions to create the template:**
+1.  Open a new, blank document in Microsoft Word (or a similar editor).
+2.  **Important**: First, create a dummy bulleted list (type `- item` and press enter). Then, create a dummy numbered list (type `1. item` and press enter). **Delete the text of both lists**, leaving the empty bullet/number points on the page. This registers the list styles. You can now delete those empty points.
+3.  Copy the entire text block below and paste it into your document.
+4.  Apply formatting as described in the "Formatting Guide" section after the text.
+5.  Save the file as `storage/app/templates/full_report_template.docx`.
+
+```
+${img_logo}
+
+Order Summary & Report
+
+Report Date:
+${report_date}
+Order ID:
+${order.id}
+
+${if_order.customer}
+Customer Details:
+${order.customer.name}
+${order.customer.email}
+${endif}
+
+Product Details
+Image	Description & SKU	Unit Price	Qty	Total
+${foreach_order.products as item}
+${img_item.imageUrl}	${item.name} (SKU: ${item.sku})
+${item.description}	${item.unit_price}	${item.quantity}	${item.total_price}
+${endforeach}
+
+Total:	${order.total}
+
+${if: order.total > 500}
+Note: Orders over $500 qualify for free shipping on the next purchase.
+${endif}
+
+Key Benefits of Your Purchase:
+${ul_benefits}
+
+Next Steps for Your Order:
+${ol_next_steps}
+
+```
+
+**Formatting Guide:**
+1.  **"Order Summary & Report"**: Make this text large and bold (e.g., font size 24).
+2.  **Report Details**: Select the block from "Report Date:" to `${order.id}` and align it to the right.
+3.  **Create the Product Table**:
+*   Select the text from "Image Description & SKU..." down to the line ending with `${item.total_price}`.
+*   Use the "Convert Text to Table" feature in your word processor. Specify **5 columns**.
+*   Make the header row ("Image", "Description...", etc.) bold.
+*   Center the content in the "Image" column.
+
+4.  **Create the Totals Table**:
+*   Select the line "Total: `${order.total}`".
+*   Convert this text to a **2-column** table.
+*   Align the entire small table to the right.
+*   Make the contents of both cells bold.
+
+---
+### 4. Example `data.json`
+
+Save this as `data.json` in your project root. It provides data for every placeholder in the template.
+
+```json
+{
+  "logo": "https://i.imgur.com/g4g4g2C.png",
+  "report_date": "November 29, 2023",
+  "order": {
+    "id": "ORD-2023-987B",
+    "total": 674.98,
+    "customer": {
+      "name": "Innovate Dynamics",
+      "email": "jane.doe@innovate-dynamics.com"
+    },
+    "products": [
+      {
+        "name": "Quantum Widget Pro",
+        "sku": "QW-PRO-001",
+        "description": "Next-generation widget with enhanced durability.",
+        "quantity": 2,
+        "unit_price": "299.99",
+        "total_price": "599.98",
+        "imageUrl": "https://i.imgur.com/Gz7e1E9.png"
+      },
+      {
+        "name": "Standard Maintenance Kit",
+        "sku": "SMK-STD-004",
+        "description": "Includes all necessary tools for standard upkeep.",
+        "quantity": 1,
+        "unit_price": "75.00",
+        "total_price": "75.00",
+        "imageUrl": "https://i.imgur.com/mO2rN3b.png"
+      }
+    ]
+  },
+  "benefits": [
+    "Premium Quality Materials",
+    "3-Year Extended Warranty",
+    "24/7 Customer Support Access"
+  ],
+  "next_steps": [
+    "Your order will be processed within 24 hours.",
+    "A shipping confirmation will be sent to your email.",
+    "Track your package using the provided tracking number."
+  ]
+}
+```
+
+### 5. How to Test
+
+Run these commands from your project root:
+```bash
+# To generate a DOCX file
+php artisan docx:generate --template="storage/app/templates/full_report_template.docx" --data="data.json" --output="storage/app/output/full_report" --mode=merge
+
+# To generate a PDF file
+php artisan docx:generate --template="storage/app/templates/full_report_template.docx" --data="data.json" --output="storage/app/output/full_report" --mode=pdf
+```
+
+### 6. The Complete `DocxGenerateCommand.php` Code
+
+This is the final and complete code for the command. Save this file as `app/Console/Commands/DocxGenerateCommand.php`.
+
+```php
+<?php
+
+namespace App\Console\Commands;
+
+use Illuminate\Console\Command;
+use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\File;
+use Illuminate\Support\Str;
+use PhpOffice\PhpWord\IOFactory;
+use PhpOffice\PhpWord\Settings;
+use PhpOffice\PhpWord\TemplateProcessor;
+use Symfony\Component\ExpressionLanguage\ExpressionLanguage;
+
+class DocxGenerateCommand extends Command
+{
+    /**
+     * The name and signature of the console command.
+     * @var string
+     */
+    protected $signature = 'docx:generate
+                            {--template=storage/app/templates/invoice_template.docx : The path to the DOCX template file}
+                            {--output=storage/app/output/result : The base path for the generated file (extension is added automatically)}
+                            {--data=invoice_data.json : The path to the JSON data file (ignored in "blade" mode)}
+                            {--mode=merge : The output mode (merge, blade, html, pdf)}';
+
+    /**
+     * The console command description.
+     * @var string
+     */
+    protected $description = 'Generate DOCX, HTML, PDF, or Blade files from a DOCX template.';
+
+    private $expressionLanguage;
+
+    public function __construct()
+    {
+        parent::__construct();
+        $this->expressionLanguage = new ExpressionLanguage();
+    }
+
+    public function handle()
+    {
+        $mode = $this->option('mode');
+        $templatePath = $this->option('template');
+        $outputPath = $this->option('output');
+        $dataPath = $this->option('data');
+
+        if (!in_array($mode, ['merge', 'blade', 'html', 'pdf'])) { $this->error("Invalid mode..."); return 1; }
+        if (!File::exists($templatePath)) { $this->error("Template not found..."); return 1; }
+
+        $finalOutputPath = $this->getFinalOutputPath($outputPath, $mode);
+        File::ensureDirectoryExists(dirname($finalOutputPath));
+
+        $processedTemplatePath = null;
+        try {
+            if ($mode === 'blade') {
+                $this->generateBlade($templatePath, $finalOutputPath);
+            } else {
+                if (!File::exists($dataPath)) { $this->error("Data file not found..."); return 1; }
+                $data = json_decode(File::get($dataPath), true);
+                if (json_last_error() !== JSON_ERROR_NONE) { throw new \Exception("Invalid JSON..."); }
+
+                $processedTemplatePath = $this->preprocessTemplate($templatePath, $data);
+                $templateProcessor = new TemplateProcessor($processedTemplatePath);
+
+                $this->processPlaceholders($templateProcessor, $data, $mode);
+
+                $this->saveOutput($templateProcessor, $finalOutputPath, $mode);
+            }
+            $this->info(strtoupper($mode) . " file generated successfully at: {$finalOutputPath}");
+        } catch (\Exception $e) {
+            $this->error("An error occurred: " . $e->getMessage());
+            return 1;
+        } finally {
+            if ($processedTemplatePath && File::exists($processedTemplatePath)) {
+                File::delete($processedTemplatePath);
+            }
+        }
+        return 0;
+    }
+
+    private function preprocessTemplate(string $templatePath, array $data): string
+    {
+        $tempPath = storage_path('app/temp/' . Str::random(16) . '.docx');
+        File::copy($templatePath, $tempPath);
+        $zip = new \ZipArchive();
+        $zip->open($tempPath);
+        $documentXml = $zip->getFromName('word/document.xml');
+        $documentXml = str_replace('</w:t></w:r><w:r><w:t>', '', $documentXml);
+
+        // --- Generic Foreach Block Processing ---
+        $foreachRegex = '/\${foreach_([a-zA-Z0-9_.]+) as ([a-zA-Z0-9_]+)}(.*?)\${endforeach}/s';
+        while (preg_match($foreachRegex, $documentXml)) {
+            $documentXml = preg_replace_callback($foreachRegex, function ($matches) use ($data) {
+                $arrayName = $matches[1];
+                $itemName = $matches[2];
+                $blockContent = $matches[3];
+
+                $items = Arr::get($data, $arrayName, []);
+                if (!is_array($items)) { return ''; }
+
+                $resultXml = '';
+                foreach ($items as $index => $itemData) {
+                    $itemBlock = $blockContent;
+                    $itemBlock = preg_replace('/\${' . $itemName . '\.([a-zA-Z0-9_]+)}/', '\${' . $arrayName . '.' . $index . '.$1}', $itemBlock);
+                    $itemBlock = preg_replace('/\${img_' . $itemName . '\.([a-zA-Z0-9_]+)}/', '\${img_' . $arrayName . '.' . $index . '.$1}', $itemBlock);
+                    $resultXml .= $itemBlock;
+                }
+                return $resultXml;
+            }, $documentXml);
+        }
+
+        // --- Conditional Block Processing ---
+        $ifRegex = '/\${if([:_])(.+?)}(.*?)\${endif}/s';
+        while (preg_match($ifRegex, $documentXml)) {
+            $documentXml = preg_replace_callback($ifRegex, function ($matches) use ($data) {
+                $type = $matches[1];
+                $condition = html_entity_decode($matches[2]);
+                $content = $matches[3];
+                $result = false;
+                try {
+                    if ($type === '_') { $result = !empty(Arr::get($data, $condition)); }
+                    else { $result = $this->expressionLanguage->evaluate($condition, $data); }
+                } catch (\Exception $e) { $this->warn("Expression Error: {$e->getMessage()}"); }
+                return $result ? $content : '';
+            }, $documentXml);
+        }
+
+        $zip->addFromString('word/document.xml', $documentXml);
+        $zip->close();
+        return $tempPath;
+    }
+
+    private function processPlaceholders(TemplateProcessor $templateProcessor, array $data, string $mode)
+    {
+        $templateVariables = $templateProcessor->getVariables();
+
+        foreach ($templateVariables as $variable) {
+            // Handle Images
+            if (strpos($variable, 'img_') === 0) {
+                $fieldName = substr($variable, 4);
+                $imagePath = Arr::get($data, $fieldName);
+
+                if ($imagePath) {
+                    if ($mode === 'html' || $mode === 'blade') {
+                        $imageTagXml = '<w:p><w:r><w:t>&lt;img src=&quot;' . htmlspecialchars($imagePath) . '&quot; alt=&quot;' . $fieldName . '&quot; style=&quot;width:150px; height:auto;&quot; &gt;</w:t></w:r></w:p>';
+                        $templateProcessor->setValue($variable, $imageTagXml);
+                    } else {
+                        $isUrl = preg_match('/^https?:\/\//', $imagePath);
+                        $localPath = $this->getLocalImagePath($imagePath, $isUrl);
+                        if ($localPath) {
+                            $templateProcessor->setImageValue($variable, ['path' => $localPath, 'width' => 150, 'ratio' => true]);
+                            if ($isUrl) File::delete($localPath);
+                        } else { $templateProcessor->setValue($variable, ''); }
+                    }
+                } else { $templateProcessor->setValue($variable, ''); }
+            }
+            // Handle Lists
+            else if (strpos($variable, 'ul_') === 0 || strpos($variable, 'ol_') === 0) {
+                $isOl = strpos($variable, 'ol_') === 0;
+                $fieldName = substr($variable, 3);
+                $listData = Arr::get($data, $fieldName, []);
+                if (is_array($listData)) {
+                    $listXml = $this->generateListXml($listData, $isOl ? 2 : 1);
+                    $templateProcessor->setValue($variable, $listXml);
+                }
+            }
+            // Handle all other text placeholders (simple, nested, and foreach-expanded)
+            else {
+                $value = Arr::get($data, $variable, '');
+                if (is_scalar($value)) {
+                    $templateProcessor->setValue($variable, $value);
+                }
+            }
+        }
+    }
+
+    private function generateListXml(array $items, int $numId): string
+    {
+        $listXml = '';
+        foreach ($items as $item) {
+            $escapedItem = htmlspecialchars($item, ENT_XML1, 'UTF-8');
+            $listXml .= '<w:p><w:pPr><w:pStyle w:val="ListParagraph"/><w:numPr><w:ilvl w:val="0"/><w:numId w:val="' . $numId . '"/></w:numPr></w:pPr><w:r><w:t>' . $escapedItem . '</w:t></w:r></w:p>';
+        }
+        return '</w:t></w:r></w:p>' . $listXml . '<w:p><w:r><w:t>';
+    }
+
+    private function generateBlade(string $templatePath, string $finalOutputPath) {
+        $phpWord = IOFactory::load($templatePath);
+        $htmlWriter = IOFactory::createWriter($phpWord, 'HTML');
+        $htmlContent = $htmlWriter->getWriterPart('Body')->write();
+        $bladeContent = preg_replace_callback('/\$\{(.+?)\}/', function ($matches) {
+            $placeholder = $matches[1];
+            if (preg_match('/^foreach_([a-zA-Z0-9_.]+) as ([a-zA-Z0-9_]+)/', $placeholder, $loopMatches)) { return "@foreach(\${$loopMatches[1]} as \${$loopMatches[2]})"; }
+            if ($placeholder === 'endforeach') { return "@endforeach"; }
+            if (preg_match('/^if:\s*(.*)/', $placeholder, $condMatches)) {
+                $expression = preg_replace_callback('/([a-zA-Z0-9_.]+)/', fn($v) => '$' . str_replace('.', '->', $v[0]), $condMatches[1]);
+                return "@if({$expression})";
+            }
+            if (preg_match('/^if_(.*)/', $placeholder, $condMatches)) {
+                $varName = str_replace('.', '->', $condMatches[1]);
+                return "@if(!empty(\${$varName}))";
+            }
+            if ($placeholder === 'endif') { return "@endif"; }
+            if (preg_match('/^img_(.*)/', $placeholder, $imgMatches)) {
+                $varName = str_replace('.', '->', $imgMatches[1]);
+                return '<img src="{{ $' . $varName . ' ?? \'\' }}" style="width:150px; height:auto;" alt="">';
+            }
+            if (preg_match('/^ul_(.*)/', $placeholder, $listMatches)) {
+                $varName = $listMatches[1];
+                return "<ul style='margin:0; padding-left:20px;'>@foreach(\${$varName} ?? [] as \$item)<li>{{ \$item }}</li>@endforeach</ul>";
+            }
+            if (preg_match('/^ol_(.*)/', $placeholder, $listMatches)) {
+                $varName = $listMatches[1];
+                return "<ol style='margin:0; padding-left:20px;'>@foreach(\${$varName} ?? [] as \$item)<li>{{ \$item }}</li>@endforeach</ol>";
+            }
+            $varName = str_replace('.', '->', $placeholder);
+            return "{{ \${$varName} ?? '' }}";
+        }, $htmlContent);
+        $this->warn("Blade conversion is an approximation. Review the generated file for correctness.");
+        File::put($finalOutputPath, $bladeContent);
+    }
+
+    private function saveOutput(TemplateProcessor $templateProcessor, string $finalOutputPath, string $mode) {
+        if ($mode === 'merge') {
+            $templateProcessor->saveAs($finalOutputPath);
+            return;
+        }
+        $tempDocxPath = storage_path('app/temp/' . Str::random(16) . '.docx');
+        try {
+            $templateProcessor->saveAs($tempDocxPath);
+            $phpWord = IOFactory::load($tempDocxPath);
+            if ($mode === 'html') { IOFactory::createWriter($phpWord, 'HTML')->save($finalOutputPath); }
+            if ($mode === 'pdf') {
+                if (!class_exists(\Dompdf\Dompdf::class)) { throw new \Exception('PDF requires DomPDF...'); }
+                Settings::setPdfRendererName(Settings::PDF_RENDERER_DOMPDF); Settings::setPdfRendererPath('.');
+                IOFactory::createWriter($phpWord, 'PDF')->save($finalOutputPath);
+            }
+        } finally {
+            if (File::exists($tempDocxPath)) { File::delete($tempDocxPath); }
+        }
+    }
+
+    private function getLocalImagePath(string $path, bool $isUrl): ?string {
+        if ($isUrl) {
+            $contents = @file_get_contents($path);
+            if ($contents === false) { $this->warn("Could not download image..."); return null; }
+            $tempPath = storage_path('app/temp/' . Str::random(16) . '.' . pathinfo(parse_url($path, PHP_URL_PATH), PATHINFO_EXTENSION));
+            File::ensureDirectoryExists(dirname($tempPath)); File::put($tempPath, $contents);
+            return $tempPath;
+        }
+        if (File::exists($path)) { return $path; }
+        $this->warn("Local image file not found...");
+        return null;
+    }
+
+    private function getFinalOutputPath(string $basePath, string $mode): string {
+        $extensionMap = ['merge' => '.docx', 'blade' => '.blade.php', 'html' => '.html', 'pdf' => '.pdf'];
+        return $basePath . ($extensionMap[$mode] ?? '.docx');
+    }
+}
+```
+---

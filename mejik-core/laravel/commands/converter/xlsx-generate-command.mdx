@@ -1,0 +1,490 @@
+---
+title: "XLSX Generator Commands"
+description: "From XLSX template to blade template, and data merge to html and pdf"
+---
+### 2. Comprehensive Documentation & Example Files
+
+## English Documentation
+
+### **Guide to Creating Stable XLSX Templates for `xlsx:generate`**
+
+This guide explains the full syntax for the `xlsx:generate` command. **A critical rule for stability is that all structural tags (`if:`, `foreach`, `end...`, `ul_`, `ol_`) must be placed in Column A.**
+
+#### **1. Setup**
+Requires: `composer require phpoffice/phpspreadsheet`, `mpdf/mpdf`, `symfony/expression-language`.
+
+#### **2. Template Tag Reference**
+
+**2.1. Conditional Blocks (Row-based, Column A)**
+*   **Syntax**:
+*   Start Cell **(Column A)**: **`${if:expression}`**. The shorthand `if_` is no longer supported.
+*   End Cell **(Column A)**: `${endif}`.
+*   **Example**: To check if the total is over 500, the syntax **must** be `${if:order.total > 500}`.
+
+**2.2. List Generation (Row-based, Column A)**
+*   **Syntax**: Place `${ul_fieldname}` or `${ol_fieldname}` in **Column A**. On the same row, place a single `${item}` placeholder in the column where you want the list text to appear.
+
+**2.3. Generic Foreach Blocks (Row-based, Column A)**
+*   **Syntax**:
+*   Start Cell **(Column A)**: `${foreach_arrayname as item}`.
+*   End Cell **(Column A)**: `${endforeach}`.
+
+#### **3. Note on Expressions and Data**
+The `ExpressionLanguage` library works best when accessing nested data. Your JSON should be structured with objects. The expression `order.total` correctly accesses the `total` key within the `order` object in your JSON data.
+
+---
+### 4. Example Files (Corrected for Your Template)
+
+#### **A. XLSX Template (`final_report_template.xlsx`)**
+
+Please create an XLSX file that matches your screenshot, but with these **critical corrections**:
+
+1.  Move all structural tags to **Column A**.
+2.  Use the correct **`${if:expression}`** syntax.
+
+| | **A** | **B** | **C** | **D** | **E** |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **1**| | **Sales Report (Merged B:E)** | | | |
+| **2**| | Report Date: | `${report_date}` | | |
+| **3**| | Order ID: | `${order.id}` | | |
+| **4**| | Customer: | `${order.customer.name}` | | |
+| **5**| | | | | |
+| **6**| | **Product Purchase Detail** | | | |
+| **7**| | **Image** | **Product (SKU)** | **Description**| **Total** |
+| **8**| `${foreach_order.products as item}` | `${img_item.imageUrl}` | `${item.name} (${item.sku})` | `${item.description}` | `${item.total_price}` |
+| **9**| `${endforeach}` | | | **GRAND TOTAL** | **`${order.total}`** |
+| **10**| | | | | |
+| **11**| **`${if:order.total > 500}`** | **Special Note** | | | |
+| **12**| | This high-value order qualifies for priority shipping. | | | |
+| **13**| **`${endif}`** | | | | |
+| **14**| | | | | |
+| **15**| | **Key Benefits** | | | |
+| **16**| **`${ul_benefits}`** | **`${item}`** | | | |
+
+#### **B. JSON Data (`data.json`)**
+The JSON data remains the same and is correct.
+```json
+{
+  "report_date": "November 29, 2023",
+  "total": 674.98,
+  "order": {
+    "id": "ORD-2023-987B",
+    "customer": { "name": "Innovate Dynamics" },
+    "products": [
+      {
+        "name": "Quantum Widget Pro", "sku": "QW-PRO-001", "description": "Next-generation widget.",
+        "total_price": 599.98, "imageUrl": "https://i.imgur.com/Gz7e1E9.png"
+      },
+      {
+        "name": "Maintenance Kit", "sku": "SMK-STD-004", "description": "Includes all necessary tools.",
+        "total_price": 75.00, "imageUrl": "https://i.imgur.com/mO2rN3b.png"
+      }
+    ]
+  },
+  "benefits": [
+    "Premium Quality Materials",
+    "3-Year Extended Warranty",
+    "24/7 Customer Support Access"
+  ]
+}
+```
+
+
+### 1. Dokumentasi Lengkap (Bahasa Indonesia)
+
+### **Panduan Membuat Templat XLSX yang Stabil untuk `xlsx:generate`**
+
+Panduan ini menjelaskan sintaks lengkap untuk perintah `xlsx:generate`. **Sebuah aturan penting untuk stabilitas adalah semua tag struktural (`if:`, `foreach`, `end...`, `ul_`, `ol_`) harus ditempatkan di Kolom A.**
+
+#### **1. Pengaturan**
+Membutuhkan:
+*   `composer require phpoffice/phpspreadsheet`
+*   `composer require mpdf/mpdf` (untuk mode PDF)
+*   `composer require symfony/expression-language`
+
+#### **2. Referensi Tag Templat**
+
+**2.1. Variabel Sederhana & Bersarang (Nested)**
+*   **Sintaks**: `${variabel}` atau `${objek.key}`.
+*   **Penggunaan**: Dapat ditempatkan di sel mana pun **selain Kolom A** untuk menghindari kesalahan pembacaan sebagai tag struktural.
+
+**2.2. Placeholder Gambar**
+*   **Sintaks**: `${img_namavariabel}` atau `${img_objek.key}`.
+*   **Perilaku Mode**:
+*   `merge`/`pdf`: Gambar akan disematkan (embed).
+*   `html`: Placeholder akan diganti dengan URL gambar dalam bentuk teks biasa.
+
+**2.3. Blok Kondisional (Berbasis Baris, di Kolom A)**
+Menyembunyikan atau menampilkan satu blok baris.
+*   **Sintaks**:
+*   Sel Awal **(Kolom A)**: **`${if:ekspresi}`**. Shorthand `if_` tidak lagi didukung.
+*   Sel Akhir **(Kolom A)**: `${endif}`.
+*   **Contoh**: Untuk memeriksa apakah total lebih dari 500, sintaksnya **harus** `${if:order.total > 500}`.
+
+**2.4. Pembuatan Daftar (Berbasis Baris, di Kolom A)**
+Menghasilkan beberapa baris dari sebuah array sederhana.
+*   **Sintaks**: Tempatkan `${ul_namavariabel}` atau `${ol_namavariabel}` di **Kolom A**. Pada baris yang sama, tempatkan satu placeholder `${item}` di kolom tempat Anda ingin teks daftar ditampilkan.
+*   **Penggunaan**: Perintah akan menggunakan baris tersebut sebagai templat, menyisipkan baris baru di bawahnya dan mengganti `${item}` dengan nilai dari array Anda.
+
+**2.5. Blok Foreach Generik (Berbasis Baris, di Kolom A)**
+Mengulang satu blok baris untuk setiap item dalam sebuah array.
+*   **Sintaks**:
+*   Sel Awal **(Kolom A)**: `${foreach_namaarray as item}`.
+*   Sel Akhir **(Kolom A)**: `${endforeach}`.
+*   **Penggunaan**: Baris-baris di antara penanda akan diduplikasi. Ini berfungsi untuk beberapa perulangan `foreach` yang terpisah di lembar kerja yang sama.
+
+#### **3. Catatan tentang Ekspresi dan Data**
+Library `ExpressionLanguage` bekerja paling baik saat mengakses data bersarang (nested). JSON Anda harus terstruktur dengan objek. Ekspresi `order.total` dengan benar mengakses kunci `total` di dalam objek `order` pada data JSON Anda.
+
+---
+### 2. Contoh File untuk Pengujian
+
+#### **A. Templat XLSX (`final_report_template.xlsx`)**
+
+Silakan buat file XLSX yang cocok dengan tangkapan layar Anda, tetapi dengan **koreksi penting** berikut:
+
+1.  Pindahkan semua tag struktural ke **Kolom A**.
+2.  Gunakan sintaks **`${if:ekspresi}`** yang benar.
+
+| | **A** | **B** | **C** | **D** | **E** |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| **1**| | **Sales Report (Merged B:E)** | | | |
+| **2**| | Report Date: | `${report_date}` | | |
+| **3**| | Order ID: | `${order.id}` | | |
+| **4**| | Customer: | `${order.customer.name}` | | |
+| **5**| | | | | |
+| **6**| | **Product Purchase Detail** | | | |
+| **7**| | **Gambar** | **Produk (SKU)** | **Deskripsi**| **Total** |
+| **8**| `${foreach_order.products as item}` | `${img_item.imageUrl}` | `${item.name} (${item.sku})` | `${item.description}` | `${item.total_price}` |
+| **9**| `${endforeach}` | | | **GRAND TOTAL** | **`${order.total}`** |
+| **10**| | | | | |
+| **11**| **`${if:order.total > 500}`** | **Catatan Khusus** | | | |
+| **12**| | Pesanan bernilai tinggi ini memenuhi syarat untuk pengiriman prioritas. | | | |
+| **13**| **`${endif}`** | | | | |
+| **14**| | | | | |
+| **15**| | **Keuntungan Utama** | | | |
+| **16**| **`${ul_benefits}`** | **`${item}`** | | | |
+
+#### **B. Data JSON (`data.json`)**
+Data JSON berikut ini sudah benar dan dapat digunakan.
+```json
+{
+  "report_date": "November 29, 2023",
+  "order": {
+    "id": "ORD-2023-987B",
+    "total": 674.98,
+    "customer": { "name": "Innovate Dynamics" },
+    "products": [
+      {
+        "name": "Quantum Widget Pro", "sku": "QW-PRO-001", "description": "Widget generasi terbaru.",
+        "total_price": 599.98, "imageUrl": "https://i.imgur.com/Gz7e1E9.png"
+      },
+      {
+        "name": "Maintenance Kit", "sku": "SMK-STD-004", "description": "Termasuk semua alat yang diperlukan.",
+        "total_price": 75.00, "imageUrl": "https://i.imgur.com/mO2rN3b.png"
+      }
+    ]
+  },
+  "benefits": [
+    "Bahan Kualitas Premium",
+    "Garansi Tambahan 3 Tahun",
+    "Akses Dukungan Pelanggan 24/7"
+  ]
+}
+```
+---
+
+### `XlsxGenerateCommand.php` Code
+
+This version is stable, follows the strict "Column A" rule, and correctly handles expressions.
+
+```php
+<?php
+
+namespace App\Console\Commands;
+
+use Illuminate\Console\Command;
+use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\File;
+use Illuminate\Support\Str;
+use PhpOffice\PhpSpreadsheet\IOFactory;
+use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use PhpOffice\PhpSpreadsheet\Worksheet\Drawing;
+use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
+use Symfony\Component\ExpressionLanguage\ExpressionLanguage;
+
+class XlsxGenerateCommand extends Command
+{
+    /**
+     * The name and signature of the console command.
+     * @var string
+     */
+    protected $signature = 'xlsx:generate
+                            {--template=storage/app/templates/report_template.xlsx : The path to the XLSX template file}
+                            {--output=storage/app/output/report : The base path for the generated file (extension is added automatically)}
+                            {--data=report_data.json : The path to the JSON data file}
+                            {--mode=merge : The output mode (merge, blade, html, pdf)}';
+
+    /**
+     * The console command description.
+     * @var string
+     */
+    protected $description = 'Generate XLSX, HTML, or PDF files from an XLSX template and a JSON data file.';
+
+    private $expressionLanguage;
+
+    public function __construct()
+    {
+        parent::__construct();
+        $this->expressionLanguage = new ExpressionLanguage();
+    }
+
+    public function handle()
+    {
+        $mode = $this->option('mode');
+        $templatePath = $this->option('template');
+        $outputPath = $this->option('output');
+        $dataPath = $this->option('data');
+
+        if (!in_array($mode, ['merge', 'blade', 'html', 'pdf'])) { $this->error("Invalid mode '{$mode}'."); return 1; }
+        if (!File::exists($templatePath)) { $this->error("Template file not found at: {$templatePath}"); return 1; }
+
+        $finalOutputPath = $this->getFinalOutputPath($outputPath, $mode);
+        File::ensureDirectoryExists(dirname($finalOutputPath));
+
+        try {
+            if ($mode === 'blade') {
+                $this->generateBlade($templatePath, $finalOutputPath);
+            } else {
+                if (!File::exists($dataPath)) { $this->error("Data file not found at: {$dataPath}"); return 1; }
+                $data = json_decode(File::get($dataPath), true);
+                if (json_last_error() !== JSON_ERROR_NONE) { throw new \Exception("Invalid JSON in data file: " . json_last_error_msg()); }
+
+                $spreadsheet = IOFactory::load($templatePath);
+                $sheet = $spreadsheet->getActiveSheet();
+
+                $tags = $this->scanSheetForTags($sheet);
+                $this->processTags($sheet, $tags, $data);
+                $this->processPlaceholders($sheet, $data, $mode);
+
+                $this->saveOutput($spreadsheet, $finalOutputPath, $mode);
+            }
+            $this->info(strtoupper($mode) . " file generated successfully at: {$finalOutputPath}");
+        } catch (\Exception $e) {
+            $this->error("An error occurred: " . $e->getMessage());
+            return 1;
+        }
+        return 0;
+    }
+
+    private function scanSheetForTags(Worksheet $sheet): array
+    {
+        $tags = [];
+        $ifStack = [];
+        $foreachStack = [];
+
+        foreach ($sheet->getRowIterator() as $row) {
+            $rowIndex = $row->getRowIndex();
+            $cellValue = (string) $sheet->getCell('A' . $rowIndex)->getValue();
+
+            if (preg_match('/\${foreach_([a-zA-Z0-9_.]+) as ([a-zA-Z0-9_]+)}/', $cellValue, $matches)) {
+                $foreachStack[] = ['start' => $rowIndex, 'arrayKey' => $matches[1], 'itemName' => $matches[2]];
+            }
+            if (strpos($cellValue, '${endforeach}') !== false) {
+                if ($start = array_pop($foreachStack)) {
+                    $tags[] = ['type' => 'foreach', 'start' => $start['start'], 'end' => $rowIndex, 'arrayKey' => $start['arrayKey'], 'itemName' => $start['itemName']];
+                }
+            }
+            if (preg_match('/\${if:([^}]+)}/', $cellValue, $matches)) {
+                $ifStack[] = ['start' => $rowIndex, 'condition' => trim($matches[1])];
+            }
+            if (strpos($cellValue, '${endif}') !== false) {
+                if ($start = array_pop($ifStack)) {
+                    $tags[] = ['type' => 'if', 'start' => $start['start'], 'end' => $rowIndex, 'condition' => $start['condition']];
+                }
+            }
+            if (preg_match('/\${(ul|ol)_([a-zA-Z0-9_.]+)}/', $cellValue, $matches)) {
+                $itemPlaceholderCoord = null;
+                foreach($row->getCellIterator() as $cell) {
+                    if ($cell->getValue() === '${item}') {
+                        $itemPlaceholderCoord = $cell->getCoordinate();
+                        break;
+                    }
+                }
+                $tags[] = ['type' => 'list', 'start' => $rowIndex, 'listType' => $matches[1], 'key' => $matches[2], 'itemCoord' => $itemPlaceholderCoord];
+            }
+        }
+        usort($tags, fn($a, $b) => $b['start'] <=> $a['start']);
+        return $tags;
+    }
+
+    private function processTags(Worksheet $sheet, array $tags, array $data)
+    {
+        foreach ($tags as $tag) {
+            if ($tag['type'] === 'foreach') $this->processForeachBlock($sheet, $tag, $data);
+            if ($tag['type'] === 'if') $this->processIfBlock($sheet, $tag, $data);
+            if ($tag['type'] === 'list') $this->processListBlock($sheet, $tag, $data);
+        }
+    }
+
+    private function processForeachBlock(Worksheet $sheet, array $tag, array $data)
+    {
+        $items = Arr::get($data, $tag['arrayKey'], []);
+        $templateRowsCount = ($tag['end'] - $tag['start']) + 1;
+
+        if (empty($items)) {
+            $sheet->removeRow($tag['start'], $templateRowsCount);
+            return;
+        }
+
+        $sheet->insertNewRowBefore($tag['start'] + $templateRowsCount, count($items) * $templateRowsCount);
+
+        $currentRow = $tag['start'] + $templateRowsCount;
+        foreach ($items as $itemData) {
+            for ($i = 0; $i < $templateRowsCount; $i++) {
+                foreach ($sheet->getColumnIterator() as $column) {
+                    $col = $column->getColumnIndex();
+                    $templateCell = $sheet->getCell($col . ($tag['start'] + $i));
+                    $targetCell = $sheet->getCell($col . ($currentRow + $i));
+                    $targetCell->setXfIndex($templateCell->getXfIndex());
+                    $targetCell->setValue($templateCell->getValue());
+                }
+            }
+            for ($i = 0; $i < $templateRowsCount; $i++) {
+                foreach ($sheet->getColumnIterator() as $column) {
+                    $col = $column->getColumnIndex();
+                    $cell = $sheet->getCell($col . ($currentRow + $i));
+                    $cellValue = $cell->getValue();
+                    if(!is_string($cellValue)) continue;
+
+                    $newValue = preg_replace_callback('/\${' . $tag['itemName'] . '\.(.+?)}/', fn ($m) => Arr::get($itemData, $m[1], ''), $cellValue);
+                    $cell->setValue($newValue);
+                }
+            }
+            $currentRow += $templateRowsCount;
+        }
+
+        $sheet->removeRow($tag['start'], $templateRowsCount);
+    }
+
+    private function processIfBlock(Worksheet $sheet, array $tag, array $data)
+    {
+        $result = false;
+        try {
+            $result = $this->expressionLanguage->evaluate($tag['condition'], $data);
+        } catch (\Exception $e) { $this->warn("Expression Error evaluating '{$tag['condition']}': {$e->getMessage()}"); }
+
+        if (!$result) {
+            $sheet->removeRow($tag['start'], ($tag['end'] - $tag['start']) + 1);
+        } else {
+            $sheet->getCell('A' . $tag['start'])->setValue('');
+            $sheet->getCell('A' . $tag['end'])->setValue('');
+        }
+    }
+
+    private function processListBlock(Worksheet $sheet, array $tag, array $data)
+    {
+        $items = Arr::get($data, $tag['key'], []);
+        $startRow = $tag['start'];
+
+        if (empty($items) || !$tag['itemCoord']) {
+            $sheet->removeRow($startRow, 1);
+            return;
+        }
+
+        [$itemCol, $itemRow] = \PhpOffice\PhpSpreadsheet\Cell\Coordinate::coordinateFromString($tag['itemCoord']);
+
+        if (count($items) > 1) {
+            $sheet->insertNewRowBefore($startRow + 1, count($items) - 1);
+        }
+
+        foreach($items as $index => $item) {
+            $prefix = ($tag['listType'] === 'ol') ? ($index + 1) . '. ' : '• ';
+            $targetRow = $startRow + $index;
+            if ($index > 0) {
+                foreach ($sheet->getColumnIterator() as $column) {
+                    $templateCell = $sheet->getCell($column->getColumnIndex() . $itemRow);
+                    $targetCell = $sheet->getCell($column->getColumnIndex() . $targetRow);
+                    $targetCell->setXfIndex($templateCell->getXfIndex());
+                }
+            }
+            $sheet->getCell($itemCol . $targetRow)->setValue($prefix . $item);
+        }
+        $sheet->getCell('A' . $startRow)->setValue('');
+    }
+
+    private function processPlaceholders(Worksheet $sheet, array $data, string $mode)
+    {
+        foreach ($sheet->getRowIterator() as $row) {
+            foreach ($row->getCellIterator() as $cell) {
+                $value = $cell->getValue();
+                if (!is_string($value) || strpos($value, '${') === false) continue;
+
+                $value = preg_replace_callback('/\${img_([a-zA-Z0-9_.]+)}/', function ($matches) use ($cell, $sheet, $data, $mode) {
+                    $imagePath = Arr::get($data, $matches[1]);
+                    if (!$imagePath) return '';
+                    if ($mode === 'html') return $imagePath;
+
+                    $isUrl = preg_match('/^https?:\/\//', $imagePath);
+                    $localPath = $this->getLocalImagePath($imagePath, $isUrl);
+                    if ($localPath) {
+                        $drawing = new Drawing();
+                        $drawing->setPath($localPath);
+                        $drawing->setCoordinates($cell->getCoordinate());
+                        $drawing->setOffsetX(5)->setOffsetY(5);
+                        $drawing->setHeight(60);
+                        $drawing->setWorksheet($sheet);
+                        $sheet->getRowDimension($cell->getRow())->setRowHeight(50);
+                        if ($isUrl) File::delete($localPath);
+                    }
+                    return '';
+                }, $value);
+
+                $value = preg_replace_callback('/\${(?!if|foreach|end|ul|ol|item)([a-zA-Z0-9_.]+)}/', fn ($m) => Arr::get($data, $m[1], $m[0]), $value);
+                $cell->setValue($value);
+            }
+        }
+    }
+
+    private function generateBlade($templatePath, $finalOutputPath)
+    {
+        $spreadsheet = IOFactory::load($templatePath);
+        $writer = IOFactory::createWriter($spreadsheet, 'Html');
+        $html = $writer->generateHTML();
+        $blade = preg_replace_callback('/\${(.*?)}/', fn ($m) => "{{ $" . str_replace('.', '->', $m[1]) . " ?? '' }}", $html);
+        File::put($finalOutputPath, $blade);
+        $this->info("Blade file generated. Note: Blade conversion is a basic HTML export.");
+    }
+
+    private function saveOutput(Spreadsheet $spreadsheet, string $finalOutputPath, string $mode)
+    {
+        $writerType = ucfirst($mode === 'merge' ? 'Xlsx' : ($mode === 'pdf' ? 'Mpdf' : 'Html'));
+        if ($mode === 'pdf' && !class_exists(\Mpdf\Mpdf::class)) {
+            throw new \Exception('PDF generation requires mPDF. Please run: composer require mpdf/mpdf');
+        }
+        $writer = IOFactory::createWriter($spreadsheet, $writerType);
+        $writer->save($finalOutputPath);
+    }
+
+    private function getLocalImagePath(string $path, bool $isUrl): ?string
+    {
+        if ($isUrl) {
+            $contents = @file_get_contents($path);
+            if ($contents === false) { $this->warn("Could not download image..."); return null; }
+            $tempPath = storage_path('app/temp/' . Str::random(16) . '.' . pathinfo(parse_url($path, PHP_URL_PATH), PATHINFO_EXTENSION));
+            File::ensureDirectoryExists(dirname($tempPath));
+            File::put($tempPath, $contents);
+            return $tempPath;
+        }
+        if (File::exists($path)) { return $path; }
+        $this->warn("Local image file not found...");
+        return null;
+    }
+
+    private function getFinalOutputPath(string $basePath, string $mode): string
+    {
+        $extensionMap = ['merge' => '.xlsx', 'html' => '.html', 'pdf' => '.pdf', 'blade' => '.blade.php'];
+        return $basePath . ($extensionMap[$mode] ?? '.xlsx');
+    }
+}
+```

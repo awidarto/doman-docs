@@ -1,0 +1,464 @@
+---
+title: "Office Documents to PDF Converter Commands"
+description: "Converting Office documents to pdf, supports docx, xlsx, pptx"
+---
+
+## English Documentation
+
+### **Documentation: `pdf:convert-from` Artisan Command**
+
+This command provides a powerful server-side utility to convert a wide variety of office and text documents into PDF files. It acts as a wrapper for the **LibreOffice** command-line interface, ensuring high-fidelity conversions.
+
+---
+
+### **1. Prerequisites: Installing LibreOffice**
+
+This command requires LibreOffice to be installed on the machine where you run the command (your local development machine or your production server).
+
+#### **On a Server (Linux - Headless)**
+*   **Ubuntu / Debian:**
+```bash
+sudo apt-get update
+sudo apt-get install -y libreoffice-common libreoffice-writer libreoffice-calc libreoffice-impress --no-install-recommends
+    ```
+*   **CentOS / RHEL:**
+```bash
+sudo yum install -y libreoffice-headless libreoffice-writer libreoffice-calc libreoffice-impress
+    ```
+
+#### **On a Desktop (for Local Development)**
+*   **Windows:** Install from the [official website](https://www.libreoffice.org/download/download/) and add `C:\Program Files\LibreOffice\program` to your system's `PATH`.
+*   **macOS (via Homebrew):** `brew install --cask libreoffice` and then create a symlink: `sudo ln -s /Applications/LibreOffice.app/Contents/MacOS/soffice /usr/local/bin/soffice`.
+
+---
+
+### **2. Command Signature**
+
+```bash
+php artisan pdf:convert-from --in=<input file> --out=<output file> --filetype=<filetype>
+```
+
+---
+
+### **3. Options**
+
+*   `--in=<input file>`
+*   **Description:** The absolute path to the source document you want to convert.
+*   **Required:** Yes
+
+*   `--out=<output file>`
+*   **Description:** The absolute path where the converted PDF file should be saved. The filename must end with `.pdf`.
+*   **Required:** Yes
+
+*   `--filetype=<filetype>`
+*   **Description:** The file type of the input document.
+*   **Required:** Yes
+*   **Allowed Values:**
+*   **Microsoft Office:** `docx`, `doc`, `rtf`, `xlsx`, `xls`, `csv`, `pptx`, `ppt`
+*   **OpenDocument:** `odt`, `ods`, `odp`
+*   **Other Formats:** `html`, `htm`, `txt`, `wpd`
+
+---
+
+### **4. Usage Examples**
+
+*   **Convert a modern Word Document (.docx):**
+```bash
+php artisan pdf:convert-from --in="/path/to/quarterly-report.docx" --out="/path/to/public/quarterly-report.pdf" --filetype=docx
+    ```
+
+*   **Convert a legacy Word Document (.doc):**
+```bash
+php artisan pdf:convert-from --in="/path/to/archive/old-manual.doc" --out="/path/to/public/old-manual.pdf" --filetype=doc
+    ```
+
+*   **Convert an OpenDocument Text file (.odt):**
+```bash
+php artisan pdf:convert-from --in="/path/to/open-document.odt" --out="/path/to/public/open-document.pdf" --filetype=odt
+    ```
+
+*   **Convert a CSV file:**
+```bash
+php artisan pdf:convert-from --in="/path/to/data.csv" --out="/path/to/public/data-table.pdf" --filetype=csv
+    ```
+
+---
+
+### **5. Troubleshooting**
+
+*   **`soffice: command not found`:** Ensure LibreOffice is installed and its program directory is in your system's `PATH`.
+*   **Permission Denied:** The user running PHP must have execute permissions for `soffice` and write permissions for the `--out` directory.
+*   **Font Issues:** Install any required fonts on the server to ensure the PDF renders correctly.
+*   **Timeouts:** For very large files, you may need to uncomment and adjust the `$process->setTimeout(3600);` line in the command code to allow more time for conversion.
+
+---
+
+
+    ## Dokumentasi Bahasa Indonesia
+
+    ### **Dokumentasi: Perintah Artisan `pdf:convert-from`**
+
+    Perintah ini menyediakan utilitas sisi server yang andal untuk mengonversi berbagai macam format dokumen office dan teks menjadi file PDF. Perintah ini berfungsi sebagai *wrapper* untuk antarmuka baris perintah (CLI) **LibreOffice**, memastikan konversi dengan kualitas tinggi.
+
+    ---
+
+    ### **1. Prasyarat: Instalasi LibreOffice**
+
+    Perintah ini memerlukan LibreOffice untuk terpasang di mesin tempat Anda menjalankan perintah (baik di mesin pengembangan lokal Anda maupun di server produksi).
+
+    #### **Di Server (Linux - Headless)**
+    *   **Ubuntu / Debian:**
+    ```bash
+    sudo apt-get update
+    sudo apt-get install -y libreoffice-common libreoffice-writer libreoffice-calc libreoffice-impress --no-install-recommends
+    ```
+    *   **CentOS / RHEL:**
+    ```bash
+    sudo yum install -y libreoffice-headless libreoffice-writer libreoffice-calc libreoffice-impress
+    ```
+
+    #### **Di Desktop (untuk Pengembangan Lokal)**
+    *   **Windows:** Instal dari [situs web resmi](https://www.libreoffice.org/download/download/) dan tambahkan `C:\Program Files\LibreOffice\program` ke `PATH` sistem Anda.
+    *   **macOS (via Homebrew):** `brew install --cask libreoffice` lalu buat symlink: `sudo ln -s /Applications/LibreOffice.app/Contents/MacOS/soffice /usr/local/bin/soffice`.
+
+    ---
+
+    ### **2. Signature Perintah (Command Signature)**
+
+    ```bash
+    php artisan pdf:convert-from --in=<file input> --out=<file output> --filetype=<tipe file>
+    ```
+
+    ---
+
+    ### **3. Opsi (Options)**
+
+    *   `--in=<file input>`
+    *   **Deskripsi:** Path absolut ke dokumen sumber yang ingin Anda konversi.
+    *   **Wajib:** Ya
+
+    *   `--out=<file output>`
+        *   **Deskripsi:** Path absolut tempat file PDF hasil konversi akan disimpan. Nama file harus diakhiri dengan `.pdf`.
+        *   **Wajib:** Ya
+
+        *   `--filetype=<tipe file>`
+            *   **Deskripsi:** Tipe file dari dokumen input.
+            *   **Wajib:** Ya
+            *   **Nilai yang Diizinkan:**
+            *   **Microsoft Office:** `docx`, `doc`, `rtf`, `xlsx`, `xls`, `csv`, `pptx`, `ppt`
+            *   **OpenDocument:** `odt`, `ods`, `odp`
+            *   **Format Lain:** `html`, `htm`, `txt`, `wpd`
+
+            ---
+
+            ### **4. Contoh Penggunaan**
+
+            *   **Mengonversi Dokumen Word modern (.docx):**
+            ```bash
+            php artisan pdf:convert-from --in="/path/to/laporan-kuartal.docx" --out="/path/to/public/laporan-kuartal.pdf" --filetype=docx
+            ```
+
+            *   **Mengonversi Dokumen Word versi lama (.doc):**
+            ```bash
+            php artisan pdf:convert-from --in="/path/to/arsip/manual-lama.doc" --out="/path/to/public/manual-lama.pdf" --filetype=doc
+            ```
+
+            *   **Mengonversi file OpenDocument Text (.odt):**
+            ```bash
+            php artisan pdf:convert-from --in="/path/to/dokumen-terbuka.odt" --out="/path/to/public/dokumen-terbuka.pdf" --filetype=odt
+            ```
+
+            *   **Mengonversi file CSV:**
+            ```bash
+            php artisan pdf:convert-from --in="/path/to/data.csv" --out="/path/to/public/tabel-data.pdf" --filetype=csv
+            ```
+
+            ---
+
+            ### **5. Troubleshooting**
+
+            *   **`soffice: command not found`:** Pastikan LibreOffice terinstal dan direktorinya ada di dalam `PATH` sistem Anda.
+            *   **Permission Denied (Izin Ditolak):** Pengguna yang menjalankan PHP harus memiliki izin eksekusi untuk `soffice` dan izin tulis untuk direktori `--out`.
+            *   **Masalah Font:** Instal semua font yang diperlukan di server untuk memastikan PDF ditampilkan dengan benar.
+            *   **Timeout:** Untuk file yang sangat besar, Anda mungkin perlu menghapus komentar dan menyesuaikan baris `$process->setTimeout(3600);` di dalam kode perintah untuk memberikan waktu konversi yang lebih lama.
+
+
+Excellent! It's fantastic that everything is working. Having a stable, powerful command is the goal, and now we can properly document it for everyone to use.
+
+Here is the complete, final documentation for both the `DocxTplGenerator` and the newly refactored `PdfConvertCommand`, in both English and Bahasa Indonesia.
+
+---
+---
+
+## 1. Documentation for `generate:from-docx`
+
+### English Documentation
+
+#### **Overview**
+This Artisan command is a powerful, generic document generator. It creates a styled DOCX file by merging data from a JSON source into a DOCX template. It fully supports a cloud-native workflow, allowing inputs (data and template) to be URLs and outputs to be saved to local paths or S3-compatible cloud storage (like Minio). It can also optionally trigger a PDF conversion of the final document.
+
+#### **Prerequisites**
+*   **PHPWord Library:** `composer require phpoffice/phpword`
+*   **S3/Minio Driver (for remote output):** `composer require league/flysystem-aws-s3-v3 "^3.0"`
+*   **LibreOffice (if using `--pdf` option):** Must be installed on the server and accessible in the system's `PATH`.
+
+#### **Command Usage**
+
+##### **Syntax**
+```bash
+php artisan generate:from-docx \
+--data=<path_or_url> \
+--tpl=<path_or_url> \
+--out=<destination_path> \
+[--disk=<disk_name>] \
+[--pdf]
+```
+
+##### **Options**
+*   `--data`: The source for the JSON data. Can be a local file path (`storage/data.json`) or a full URL to a file or API endpoint.
+*   `--tpl`: The source for the DOCX template. Can be a local file path (`storage/template.docx`) or a full URL.
+*   `--out`: The destination path for the output file. If `--disk` is not used, this is a local file path. If `--disk` is used, this is the path within that disk's bucket.
+*   `--disk`: (Optional) The name of the Laravel filesystem disk to use for output (e.g., `s3`, `minio`).
+*   `--pdf`: (Optional) If present, the command will also generate a PDF version of the document and save it to the same destination.
+
+##### **Example Usage**
+
+**1. Local to Local**
+```bash
+php artisan generate:from-docx \
+--data="storage/app/data/invoice_data.json" \
+--tpl="storage/app/templates/invoice_template.docx" \
+--out="public/output/MyInvoice.docx"
+```
+
+**2. URL Inputs to Local Output with PDF**
+```bash
+php artisan generate:from-docx \
+--data="http://api.example.com/invoices/123" \
+--tpl="https://my-storage.s3.amazonaws.com/templates/invoice_template.docx" \
+--out="public/output/Invoice-123.docx" \
+--pdf
+```
+
+**3. URL Inputs to S3/Minio Output**
+```bash
+php artisan generate:from-docx \
+--data="http://api.example.com/invoices/123" \
+--tpl="https://my-storage.s3.amazonaws.com/templates/invoice_template.docx" \
+--out="invoices/2024/Invoice-123.docx" \
+--disk="minio"
+```
+
+#### **Template and Data Conventions**
+
+To ensure the generator works correctly, your files must follow these conventions:
+
+1.  **Simple & Nested Data:** A JSON object like `"customer": { "name": "John" }` corresponds to a placeholder `${customer.name}` in the template.
+
+2.  **Images:** The placeholder in the template **must exactly match** the full key path in the JSON.
+*   **Example:** If your JSON has `"company": { "logo_url": "http://..." }`, your template **must** use the placeholder `${company.logo_url}`.
+*   The code automatically detects an image if the key ends in `_url` (case-insensitive) or if the value is a URL ending in `.png`, `.jpg`, etc.
+
+3.  **Repeating Data: Tables (e.g., Invoice Items)**
+*   **Data Format:** An array of objects with any keys (e.g., `description`, `quantity`).
+*   **Template Convention:** Placeholders in the repeating table row **must** be prefixed with `item.`.
+*   **Example:** For a JSON key `"items"`, the template must use `${item.description}`, `${item.quantity}`, etc.
+
+4.  **Repeating Data: Lists (e.g., Terms & Conditions)**
+*   **Data Format:** An array of objects, where each object **must** have a `"text"` key: `[{ "text": "First point." }, { "text": "Second point." }]`.
+*   **Template Convention:**
+1.  Create a block named after your JSON key, with a `_block` suffix. Example: for the `"terms"` key, use `${terms_block}` and `${/terms_block}`.
+2.  Inside the block, define the template for one list item. Placeholders **must** be prefixed with `<key>_item.`.
+3.  The command automatically provides a sequence number via the `.seq` placeholder.
+*   **Example:** For the `"terms"` key, the template block must be:
+```text
+${terms_block}
+${terms_item.seq}. ${terms_item.text}
+${/terms_block}
+        ```
+*   **Best Practice:** To avoid document corruption, it is highly recommended to use **Shift+Enter** for line breaks inside the `_block` definition in your Word document.
+
+---
+
+### Bahasa Indonesia Documentation
+
+#### **Gambaran Umum**
+Perintah Artisan ini adalah generator dokumen generik yang canggih. Perintah ini membuat file DOCX bergaya dengan menggabungkan data dari sumber JSON ke dalam sebuah template DOCX. Perintah ini sepenuhnya mendukung alur kerja berbasis cloud, memungkinkan input (data dan template) berupa URL dan output dapat disimpan ke path lokal atau penyimpanan cloud yang kompatibel dengan S3 (seperti Minio). Perintah ini juga dapat secara opsional memicu konversi PDF dari dokumen akhir.
+
+#### **Prasyarat**
+*   **Library PHPWord:** `composer require phpoffice/phpword`
+*   **Driver S3/Minio (untuk output jarak jauh):** `composer require league/flysystem-aws-s3-v3 "^3.0"`
+*   **LibreOffice (jika menggunakan opsi `--pdf`):** Harus terinstal di server dan dapat diakses melalui `PATH` sistem.
+
+#### **Penggunaan Perintah**
+
+##### **Sintaks**
+```bash
+php artisan generate:from-docx \
+--data=<path_atau_url> \
+--tpl=<path_atau_url> \
+--out=<path_tujuan> \
+[--disk=<nama_disk>] \
+[--pdf]
+```
+
+##### **Opsi**
+*   `--data`: Sumber untuk data JSON. Bisa berupa path file lokal (`storage/data.json`) atau URL lengkap ke sebuah file atau endpoint API.
+*   `--tpl`: Sumber untuk template DOCX. Bisa berupa path file lokal (`storage/template.docx`) atau URL lengkap.
+*   `--out`: Path tujuan untuk file output. Jika `--disk` tidak digunakan, ini adalah path file lokal. Jika `--disk` digunakan, ini adalah path di dalam bucket disk tersebut.
+*   `--disk`: (Opsional) Nama disk filesystem Laravel yang akan digunakan untuk output (misalnya, `s3`, `minio`).
+*   `--pdf`: (Opsional) Jika ada, perintah juga akan menghasilkan versi PDF dari dokumen dan menyimpannya ke tujuan yang sama.
+
+##### **Contoh Penggunaan**
+
+**1. Lokal ke Lokal**
+```bash
+php artisan generate:from-docx \
+--data="storage/app/data/data_faktur.json" \
+--tpl="storage/app/templates/template_faktur.docx" \
+--out="public/output/FakturSaya.docx"
+```
+
+**2. Input URL ke Output Lokal dengan PDF**
+```bash
+php artisan generate:from-docx \
+--data="http://api.contoh.com/faktur/123" \
+--tpl="https://storage-saya.s3.amazonaws.com/templates/template_faktur.docx" \
+--out="public/output/Faktur-123.docx" \
+--pdf
+```
+
+**3. Input URL ke Output S3/Minio**
+```bash
+php artisan generate:from-docx \
+--data="http://api.contoh.com/faktur/123" \
+--tpl="https://storage-saya.s3.amazonaws.com/templates/template_faktur.docx" \
+--out="faktur/2024/Faktur-123.docx" \
+--disk="minio"
+```
+
+#### **Konvensi Template dan Data**
+
+Anda harus mengikuti konvensi berikut agar generator berfungsi dengan benar:
+
+1.  **Data Sederhana & Bertingkat:** Objek JSON seperti `"pelanggan": { "nama": "John" }` berkorespondensi dengan placeholder `${pelanggan.nama}` di dalam template.
+
+2.  **Gambar:** Placeholder di dalam template **harus sama persis** dengan path key lengkap di dalam JSON.
+*   **Contoh:** Jika JSON Anda memiliki `"company": { "logo_url": "http://..." }`, template Anda **harus** menggunakan placeholder `${company.logo_url}`.
+*   Kode akan secara otomatis mendeteksi gambar jika key diakhiri dengan `_url` (tidak sensitif huruf besar/kecil) atau jika nilai URL diakhiri dengan ekstensi gambar umum (`.png`, `.jpg`, dll.).
+
+3.  **Data Berulang: Tabel (misalnya, Rincian Faktur)**
+*   **Format Data:** Sebuah array objek dengan key apa pun (misalnya, `description`, `quantity`).
+*   **Konvensi Template:** Placeholder di dalam baris tabel yang berulang **harus** diawali dengan `item.`.
+*   **Contoh:** Untuk key JSON `"items"`, template harus menggunakan `${item.description}`, `${item.quantity}`, dll.
+
+4.  **Data Berulang: Daftar/List (misalnya, Syarat & Ketentuan)**
+*   **Format Data:** Sebuah array objek, di mana setiap objek **harus** memiliki key `"text"`: `[{ "text": "Poin pertama." }, { "text": "Poin kedua." }]`.
+*   **Konvensi Template:**
+1.  Buat sebuah blok yang dinamai sesuai key JSON Anda, dengan akhiran `_block`. Contoh: untuk key `"terms"`, gunakan `${terms_block}` dan `${/terms_block}`.
+2.  Di dalam blok, definisikan template untuk satu item daftar. Placeholder **harus** diawali dengan `<key>_item.`.
+3.  Perintah ini secara otomatis menyediakan nomor urut melalui placeholder `.seq`.
+*   **Contoh:** Untuk key `"terms"`, blok template harus seperti ini:
+```text
+${terms_block}
+${terms_item.seq}. ${terms_item.text}
+${/terms_block}
+        ```
+*   **Praktik Terbaik:** Untuk menghindari kerusakan dokumen, sangat disarankan untuk menggunakan **Shift+Enter** untuk membuat baris baru di dalam definisi `_block` pada dokumen Word Anda.
+
+---
+---
+
+## 2. Documentation for `pdf:convert-from`
+
+### English Documentation
+
+#### **Overview**
+This is a utility command that converts a wide variety of office documents (e.g., `.docx`, `.xlsx`, `.odt`) into a PDF file. It uses the LibreOffice suite in headless (server) mode to perform the conversion. The command is designed to work in a cloud environment, supporting inputs from URLs and outputs to S3-compatible storage.
+
+#### **Prerequisites**
+*   **LibreOffice:** Must be installed on the server and accessible via the system `PATH`. On Debian/Ubuntu, install with `sudo apt-get install libreoffice`. The command uses the `soffice` binary, which may be `libreoffice` on some systems; you may need to edit the script if necessary.
+*   **S3/Minio Driver (for remote output):** `composer require league/flysystem-aws-s3-v3 "^3.0"`
+
+#### **Command Usage**
+
+##### **Syntax**
+```bash
+php artisan pdf:convert-from \
+--in=<path_or_url> \
+--out=<destination_path> \
+--filetype=<file_ext> \
+[--disk=<disk_name>]
+```
+
+##### **Options**
+*   `--in`: The source document. Can be a local file path or a full URL.
+*   `--out`: The destination path for the output PDF. If `--disk` is not used, this is a local file path. If `--disk` is used, this is the path within that disk's bucket.
+*   `--filetype`: The file extension of the input file (e.g., `docx`, `xlsx`). This is a hint for the conversion process.
+*   `--disk`: (Optional) The name of the Laravel filesystem disk to use for output.
+
+##### **Example Usage**
+
+**1. Local to Local**
+```bash
+php artisan pdf:convert-from \
+--in="storage/app/reports/AnnualReport.docx" \
+--out="public/pdfs/AnnualReport.pdf" \
+--filetype="docx"
+```
+
+**2. URL Input to S3/Minio Output**
+```bash
+php artisan pdf:convert-from \
+--in="https://company-files.com/quarterly.xlsx" \
+--out="reports/2024/quarterly.pdf" \
+--filetype="xlsx" \
+--disk="minio"
+```
+
+---
+
+### Bahasa Indonesia Documentation
+
+#### **Gambaran Umum**
+Ini adalah perintah utilitas yang mengonversi berbagai jenis dokumen office (misalnya, `.docx`, `.xlsx`, `.odt`) menjadi file PDF. Perintah ini menggunakan LibreOffice suite dalam mode *headless* (server) untuk melakukan konversi. Perintah ini dirancang untuk bekerja di lingkungan cloud, mendukung input dari URL dan output ke penyimpanan yang kompatibel dengan S3.
+
+#### **Prasyarat**
+*   **LibreOffice:** Harus terinstal di server dan dapat diakses melalui `PATH` sistem. Di Debian/Ubuntu, instal dengan `sudo apt-get install libreoffice`. Perintah ini menggunakan biner `soffice`, yang mungkin bernama `libreoffice` di beberapa sistem; Anda mungkin perlu mengedit skrip jika diperlukan.
+*   **Driver S3/Minio (untuk output jarak jauh):** `composer require league/flysystem-aws-s3-v3 "^3.0"`
+
+#### **Penggunaan Perintah**
+
+##### **Sintaks**
+```bash
+php artisan pdf:convert-from \
+--in=<path_atau_url> \
+--out=<path_tujuan> \
+--filetype=<ekstensi_file> \
+[--disk=<nama_disk>]
+```
+
+##### **Opsi**
+*   `--in`: Dokumen sumber. Bisa berupa path file lokal atau URL lengkap.
+*   `--out`: Path tujuan untuk file PDF output. Jika `--disk` tidak digunakan, ini adalah path file lokal. Jika `--disk` digunakan, ini adalah path di dalam bucket disk tersebut.
+*   `--filetype`: Ekstensi file dari file input (misalnya, `docx`, `xlsx`). Ini adalah petunjuk untuk proses konversi.
+*   `--disk`: (Opsional) Nama disk filesystem Laravel yang akan digunakan untuk output.
+
+##### **Contoh Penggunaan**
+
+**1. Lokal ke Lokal**
+```bash
+php artisan pdf:convert-from \
+--in="storage/app/laporan/LaporanTahunan.docx" \
+--out="public/pdfs/LaporanTahunan.pdf" \
+--filetype="docx"
+```
+
+**2. Input URL ke Output S3/Minio**
+```bash
+php artisan pdf:convert-from \
+--in="https://file-perusahaan.com/kuartal.xlsx" \
+--out="laporan/2024/kuartal.pdf" \
+--filetype="xlsx" \
+--disk="minio"
+```

@@ -1,0 +1,60 @@
+---
+title: "XLSX Template Example"
+description: "XLSX template example & guide"
+---
+
+Here is a visual representation of what the `report_template.xlsx` file would look like in a spreadsheet application like Excel or Google Sheets, followed by a breakdown of each key element.
+
+### Visual Representation of the XLSX Template
+
+Imagine you are looking at this in Microsoft Excel:
+
+| | **A** | **B** | **C** | **D** |
+| :--- | :--- | :--- | :--- | :--- |
+| **1**| | <b>Monthly Sales Report</b> (Merged across B:D) |
+| **2**| | | | |
+| **3**| **Month:** | `${report_details.month_name}` | | |
+| **4**| **Generated On:** | `${generation_date}` | | |
+| **5**| | | | |
+| **6**| # | <b>Product Name</b> | <b>Units Sold</b> | <b>Revenue</b> |
+| **7**| `${foreach:sales_data}` | `${item.product_name}` | `${item.units_sold}` | `${item.revenue}` |
+| **8**| | | | |
+| **9**| | | <b>TOTAL:</b> | <b>`${total_revenue}`</b> |
+
+---
+
+### Breakdown of the Template Elements
+
+#### 1. Simple Placeholders
+-   **Cell B3 (`${report_details.month_name}`)**: This is a standard placeholder that uses **dot notation** to access a nested value in your JSON.
+-   **Cell B4 (`${generation_date}`)**: This placeholder will be replaced by a top-level key in your JSON.
+-   **Cell D9 (`${total_revenue}`)**: Another simple placeholder. Notice that you can apply formatting (like **bold** text and a grey background) directly to the cell in Excel, and this formatting will be preserved in the final output.
+
+#### 2. The Loop Template Row (Row 7)
+This is the most important part of the template. The entire row acts as a blueprint for the data in your array.
+
+-   **Cell A7 (`${foreach:sales_data}`)**: This is the **loop trigger**.
+-   The command searches for cells starting with `${foreach:...}` in Column A.
+-   `sales_data` is the key of the **array** in your JSON file.
+-   This specific cell will be replaced by the item number (1, 2, 3, ...).
+-   **Cell B7 (`${item.product_name}`)**: The `item.` prefix is special. It tells the command to look for the `product_name` key **inside an object within the `sales_data` array**.
+-   **Cells C7 (`${item.units_sold}`) and D7 (`${item.revenue}`)**: These work the same way, accessing other keys from the array item.
+
+#### 3. Formatting and Structure
+-   **Row 6 (Headers)**: These are just static text cells. We've made them **bold** and given them a grey background color for clarity. This formatting is part of the template and will not be changed.
+-   **Cell D7 (Revenue Placeholder)**: In Excel, you could format this cell as **Currency** (e.g., `$ #,##0.00`). When the command replaces `${item.revenue}` with a number like `7500`, Excel will automatically display it as `$ 7,500.00`. This formatting is copied for every new row created.
+-   **Row 9 (Totals Row)**: This row exists *after* the loop template row. The `xlsx:generate` command is smart enough to insert the new rows for your loop data *before* this row, pushing it down automatically.
+
+### How it Works During Generation
+
+1.  The command loads this template.
+2.  It finds `${foreach:sales_data}` in **A7**.
+3.  It sees your JSON has 3 items in the `sales_data` array.
+4.  It **inserts 2 new rows** below row 7. Now you have three identical "template" rows (rows 7, 8, and 9).
+5.  It iterates through your array and populates these rows:
+-   Row 7 is filled with data from the first item. `A7` becomes `1`, `B7` becomes `Widget Pro`, etc.
+-   Row 8 is filled with data from the second item. `A8` becomes `2`, `B8` becomes `Gadget Plus`, etc.
+-   Row 9 is filled with data from the third item.
+The "TOTAL" row, which was originally at row 9, is now at **row 11**, and all other simple placeholders (like `${report_details.month_name}`) are filled in.
+
+The final output is a clean, formatted spreadsheet with a dynamically sized table.

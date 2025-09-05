@@ -1,0 +1,224 @@
+---
+title: "Sub-Generator Commands"
+description: "Sub-Generator Commands for YAML Based Inertia CRUD"
+---
+
+
+### 2. Sub-Generator Commands
+
+These commands are called by the `make:module-crud` orchestrator but can also be used individually for more granular control.
+
+#### **`make:inertia-crud`**
+
+Generates the core backend files (Controller, Model) and the `Index.vue` page for listing data.
+
+**Signature:**
+```bash
+php artisan make:inertia-crud {name} {--ns=} {--js-page-namespace=} {--modelPath=} {--controllerPath=} {--pagePath=} {--tableYaml=} {--authenticatable} {--softDeletes}
+```
+
+*   `name`: The name of the entity (e.g., `Product`).
+*   `--ns`: PHP Namespace for the Controller and Model (e.g., `Dms\Reports`).
+*   `--js-page-namespace`: (Optional) JS Namespace for the Pages directory structure (e.g., `Dms/Reports`). If empty, it's derived from `--ns`.
+*   `--modelPath`, `--controllerPath`, `--pagePath`: (Optional) Override default subdirectory paths.
+*   `--tableYaml`: (Optional) Path to a YAML file defining table columns. If provided, `make:table-columns` is called to generate `columns.ts` for the `Index.vue` page.
+*   `--authenticatable`: (Flag) Generates a Model that extends `Authenticatable` for user-like entities.
+*   `--softDeletes`: (Flag) Adds the `SoftDeletes` trait to the generated Model.
+
+**Generated Files:**
+*   `app/Http/Controllers/[Ns]/[ControllerPath]/[Name]Controller.php`
+*   `app/Models/[Ns]/[ModelPath]/[Name].php`
+*   `resources/js/Pages/[JsPageNs]/[Name]/Index.vue`
+*   `resources/js/Pages/[JsPageNs]/[Name]/data/columns.ts` (if `--tableYaml` is used)
+
+---
+
+#### **`make:vue-form`**
+
+Generates a reusable Vue form component and the `Create.vue` and `Edit.vue` Inertia pages that use it.
+
+**Signature:**
+```bash
+php artisan make:vue-form {yamlFile} {--formName=} {--ns=} {--page} {--with-layout}
+```
+
+*   `yamlFile`: Path to the YAML file defining the form fields and layout.
+*   `--formName`: The PascalCase name for the generated Vue form component (e.g., `ProductMainForm`).
+*   `--ns`: JS Namespace for the Pages and components (e.g., `Inventory/Catalog`).
+*   `--page`: (Flag) If included, generates `Create.vue` and `Edit.vue` pages.
+*   `--with-layout`: (Flag) Processes the YAML as a two-level structure (sections with child elements) instead of a flat list of form elements.
+
+**Generated Files (with `--page`):**
+*   `resources/js/Pages/[Ns]/[Entity]/components/forms/[FormName].vue`
+*   `resources/js/Pages/[Ns]/[Entity]/Create.vue`
+*   `resources/js/Pages/[Ns]/[Entity]/Edit.vue`
+
+---
+
+#### **`make:vue-dataview`**
+
+Generates a reusable Vue component for displaying data and the `View.vue` Inertia page.
+
+**Signature:**
+```bash
+php artisan make:vue-dataview {yamlFile} {--componentName=} {--ns=} {--page}
+```
+
+*   `yamlFile`: Path to the YAML file defining the data view sections and elements.
+*   `--componentName`: The PascalCase name for the generated Vue data view component (e.g., `ProductDetailView`).
+*   `--ns`: JS Namespace for the Pages and components.
+*   `--page`: (Flag) If included, generates the `View.vue` page.
+
+**Generated Files (with `--page`):**
+*   `resources/js/Pages/[Ns]/[Entity]/components/views/[ComponentName].vue`
+*   `resources/js/Pages/[Ns]/[Entity]/View.vue`
+
+---
+
+#### **`make:table-columns`**
+
+Generates a `columns.ts` file with TanStack Table column definitions.
+
+**Signature:**
+```bash
+php artisan make:table-columns {yamlFile} {--T=} {--outputFile=} {--actionsComponent=} {--headerComponent=}
+```
+
+*   `yamlFile`: Path to the YAML file with a `table:` key defining the columns.
+*   `--T`: The TypeScript type for the row data (e.g., `Product`). This will be used for `ColumnDef<Product>`.
+*   `--outputFile`: The full path for the output `columns.ts` file.
+*   `--actionsComponent`, `--headerComponent`: (Optional) Specify names of custom Vue components for rendering row actions and sortable column headers.
+
+**Generated File:**
+*   The file specified by `--outputFile`.
+
+---
+
+#### **`make:zod-schema`**
+
+Generates a `schema.ts` file with a Zod schema and its inferred TypeScript type.
+
+**Signature:**
+```bash
+php artisan make:zod-schema {yamlFile} {schemaName} {typeName} {--yamlKey=} {--outputFile=}
+```
+
+*   `yamlFile`: Path to the YAML file defining the data fields.
+*   `schemaName`: The name for the exported Zod schema variable (e.g., `productSchema`).
+*   `typeName`: The name for the exported TypeScript type (e.g., `Product`).
+*   `--yamlKey`: The top-level key in the YAML file that contains the field list (defaults to `vue`).
+*   `--outputFile`: The full path for the output `schema.ts` file.
+
+**Generated File:**
+*   The file specified by `--outputFile`.
+
+---
+---
+
+### 2. Perintah Sub-Generator (Bahasa Indonesia)
+
+Perintah-perintah ini dipanggil oleh `make:module-crud` tetapi juga dapat digunakan secara individual untuk kontrol yang lebih terperinci.
+
+#### **`make:inertia-crud`**
+
+Menghasilkan file backend inti (Controller, Model) dan halaman `Index.vue` untuk menampilkan daftar data.
+
+**Struktur Perintah:**
+```bash
+php artisan make:inertia-crud {name} {--ns=} {--js-page-namespace=} {--modelPath=} {--controllerPath=} {--pagePath=} {--tableYaml=} {--authenticatable} {--softDeletes}
+```
+
+*   `name`: Nama entitas (contoh: `Product`).
+*   `--ns`: Namespace PHP untuk Controller dan Model (contoh: `Dms\Reports`).
+*   `--js-page-namespace`: (Opsional) Namespace JS untuk struktur direktori Pages (contoh: `Dms/Reports`). Jika kosong, akan diturunkan dari `--ns`.
+*   `--modelPath`, `--controllerPath`, `--pagePath`: (Opsional) Mengganti path subdirektori default.
+*   `--tableYaml`: (Opsional) Path ke file YAML yang mendefinisikan kolom tabel. Jika diberikan, `make:table-columns` akan dipanggil untuk menghasilkan `columns.ts` untuk halaman `Index.vue`.
+*   `--authenticatable`: (Flag) Menghasilkan Model yang meng-extend `Authenticatable` untuk entitas seperti User.
+*   `--softDeletes`: (Flag) Menambahkan trait `SoftDeletes` ke Model yang dihasilkan.
+
+**File yang Dihasilkan:**
+*   `app/Http/Controllers/[Ns]/[ControllerPath]/[Name]Controller.php`
+*   `app/Models/[Ns]/[ModelPath]/[Name].php`
+*   `resources/js/Pages/[JsPageNs]/[Name]/Index.vue`
+*   `resources/js/Pages/[JsPageNs]/[Name]/data/columns.ts` (jika `--tableYaml` digunakan)
+
+---
+
+#### **`make:vue-form`**
+
+Menghasilkan komponen form Vue yang dapat digunakan kembali serta halaman Inertia `Create.vue` dan `Edit.vue` yang menggunakannya.
+
+**Struktur Perintah:**
+```bash
+php artisan make:vue-form {yamlFile} {--formName=} {--ns=} {--page} {--with-layout}
+```
+
+*   `yamlFile`: Path ke file YAML yang mendefinisikan field dan layout form.
+*   `--formName`: Nama dalam format PascalCase untuk komponen form Vue yang dihasilkan (contoh: `ProductMainForm`).
+*   `--ns`: Namespace JS untuk Pages dan komponen (contoh: `Inventory/Catalog`).
+*   `--page`: (Flag) Jika disertakan, akan menghasilkan halaman `Create.vue` dan `Edit.vue`.
+*   `--with-layout`: (Flag) Memproses YAML sebagai struktur dua tingkat (section dengan elemen anak) alih-alih daftar field yang datar.
+
+**File yang Dihasilkan (dengan `--page`):**
+*   `resources/js/Pages/[Ns]/[Entity]/components/forms/[FormName].vue`
+*   `resources/js/Pages/[Ns]/[Entity]/Create.vue`
+*   `resources/js/Pages/[Ns]/[Entity]/Edit.vue`
+
+---
+
+#### **`make:vue-dataview`**
+
+Menghasilkan komponen Vue untuk menampilkan data dan halaman Inertia `View.vue`.
+
+**Struktur Perintah:**
+```bash
+php artisan make:vue-dataview {yamlFile} {--componentName=} {--ns=} {--page}
+```
+
+*   `yamlFile`: Path ke file YAML yang mendefinisikan section dan elemen data view.
+*   `--componentName`: Nama dalam format PascalCase untuk komponen data view Vue yang dihasilkan (contoh: `ProductDetailView`).
+*   `--ns`: Namespace JS untuk Pages dan komponen.
+*   `--page`: (Flag) Jika disertakan, akan menghasilkan halaman `View.vue`.
+
+**File yang Dihasilkan (dengan `--page`):**
+*   `resources/js/Pages/[Ns]/[Entity]/components/views/[ComponentName].vue`
+*   `resources/js/Pages/[Ns]/[Entity]/View.vue`
+
+---
+
+#### **`make:table-columns`**
+
+Menghasilkan file `columns.ts` dengan definisi kolom untuk TanStack Table.
+
+**Struktur Perintah:**
+```bash
+php artisan make:table-columns {yamlFile} {--T=} {--outputFile=} {--actionsComponent=} {--headerComponent=}
+```
+
+*   `yamlFile`: Path ke file YAML dengan kunci `table:` yang mendefinisikan kolom.
+*   `--T`: Tipe TypeScript untuk data baris (contoh: `Product`). Ini akan digunakan untuk `ColumnDef<Product>`.
+*   `--outputFile`: Path lengkap untuk file `columns.ts` yang akan dihasilkan.
+*   `--actionsComponent`, `--headerComponent`: (Opsional) Menentukan nama komponen Vue kustom untuk me-render aksi baris dan header kolom yang dapat diurutkan.
+
+**File yang Dihasilkan:**
+*   File yang ditentukan oleh `--outputFile`.
+
+---
+
+#### **`make:zod-schema`**
+
+Menghasilkan file `schema.ts` dengan skema Zod dan tipe TypeScript yang diturunkan darinya.
+
+**Struktur Perintah:**
+```bash
+php artisan make:zod-schema {yamlFile} {schemaName} {typeName} {--yamlKey=} {--outputFile=}
+```
+
+*   `yamlFile`: Path ke file YAML yang mendefinisikan field data.
+*   `schemaName`: Nama untuk variabel skema Zod yang diekspor (contoh: `productSchema`).
+*   `typeName`: Nama untuk tipe TypeScript yang diekspor (contoh: `Product`).
+*   `--yamlKey`: Kunci tingkat atas di file YAML yang berisi daftar field (default: `vue`).
+*   `--outputFile`: Path lengkap untuk file `schema.ts` yang akan dihasilkan.
+
+**File yang Dihasilkan:**
+*   File yang ditentukan oleh `--outputFile`.

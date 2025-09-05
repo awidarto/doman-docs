@@ -1,0 +1,452 @@
+# Panduan Membuat Controller dengan AdminController
+
+## Gambaran Umum
+
+`AdminController` adalah base controller yang menyediakan operasi CRUD, manajemen menu, dan response yang standar untuk interface admin. Panduan ini menjelaskan cara membuat controller baru yang extends dari `AdminController`.
+
+## Mulai Cepat
+
+### Struktur Controller Dasar
+
+```php
+<?php
+
+namespace App\Http\Controllers\YourNamespace;
+
+use App\Http\Controllers\Core\AdminController;
+use App\Models\YourNamespace\YourModel;
+use Illuminate\Http\Request;
+
+class YourController extends AdminController
+{
+    public function __construct()
+    {
+        // Set properti yang diperlukan
+        $this->modelClass = YourModel::class;
+        $this->entity = 'YourEntity';
+        $this->namespace = 'YourNamespace';
+        
+        // Panggil parent constructor SETELAH setting properties
+        parent::__construct();
+        
+        // Konfigurasi pengaturan controller
+        $this->setupController();
+    }
+    
+    private function setupController()
+    {
+        // Konfigurasi path halaman Inertia
+        $this->inertia_page_index = 'YourNamespace/YourEntity/Index';
+        $this->inertia_page_create = 'YourNamespace/YourEntity/Create';
+        $this->inertia_page_edit = 'YourNamespace/YourEntity/Edit';
+        $this->inertia_page_view = 'YourNamespace/YourEntity/View';
+        
+        // Konfigurasi routes
+        $this->controller_base_route = 'your-namespace.your-entity';
+        $this->controller_index_route = 'your-namespace.your-entity.index';
+        
+        // Konfigurasi field pencarian dan sort
+        $this->searchable_fields = ['name', 'email', 'description'];
+        $this->sortable_fields = ['created_at', 'updated_at', 'name'];
+        
+        // Konfigurasi aturan validasi
+        $this->setupValidation();
+    }
+}
+```
+
+## Properti yang Diperlukan
+
+### Properti Penting (Harus Di-Set)
+```php
+protected string $modelClass = '';     // Nama class model lengkap
+protected string $entity = '';         // Nama entity untuk pesan/default
+protected string $namespace = '';      // Namespace controller untuk organisasi
+```
+
+### Konfigurasi Halaman Inertia
+```php
+protected string $inertia_page_index = '';   // misal: 'Directory/Member/Index'
+protected string $inertia_page_create = '';  // misal: 'Directory/Member/Create'
+protected string $inertia_page_edit = '';    // misal: 'Directory/Member/Edit'
+protected string $inertia_page_view = '';    // misal: 'Directory/Member/View'
+```
+
+### Konfigurasi Route
+```php
+protected string $controller_base_route = '';    // misal: 'directory.member'
+protected string $controller_index_route = '';   // misal: 'directory.member.index'
+```
+
+## Properti Konfigurasi Opsional
+
+### Konfigurasi Pencarian & Filter
+```php
+protected array $searchable_fields = [];   // Field untuk pencarian global
+protected array $sortable_fields = [];     // Field yang boleh di-sort
+protected array $filter_casts = [];        // Casting tipe untuk filter
+```
+
+**Contoh**:
+```php
+$this->searchable_fields = ['name', 'email', 'phone', 'address'];
+$this->sortable_fields = ['created_at', 'updated_at', 'name', 'email'];
+$this->filter_casts = [
+    'status' => 'boolean',
+    'age' => 'integer',
+    'salary' => 'float'
+];
+```
+
+### Aturan Validasi
+```php
+protected array $validator_create = [];    // Rules untuk membuat record
+protected array $validator_update = [];    // Rules untuk update record
+```
+
+**Contoh**:
+```php
+private function setupValidation()
+{
+    $this->validator_create = [
+        'name' => 'required|string|max:255|unique:members,name',
+        'email' => 'required|email|unique:members,email',
+        'phone' => 'nullable|string|max:20',
+    ];
+    
+    $this->validator_update = [
+        'name' => 'required|string|max:255|unique:members,name,' . $this->request_id,
+        'email' => 'required|email|unique:members,email,' . $this->request_id,
+        'phone' => 'nullable|string|max:20',
+    ];
+}
+```
+
+### Pagination & Tampilan
+```php
+protected int $per_page = 15;                        // Item per halaman
+protected string $data_view_default = 'table';       // Tipe view default
+protected array $extra_props = [];                   // Props tambahan untuk view
+```
+
+### Otorisasi
+```php
+protected string $auth_entity = '';    // Nama entity otorisasi
+```
+
+**Contoh**:
+```php
+$this->auth_entity = 'all-members';
+```
+
+## Method Override
+
+### Modifikasi Query
+Override method ini untuk menambah logika query custom:
+
+```php
+public function additionalQuery(Request $request, $query, ?string $type = null)
+{
+    if ($type === 'index') {
+        // Tambah eager loading untuk index
+        $query->with(['category', 'tags']);
+        
+        // Tambah filter custom
+        if ($request->filled('category_id')) {
+            $query->where('category_id', $request->category_id);
+        }
+    }
+    
+    if ($type === 'view' || $type === 'edit') {
+        // Tambah relasi lebih detail untuk single item view/edit
+        $query->with(['category', 'tags', 'reviews.user']);
+    }
+    
+    return $query;
+}
+```
+
+### Kustomisasi Per Halaman
+```php
+public function index(Request $request)
+{
+    // Set data spesifik halaman
+    $this->data_object_extra = [
+        'totalActive' => $this->model->where('status', 'active')->count(),
+        'statistics' => $this->calculateStatistics(),
+    ];
+    
+    // Set breadcrumbs
+    $this->breadcrumbs = [
+        ['title' => 'Dashboard', 'href' => route('main.dashboard.index')],
+        ['title' => 'Bagian Anda', 'href' => route('your.section.index')],
+        ['title' => 'Daftar Entity Anda', 'href' => route($this->controller_index_route)],
+    ];
+    
+    return parent::index($request);
+}
+
+public function create(Request $request)
+{
+    // Tambah opsi form
+    $this->extra_props['categories'] = Category::orderBy('name')->get(['id', 'name']);
+    $this->extra_props['statuses'] = ['active', 'inactive', 'pending'];
+    
+    return parent::create($request);
+}
+```
+
+### Setup Opsi Form
+```php
+public function setupFormOptions(Request $request, $formOptions, $data = null)
+{
+    // Tambah opsi form dinamis berdasarkan data atau request saat ini
+    $formOptions['categories'] = Category::where('active', true)
+                                        ->orderBy('name')
+                                        ->get(['id', 'name']);
+    
+    if ($data && isset($data['category_id'])) {
+        $formOptions['subcategories'] = Subcategory::where('category_id', $data['category_id'])
+                                                   ->get(['id', 'name']);
+    }
+    
+    return $formOptions;
+}
+```
+
+## Lifecycle Hooks
+
+### Create Hooks
+```php
+protected function beforeStore(Request $request, array $validatedData): array
+{
+    // Modifikasi data sebelum disimpan
+    $validatedData['user_id'] = auth()->id();
+    $validatedData['slug'] = Str::slug($validatedData['name']);
+    
+    return $validatedData;
+}
+
+protected function afterStore(Request $request, Model $instance): void
+{
+    // Lakukan aksi setelah menyimpan
+    // Log activity
+    activity('created')
+        ->performedOn($instance)
+        ->withProperties($instance->toArray())
+        ->log('Membuat ' . $this->entity . ' baru');
+    
+    // Kirim notifikasi
+    // Clear cache
+    // dll.
+}
+```
+
+### Update Hooks
+```php
+protected function beforeUpdate(Request $request, array $validatedData, Model $instance): array
+{
+    // Simpan data original untuk perbandingan
+    $this->original_data = $instance->getOriginal();
+    
+    // Modifikasi data sebelum update
+    if (isset($validatedData['name']) && $validatedData['name'] !== $instance->name) {
+        $validatedData['slug'] = Str::slug($validatedData['name']);
+    }
+    
+    return $validatedData;
+}
+
+protected function afterUpdate(Request $request, Model $instance): void
+{
+    // Log perubahan
+    $changes = $instance->getChanges();
+    if (!empty($changes)) {
+        activity('updated')
+            ->performedOn($instance)
+            ->withProperties([
+                'old' => $this->original_data,
+                'new' => $changes
+            ])
+            ->log('Memperbarui ' . $this->entity);
+    }
+}
+```
+
+### Delete Hooks
+```php
+protected function beforeDestroy(Request $request, Model $instance): void
+{
+    // Cek dependensi
+    if ($instance->children()->count() > 0) {
+        throw new \Exception('Tidak dapat menghapus item yang memiliki child record');
+    }
+    
+    // Backup data
+    $this->backup_data = $instance->toArray();
+}
+
+protected function afterDestroy(Request $request, Model $instance): void
+{
+    // Bersihkan data terkait
+    // Log penghapusan
+    activity('deleted')
+        ->withProperties($this->backup_data)
+        ->log('Menghapus ' . $this->entity);
+}
+```
+
+## Konfigurasi Menu
+
+### Kontrol Level Menu Atas
+```php
+public function index(Request $request)
+{
+    // Kontrol level menu mana yang ditampilkan di navigasi atas
+    $this->generateTopMenu(1); // Tampilkan children dari grup aktif (default)
+    // $this->generateTopMenu(0); // Tampilkan grup utama sebagai gantinya
+    
+    return parent::index($request);
+}
+```
+
+## Fitur Lanjutan
+
+### Aksi Custom
+```php
+public function customAction(Request $request, $id)
+{
+    $item = $this->model->findOrFail($id);
+    
+    // Lakukan logika custom
+    $result = $this->performCustomOperation($item);
+    
+    $message = $result ? 'Operasi berhasil diselesaikan' : 'Operasi gagal';
+    $type = $result ? 'success' : 'error';
+    
+    return redirect()
+        ->route($this->controller_index_route)
+        ->with($type, $message);
+}
+```
+
+### Dukungan Modal
+```php
+public function index(Request $request)
+{
+    // Handle request modal
+    if ($request->filled('modal') && $request->filled('item_id')) {
+        $modalType = $request->input('modal');
+        $itemId = $request->input('item_id');
+        
+        switch ($modalType) {
+            case 'show-details':
+                $this->extra_props['modalData'] = $this->model
+                    ->with(['relations'])
+                    ->findOrFail($itemId);
+                break;
+        }
+    }
+    
+    return parent::index($request);
+}
+```
+
+## Contoh Lengkap
+
+```php
+<?php
+
+namespace App\Http\Controllers\Directory;
+
+use App\Http\Controllers\Core\AdminController;
+use App\Models\Directory\Member;
+use Illuminate\Http\Request;
+use Illuminate\Support\Str;
+
+class MemberController extends AdminController
+{
+    public function __construct()
+    {
+        // Properti yang diperlukan
+        $this->modelClass = Member::class;
+        $this->entity = 'Member';
+        $this->namespace = 'Directory';
+        
+        // Harus panggil parent constructor setelah set properti yang diperlukan
+        parent::__construct();
+        
+        // Konfigurasi controller
+        $this->setupController();
+    }
+    
+    private function setupController()
+    {
+        // Halaman Inertia
+        $this->inertia_page_index = 'Directory/Member/Index';
+        $this->inertia_page_create = 'Directory/Member/Create';
+        $this->inertia_page_edit = 'Directory/Member/Edit';
+        $this->inertia_page_view = 'Directory/Member/View';
+        
+        // Routes
+        $this->controller_base_route = 'directory.member';
+        $this->controller_index_route = 'directory.member.index';
+        
+        // Otorisasi
+        $this->auth_entity = 'all-members';
+        
+        // Konfigurasi pencarian & sort
+        $this->searchable_fields = ['name', 'email', 'phone', 'address'];
+        $this->sortable_fields = ['created_at', 'updated_at', 'name', 'email'];
+        
+        // Validasi
+        $this->validator_create = [
+            'name' => 'required|string|max:255',
+            'email' => 'required|email|unique:members,email',
+            'phone' => 'nullable|string|max:20',
+        ];
+        
+        $this->validator_update = [
+            'name' => 'required|string|max:255',
+            'email' => 'required|email|unique:members,email,' . $this->request_id,
+            'phone' => 'nullable|string|max:20',
+        ];
+    }
+    
+    public function additionalQuery(Request $request, $query, ?string $type = null)
+    {
+        if ($type === 'index') {
+            $query->with(['category', 'status']);
+        }
+        
+        return $query;
+    }
+    
+    public function index(Request $request)
+    {
+        $this->data_object_extra = [
+            'totalMembers' => Member::count(),
+            'activeMembers' => Member::where('status', 'active')->count(),
+        ];
+        
+        $this->breadcrumbs = [
+            ['title' => 'Dashboard', 'href' => route('main.dashboard.index')],
+            ['title' => 'Directory', 'href' => route('directory.dashboard.index')],
+            ['title' => 'Daftar Member', 'href' => route($this->controller_index_route)],
+        ];
+        
+        return parent::index($request);
+    }
+}
+```
+
+## Best Practices
+
+1. **Selalu panggil `parent::__construct()`** setelah setting properti yang diperlukan
+2. **Set breadcrumbs** di setiap method halaman untuk navigasi yang lebih baik
+3. **Gunakan lifecycle hooks** untuk logika bisnis yang kompleks
+4. **Konfigurasi field pencarian dan sort** untuk pengalaman pengguna yang lebih baik
+5. **Tambah aturan validasi yang tepat** untuk integritas data
+6. **Gunakan konvensi penamaan yang konsisten** untuk routes dan halaman
+7. **Handle otorisasi** melalui properti auth_entity
+8. **Tambah extra_props yang bermakna** untuk fungsionalitas UI yang lebih baik

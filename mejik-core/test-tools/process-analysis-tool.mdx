@@ -1,0 +1,230 @@
+---
+
+### **Comprehensive Guide: Adding Process Timing Logging**
+### **Panduan Komprehensif: Menambahkan Logging Waktu Proses**
+
+---
+
+### **Core Concept: The Request Lifecycle**
+### **Konsep Inti: Siklus Hidup Request**
+
+To log the total processing time, we need to:
+1.  **Record a start time** as soon as a request enters the application. A global **Middleware** is the perfect tool for this.
+2.  **Record an end time** and calculate the duration after the response has been sent to the user. Laravel's `terminating` application event is ideal because it runs *after* the user has received their content, meaning our logging logic will have zero impact on perceived speed.
+
+*Untuk mencatat total waktu proses, kita perlu:*
+1.  ***Mencatat waktu mulai*** *segera setelah sebuah request masuk ke aplikasi. **Middleware** global adalah alat yang paling tepat untuk ini.*
+2.  ***Mencatat waktu selesai*** *dan menghitung durasi setelah respons dikirimkan ke pengguna. Event aplikasi `terminating` milik Laravel sangat ideal karena berjalan *setelah* pengguna menerima konten mereka, yang berarti logika logging kita tidak akan berdampak sama sekali pada kecepatan yang dirasakan pengguna.*
+
+---
+
+### **Step 1: Create the Middleware to Capture Start Time**
+### **Langkah 1: Buat Middleware untuk Mencatat Waktu Mulai**
+
+This middleware will run on every request, setting a unique ID and a start timestamp.
+
+*Middleware ini akan berjalan pada setiap request, menetapkan ID unik dan timestamp awal.*
+
+**A. Create the Middleware file / Buat file Middleware**
+```bash
+php artisan make:middleware CaptureRequestMetrics
+```
+
+**B. Implement the logic / Implementasikan logika**
+Open `app/Http/Middleware/CaptureRequestMetrics.php` and add the following logic. This will also centralize the creation of our `request_id`.
+
+*Buka `app/Http/Middleware/CaptureRequestMetrics.php` dan tambahkan logika berikut. Ini juga akan memusatkan pembuatan `request_id` kita.*
+
+```php
+<?php
+
+namespace App\Http\Middleware;
+
+use Closure;
+use Illuminate\Http\Request;
+use Illuminate\Support\Str;
+
+class CaptureRequestMetrics
+{
+    public function handle(Request $request, Closure $next)
+    {
+        // Set a unique ID for the request if it doesn't already have one.
+        // This ensures both query logs and process logs can be linked.
+        // Tetapkan ID unik untuk request jika belum ada.
+        // Ini memastikan log kueri dan log proses dapat saling dihubungkan.
+        if (!$request->attributes->has('request_id')) {
+            $request->attributes->set('request_id', Str::uuid()->toString());
+        }
+
+        // Record the start time using a high-precision timer.
+        // Catat waktu mulai menggunakan timer berpresisi tinggi.
+        $request->attributes->set('request_start_time', microtime(true));
+
+        // Continue processing the request.
+        // Lanjutkan memproses request.
+        return $next($request);
+    }
+}
+```
+
+**C. Register the Middleware / Daftarkan Middleware**
+For this to run on every web request, add it to the global middleware stack in `app/Http/Kernel.php`. Add it to the `$middleware` property array.
+
+*Agar middleware ini berjalan pada setiap request web, tambahkan ke dalam tumpukan middleware global di `app/Http/Kernel.php`. Tambahkan ke array properti `$middleware`.*
+
+```php
+// app/Http/Kernel.php
+
+protected $middleware = [
+    // ... other middleware like TrustProxies, PreventRequestsDuringMaintenance etc.
+    \App\Http\Middleware\CaptureRequestMetrics::class,
+];
+```
+
+---
+
+### **Step 2: Create the Asynchronous Job for Process Logging**
+### **Langkah 2: Buat Job Asinkron untuk Logging Proses**
+
+This Job will be responsible for writing the process timing data to its own collection in MongoDB.
+
+*Job ini akan bertanggung jawab untuk menulis data waktu proses ke koleksinya sendiri di MongoDB.*
+
+**A. Create the Job file / Buat file Job**
+```bash
+php artisan make:job LogProcessTiming
+```
+
+**B. Implement the logic / Implementasikan logika**
+Open `app/Jobs/LogProcessTiming.php`. It's very similar to our query log job but writes to a different collection.
+
+*Buka `app/Jobs/LogProcessTiming.php`. Job ini sangat mirip dengan job log kueri kita tetapi menulis ke koleksi yang berbeda.*
+
+```php
+<?php
+
+namespace App\Jobs;
+
+use Illuminate\Bus\Queueable;
+use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Foundation\Bus\Dispatchable;
+use Illuminate\Queue\InteractsWithQueue;
+use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\DB;
+
+class LogProcessTiming implements ShouldQueue
+{
+    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+
+    protected array $logData;
+
+    public function __construct(array $logData)
+    {
+        $this->logData = $logData;
+    }
+
+    public function handle()
+    {
+        DB::connection('mongodb_logging')
+            ->collection('process_logs') // Use the new collection name
+            ->insert($this->logData);
+    }
+}
+```
+
+---
+
+### **Step 3: Update the Service Provider to Log on Termination**
+### **Langkah 3: Perbarui Service Provider untuk Melakukan Log saat Terminasi**
+
+We will now modify our existing `QueryLoggingServiceProvider` to listen for the application's `terminating` event.
+
+*Sekarang kita akan memodifikasi `QueryLoggingServiceProvider` yang sudah ada untuk mendengarkan event `terminating` dari aplikasi.*
+
+**A. Modify `QueryLoggingServiceProvider.php` / Modifikasi `QueryLoggingServiceProvider.php`**
+Add the new listener logic to the `boot()` method.
+
+*Tambahkan logika listener baru ke dalam method `boot()`.*
+
+```php
+<?php
+
+namespace App\Providers;
+
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\ServiceProvider;
+use Illuminate\Support\Str;
+use App\Jobs\LogQueryToMongo;
+use App\Jobs\LogProcessTiming; // <-- Import the new Job
+
+class QueryLoggingServiceProvider extends ServiceProvider
+{
+    public function boot()
+    {
+        if (config('app.debug')) {
+
+            // --- Database Query Listener (Existing Code) ---
+            // --- Listener Kueri Database (Kode yang Sudah Ada) ---
+            DB::listen(function ($query) {
+                // ... (no changes here)
+                if ($query->connectionName === 'mongodb_logging') return;
+                $logData = [
+                    'request_id' => request()->attributes->get('request_id', 'console'),
+                    // ... rest of the data
+                ];
+                LogQueryToMongo::dispatch($logData);
+            });
+
+
+            // --- NEW: Application Termination Listener ---
+            // --- BARU: Listener Terminasi Aplikasi ---
+            // This event fires after the response has been sent to the browser.
+            // Event ini dijalankan setelah respons dikirim ke browser.
+            $this->app->terminating(function () {
+                $startTime = request()->attributes->get('request_start_time');
+                $requestId = request()->attributes->get('request_id');
+
+                // If the start time wasn't set (e.g., in a console command), do nothing.
+                // Jika waktu mulai tidak diatur (misalnya, dalam perintah konsol), jangan lakukan apa-apa.
+                if (!$startTime || !$requestId) {
+                    return;
+                }
+
+                $logData = [
+                    'request_id'      => $requestId,
+                    'url'               => request()->fullUrl(),
+                    'method'            => request()->method(),
+                    'controller_action' => optional(request()->route())->getActionName(),
+                    'duration_ms'       => (microtime(true) - $startTime) * 1000,
+                    'memory_peak_mb'    => memory_get_peak_usage(true) / 1024 / 1024,
+                    'created_at'        => now()->toDateTimeString(),
+                ];
+
+                LogProcessTiming::dispatch($logData);
+            });
+        }
+    }
+}
+```
+
+### **How It Works Together**
+### **Bagaimana Semua Bekerja Bersama**
+
+1.  A request hits your application.
+*Sebuah request masuk ke aplikasi Anda.*
+2.  The `CaptureRequestMetrics` middleware runs first. It sets a unique `request_id` and a `request_start_time` on the request object.
+*Middleware `CaptureRequestMetrics` berjalan pertama kali. Ia menetapkan `request_id` unik dan `request_start_time` pada objek request.*
+3.  As your application processes the request, any database queries are caught by `DB::listen`. It dispatches a `LogQueryToMongo` job for each query, using the same `request_id`.
+*Saat aplikasi memproses request, setiap kueri database ditangkap oleh `DB::listen`. Ia mengirimkan job `LogQueryToMongo` untuk setiap kueri, menggunakan `request_id` yang sama.*
+4.  The application generates a response and sends it to the user.
+*Aplikasi menghasilkan respons dan mengirimkannya ke pengguna.*
+5.  **After the response is sent**, the `terminating` event fires.
+***Setelah respons dikirim***, *event `terminating` dijalankan.*
+6.  Our new listener calculates the total duration and peak memory usage. It then dispatches the `LogProcessTiming` job, also using the same `request_id`.
+*Listener baru kita menghitung total durasi dan penggunaan memori puncak. Kemudian ia mengirimkan job `LogProcessTiming`, juga menggunakan `request_id` yang sama.*
+7.  Your background queue worker processes both types of jobs, saving them to `query_logs` and `process_logs` respectively.
+*Worker antrian di latar belakang memproses kedua jenis job tersebut, menyimpannya ke koleksi `query_logs` dan `process_logs` secara berurutan.*
+
+Now, in your `application_logs` database, you can find a slow request in the `process_logs` collection and then use its `request_id` to find every single database query that was executed during that specific request in the `query_logs` collection.
+
+*Sekarang, di database `application_logs` Anda, Anda dapat menemukan request yang lambat di koleksi `process_logs` dan kemudian menggunakan `request_id`-nya untuk menemukan setiap kueri database yang dieksekusi selama request spesifik tersebut di koleksi `query_logs`.*

@@ -1,0 +1,370 @@
+---
+title: "XLSX Template Data Merge Commands"
+description: "Merging json data with xlsx template"
+---
+For PDF conversion from XLSX, **PhpSpreadsheet** recommends using libraries like `mPDF` or `TCPDF` because they are better at handling the grid-like structure of a spreadsheet. We will use **mPDF**.
+
+### Step 1: Install Additional Dependencies
+
+You already have `phpoffice/phpspreadsheet`. Now, add the PDF rendering library.
+```bash
+composer require mpdf/mpdf
+```
+This is **only required** if you intend to use the `--mode=pdf` option.
+
+### Step 2: The Final Command Code
+
+Replace the entire content of `app/Console/Commands/XlsxGenerateCommand.php` with this updated code. It now includes the mode-switching logic.
+
+```php
+<?php
+
+namespace App\Console\Commands;
+
+use Illuminate\Console\Command;
+use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\File;
+use PhpOffice\PhpSpreadsheet\IOFactory;
+use PhpOffice\PhpSpreadsheet\Spreadsheet;
+use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
+
+class XlsxGenerateCommand extends Command
+{
+    /**
+     * The name and signature of the console command.
+     *
+     * @var string
+     */
+    protected $signature = 'xlsx:generate
+                            {--template=storage/app/templates/report_template.xlsx : The path to the XLSX template file}
+                            {--output=storage/app/output/report : The base path for the generated file (extension is added automatically)}
+                            {--data=report_data.json : The path to the JSON data file}
+                            {--mode=merge : The output mode (merge, html, pdf)}';
+
+    /**
+     * The console command description.
+     *
+     * @var string
+     */
+    protected $description = 'Generate XLSX, HTML, or PDF files from an XLSX template and a JSON data file.';
+
+    /**
+     * Execute the console command.
+     */
+    public function handle()
+    {
+        $mode = $this->option('mode');
+        $templatePath = $this->option('template');
+        $outputPath = $this->option('output');
+        $dataPath = $this->option('data');
+
+        // 1. Validate inputs
+        if (!in_array($mode, ['merge', 'html', 'pdf'])) {
+            $this->error("Invalid mode '{$mode}'. Available modes are: merge, html, pdf.");
+            return 1;
+        }
+        if (!File::exists($templatePath)) {
+            $this->error("Template file not found at: {$templatePath}");
+            return 1;
+        }
+        if (!File::exists($dataPath)) {
+            $this->error("Data file not found at: {$dataPath}");
+            return 1;
+        }
+
+        $finalOutputPath = $this->getFinalOutputPath($outputPath, $mode);
+        File::ensureDirectoryExists(dirname($finalOutputPath));
+
+        try {
+            // 2. Process data and generate the spreadsheet object in memory
+            $spreadsheet = $this->generateMergedSpreadsheet($templatePath, $dataPath);
+
+            // 3. Save the spreadsheet in the requested format
+            $this->saveSpreadsheet($spreadsheet, $finalOutputPath, $mode);
+
+            $this->info(strtoupper($mode) . " file generated successfully at: {$finalOutputPath}");
+            return 0;
+
+        } catch (\Exception $e) {
+            $this->error("An error occurred: " . $e->getMessage());
+            return 1;
+        }
+    }
+
+    /**
+     * Loads template and data, performs the merge, and returns the Spreadsheet object.
+     */
+    private function generateMergedSpreadsheet(string $templatePath, string $dataPath): Spreadsheet
+    {
+        $data = json_decode(File::get($dataPath), true);
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            throw new \Exception("Invalid JSON in data file: " . json_last_error_msg());
+        }
+
+        $spreadsheet = IOFactory::load($templatePath);
+        $worksheet = $spreadsheet->getActiveSheet();
+
+        // Process loops first is crucial for correct row indexing
+        $this->processLoops($worksheet, $data);
+
+        // Process simple placeholders in all remaining cells
+        $this->processPlaceholders($worksheet, $data);
+
+        return $spreadsheet;
+    }
+
+    /**
+     * Saves the final Spreadsheet object to a file in the specified format.
+     */
+    private function saveSpreadsheet(Spreadsheet $spreadsheet, string $path, string $mode)
+    {
+        $writer = null;
+        switch($mode) {
+            case 'merge':
+                $writer = IOFactory::createWriter($spreadsheet, 'Xlsx');
+                break;
+            case 'html':
+                $writer = IOFactory::createWriter($spreadsheet, 'Html');
+                break;
+            case 'pdf':
+                if (!class_exists(\Mpdf\Mpdf::class)) {
+                     $this->error('PDF generation requires mPDF. Please run: composer require mpdf/mpdf');
+                     throw new \Exception('mPDF library not found.');
+                }
+                // This tells PhpSpreadsheet to use the mPDF library
+                $writer = IOFactory::createWriter($spreadsheet, 'Mpdf');
+                break;
+        }
+        $writer->save($path);
+    }
+
+    /**
+     * Finds and processes all loop markers `${foreach:key}`.
+     */
+    private function processLoops(Worksheet $worksheet, array $data)
+    {
+        // This method's logic remains the same as before
+        $loopMarkers = [];
+        foreach ($worksheet->getRowIterator() as $row) {
+            $cell = $worksheet->getCell('A' . $row->getRowIndex());
+            $cellValue = $cell->getValue();
+            if (is_string($cellValue) && preg_match('/^\${foreach:(.+)}$/', $cellValue, $matches)) {
+                $loopMarkers[$row->getRowIndex()] = $matches[1];
+            }
+        }
+
+        krsort($loopMarkers);
+
+        foreach ($loopMarkers as $rowIndex => $dataKey) {
+            $loopData = Arr::get($data, $dataKey, []);
+            if (empty($loopData)) {
+                $worksheet->removeRow($rowIndex);
+                continue;
+            }
+
+            $numItems = count($loopData);
+            if ($numItems > 1) {
+                $worksheet->insertNewRowBefore($rowIndex + 1, $numItems - 1);
+            }
+
+            for ($i = 0; $i < $numItems; $i++) {
+                $currentItem = $loopData[$i];
+                $currentRowIndex = $rowIndex + $i;
+
+                foreach ($worksheet->getColumnIterator() as $column) {
+                    $columnIndex = $column->getColumnIndex();
+                    $templateCell = $worksheet->getCell($columnIndex . $rowIndex);
+                    $currentCell = $worksheet->getCell($columnIndex . $currentRowIndex);
+
+                    if ($i > 0) {
+                        $currentCell->setXfIndex($templateCell->getXfIndex());
+                    }
+
+                    $templateValue = $templateCell->getValue();
+                    if (is_string($templateValue) && strpos($templateValue, '${') !== false) {
+                        $newValue = preg_replace_callback('/\${item\.(.+?)}/', function ($matches) use ($currentItem) {
+                            return Arr::get($currentItem, $matches[1], '');
+                        }, $templateValue);
+
+                        if (preg_match('/^\${foreach:.+}$/', $newValue)) {
+                           $currentCell->setValue($i + 1);
+                        } else {
+                           $currentCell->setValue($newValue);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Finds and replaces simple `${key.name}` placeholders.
+     */
+    private function processPlaceholders(Worksheet $worksheet, array $data)
+    {
+        // This method's logic remains the same as before
+        foreach ($worksheet->getRowIterator() as $row) {
+            foreach ($row->getCellIterator() as $cell) {
+                $cellValue = $cell->getValue();
+                if (is_string($cellValue) && strpos($cellValue, '${') !== false) {
+                    $newValue = preg_replace_callback('/\${(?!foreach:)(.+?)}/', function ($matches) use ($data) {
+                        return Arr::get($data, $matches[1], '');
+                    }, $cellValue);
+                    if ($newValue !== $cellValue) {
+                        $cell->setValue($newValue);
+                    }
+                }
+            }
+        }
+    }
+
+    /**
+     * Determines the final output path with the correct extension.
+     */
+    private function getFinalOutputPath(string $basePath, string $mode): string
+    {
+        $extensionMap = [
+            'merge' => '.xlsx',
+            'html' => '.html',
+            'pdf' => '.pdf',
+        ];
+        return $basePath . ($extensionMap[$mode] ?? '.xlsx');
+    }
+}
+
+```
+
+---
+
+## English Documentation (Updated)
+
+### **XLSX Universal Spreadsheet Generator Guide**
+
+This guide explains how to use the `xlsx:generate` command to create `.xlsx`, `.html`, or `.pdf` files from a single XLSX template and a JSON data source.
+
+#### **1. Setup and Installation**
+
+1.  **Prerequisites**:
+*   A working Laravel project.
+*   Composer installed.
+*   The `php-zip` PHP extension must be enabled.
+
+2.  **Install PhpSpreadsheet**:
+```bash
+composer require phpoffice/phpspreadsheet
+    ```
+3.  **PDF Generation Prerequisite**:
+To use the `pdf` mode, you must also install the **mPDF** rendering library.
+```bash
+composer require mpdf/mpdf
+    ```
+
+#### **2. Command Usage**
+
+**Command Signature:**
+```bash
+php artisan xlsx:generate {--template=} {--output=} {--data=} {--mode=}
+```
+
+**Options:**
+*   `--template`: Path to the input `.xlsx` template file.
+*   `--output`: Base path for the output file. The correct extension (`.xlsx`, `.html`, `.pdf`) will be added automatically.
+*   `--data`: Path to the JSON data file.
+*   `--mode`: The operation mode. **Default**: `merge`.
+*   `merge`: Merges JSON data into the template, creating a new `.xlsx` file.
+*   `html`: Merges data and converts the result to a single `.html` file.
+*   `pdf`: Merges data and converts the result to a `.pdf` file.
+
+**Examples:**
+```bash
+# Default: Create a merged XLSX file
+php artisan xlsx:generate
+
+# Create an HTML preview of a report
+php artisan xlsx:generate --output="reports/previews/oct_sales" --mode=html
+
+# Create a final PDF version of a report
+php artisan xlsx:generate --data="data/sales_final.json" --output="reports/final/oct_sales" --mode=pdf
+```
+
+#### **3. Template Tag Reference**
+
+(This section remains the same as the previous documentation, explaining `${variable}` and the `${foreach:key}` / `${item.key}` syntax for loops.)
+
+#### **4. Mode Explanations**
+
+*   **`merge` (default)**: This is the standard operation. It takes your data and template and produces a fully functional `.xlsx` file, preserving all cell styles, formulas, and formatting.
+
+*   **`html`**: This mode first merges the data and then converts the resulting spreadsheet into a single HTML file with an HTML table. It's excellent for embedding in web pages or for quick browser previews. All cell styling (colors, borders) is converted to inline CSS.
+
+*   **`pdf`**: This mode performs the data merge and then uses the **mPDF** rendering engine to convert the spreadsheet to a PDF. This is ideal for generating printable reports.
+*   **Requirement**: You must run `composer require mpdf/mpdf` first.
+*   **Note**: The conversion works best for standard report layouts. Extremely wide spreadsheets may be scaled to fit the page, which could affect readability.
+
+---
+
+## Dokumentasi Bahasa Indonesia (Diperbarui)
+
+### **Panduan Generator Spreadsheet Universal XLSX**
+
+Panduan ini menjelaskan cara menggunakan perintah `xlsx:generate` untuk membuat file `.xlsx`, `.html`, atau `.pdf` dari satu templat XLSX dan sumber data JSON.
+
+#### **1. Pengaturan dan Instalasi**
+
+1.  **Prasyarat**:
+*   Proyek Laravel yang sudah berjalan.
+*   Composer sudah terinstal.
+*   Ekstensi PHP `php-zip` harus diaktifkan.
+
+2.  **Instal PhpSpreadsheet**:
+```bash
+composer require phpoffice/phpspreadsheet
+    ```
+3.  **Prasyarat Mode PDF**:
+Untuk menggunakan mode `pdf`, Anda juga harus menginstal library rendering **mPDF**.
+```bash
+composer require mpdf/mpdf
+    ```
+
+#### **2. Penggunaan Perintah**
+
+**Struktur Perintah:**
+```bash
+php artisan xlsx:generate {--template=} {--output=} {--data=} {--mode=}
+```
+
+**Opsi:**
+*   `--template`: Path ke file templat `.xlsx` input.
+*   `--output`: Path dasar untuk file output. Ekstensi yang benar (`.xlsx`, `.html`, `.pdf`) akan ditambahkan secara otomatis.
+*   `--data`: Path ke file data JSON.
+*   `--mode`: Mode operasi. **Default**: `merge`.
+*   `merge`: Menggabungkan data JSON ke templat, menghasilkan file `.xlsx` baru.
+*   `html`: Menggabungkan data dan mengonversi hasilnya menjadi satu file `.html`.
+*   `pdf`: Menggabungkan data dan mengonversi hasilnya menjadi file `.pdf`.
+
+**Contoh:**
+```bash
+# Default: Membuat file XLSX yang sudah digabung
+php artisan xlsx:generate
+
+# Membuat pratinjau HTML dari sebuah laporan
+php artisan xlsx:generate --output="laporan/pratinjau/penjualan_okt" --mode=html
+
+# Membuat versi PDF final dari sebuah laporan
+php artisan xlsx:generate --data="data/penjualan_final.json" --output="laporan/final/penjualan_okt" --mode=pdf
+```
+
+#### **3. Referensi Tag Templat**
+
+(Bagian ini tetap sama seperti dokumentasi sebelumnya, menjelaskan sintaks `${variabel}` dan `${foreach:key}` / `${item.key}` untuk perulangan.)
+
+#### **4. Penjelasan Mode**
+
+*   **`merge` (default)**: Ini adalah operasi standar. Perintah ini mengambil data dan templat Anda dan menghasilkan file `.xlsx` yang fungsional, dengan mempertahankan semua gaya sel, formula, dan format.
+
+*   **`html`**: Mode ini pertama-tama menggabungkan data, lalu mengonversi spreadsheet yang dihasilkan menjadi satu file HTML dengan tabel HTML. Mode ini sangat baik untuk disematkan di halaman web atau untuk pratinjau cepat di browser. Semua gaya sel (warna, border) diubah menjadi inline CSS.
+
+*   **`pdf`**: Mode ini melakukan penggabungan data dan kemudian menggunakan mesin rendering **mPDF** untuk mengonversi spreadsheet menjadi PDF. Ini ideal untuk menghasilkan laporan yang dapat dicetak.
+*   **Kewajiban**: Anda harus menjalankan `composer require mpdf/mpdf` terlebih dahulu.
+*   **Catatan**: Konversi ini bekerja paling baik untuk tata letak laporan standar. Spreadsheet yang sangat lebar mungkin akan diskalakan agar sesuai dengan halaman, yang dapat memengaruhi keterbacaan.
+

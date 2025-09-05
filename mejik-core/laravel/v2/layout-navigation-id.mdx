@@ -1,0 +1,247 @@
+# Dokumentasi Sistem Layout dan Navigasi
+
+## Gambaran Umum
+
+Aplikasi menggunakan sistem layout hierarkis dengan beberapa komponen navigasi yang bekerja sama untuk memberikan pengalaman pengguna yang konsisten di seluruh halaman.
+
+## Arsitektur
+
+### Hirarki Komponen
+```
+AppLayout (Wrapper Utama)
+├── AppTopSidebarLayout
+    ├── AppShell (variant="sidebar")
+        ├── AppSidebar (Navigasi Kiri)
+        │   ├── Toggle Sidebar
+        │   ├── Item Menu (dari YAML)
+        │   └── Highlighting Status Aktif
+        └── AppContent
+            ├── TopBar (Navigasi Atas)
+            │   ├── Tombol Toggle Sidebar
+            │   ├── NavTopMenubar (Menu Kontekstual)
+            │   ├── Pemilih Bahasa
+            │   └── Toggle Tema
+            ├── Bar Breadcrumb
+            └── Konten Halaman
+```
+
+## Komponen Navigasi
+
+### 1. AppSidebar (Navigasi Kiri)
+**Lokasi**: `resources/js/components/AppSidebar.vue`
+
+**Tujuan**: Menu navigasi utama yang menampilkan semua bagian dan sub-bagian utama.
+
+**Fitur**:
+- Dapat dilipat/diperluas
+- Dukungan menu multi-level
+- Highlighting status aktif
+- Dukungan ikon
+- Visibilitas berdasarkan otorisasi
+
+**Sumber Data**: 
+- Utama: File YAML yang didefinisikan di `config/core/app.php`
+- Default: `resources/views/partials/app/dms/navnext.yml`
+- Tambahan: Menu Directory, Core, Parameter
+
+### 2. TopBar (Navigasi Atas)
+**Lokasi**: `resources/js/components/TopBar.vue`
+
+**Tujuan**: Navigasi kontekstual dan kontrol utilitas.
+
+**Komponen**:
+- **Toggle Sidebar**: Lipat/perluas sidebar kiri
+- **NavTopMenubar**: Item menu yang sadar konteks
+- **Pemilih Bahasa**: Dukungan multi-bahasa
+- **Toggle Tema**: Pergantian mode terang/gelap
+
+### 3. NavTopMenubar (Menu Kontekstual)
+**Lokasi**: `resources/js/components/NavTopMenubar.vue`
+
+**Tujuan**: Menampilkan item menu yang relevan dengan bagian aktif saat ini.
+
+**Logika**:
+- Menampilkan anak-anak dari grup menu utama yang sedang aktif
+- Kembali ke menu utama jika tidak ada top_menu yang disediakan
+- Mendukung menu dropdown untuk item yang memiliki anak
+
+## Alur Data Menu
+
+### 1. Pemrosesan Backend (AdminController)
+```php
+// Memuat file menu
+$this->menu = MenuUtil::loadResYaml($nav_file, $nav_path)->toArray();
+$dir_menu = MenuUtil::loadResYaml('nav', 'views/partials/app/directory')->toArray();
+// ... memuat menu lain
+
+// Menggabungkan semua menu
+$this->menu = array_merge($this->menu, $dir_menu, $core_menu, $parameter_menu);
+
+// Memproses menu
+$this->menu = MenuUtil::normalizeMenuUrls($this->menu);
+$this->menu = MenuUtil::translateMenu($this->menu);
+$this->menu = MenuUtil::markActiveMenuItems($this->menu);
+
+// Menghasilkan menu atas kontekstual
+$this->generateTopMenu(); // Membuat $this->top_menu
+```
+
+### 2. Penyampaian Prop Frontend
+```typescript
+// Komponen Halaman (mis., Directory/Member/Index.vue)
+interface Props {
+    menu?: NavItem[];           // Menu sidebar utama
+    icons?: {};                // Ikon menu
+    top_menu?: NavItem[];       // Menu atas kontekstual
+    top_menu_icons?: {};       // Ikon menu atas
+    // ... prop lainnya
+}
+
+// Sampaikan ke AppLayout
+<AppLayout 
+    :menu="menu" 
+    :icons="icons" 
+    :top_menu="top_menu" 
+    :top_menu_icons="top_menu_icons"
+>
+```
+
+### 3. Penggunaan Komponen
+```vue
+<!-- AppLayout.vue -->
+<AppLayout 
+    :menu="menu" 
+    :icons="icons" 
+    :top_menu="top_menu" 
+    :top_menu_icons="top_menu_icons"
+>
+
+<!-- TopBar.vue -->
+<NavTopMenubar 
+    :menu="props.top_menu || props.menu" 
+    :icons="props.top_menu_icons || props.icons"
+/>
+```
+
+## Konfigurasi Menu
+
+### Struktur Menu YAML
+```yaml
+- title: "Manajemen Dokumen"
+  auth: "dms-menu"
+  icon: "File"
+  url: "dms/main/dashboard"
+  children:
+    - title: Dashboard
+      auth: dms-repository
+      url: "dms/main/dashboard"
+      icon: "ChartPie"
+    - title: Repository
+      auth: dms-repository
+      url: "dms/repository"
+      icon: "FileStack"
+```
+
+### Properti Menu
+- **title**: Nama tampilan (dapat diterjemahkan)
+- **auth**: Persyaratan izin
+- **icon**: Nama ikon Lucide
+- **url**: Path navigasi
+- **children**: Item sub-menu
+- **isActive**: Ditetapkan secara otomatis berdasarkan URL saat ini
+
+## Deteksi Status Aktif
+
+### Cara Kerja
+1. **Ekstraksi Path Saat Ini**: Mendapatkan path request saat ini
+2. **Normalisasi URL**: Memastikan format path yang konsisten
+3. **Pencocokan Path**: Membandingkan URL item menu dengan path saat ini
+4. **Penandaan Hirarki**: Menandai parent sebagai aktif jika anak aktif
+
+### Implementasi
+```php
+// MenuUtil::markActiveMenuItems()
+$currentPath = Request::path();
+if (!str_starts_with($currentPath, '/')) {
+    $currentPath = '/' . $currentPath;
+}
+
+// Bandingkan path yang dinormalisasi
+if ($itemPath === $currentPath) {
+    $item['isActive'] = true;
+}
+```
+
+## Opsi Kustomisasi
+
+### 1. Konfigurasi Sidebar
+**Mode Rail**: Sidebar yang dilipat hanya menampilkan ikon
+```php
+// Di controller atau komponen
+$sidebarState = 'collapsed'; // atau 'expanded'
+```
+
+### 2. Toggle Navigasi Atas
+Aktifkan/nonaktifkan menu kontekstual navigasi atas:
+```php
+// Hasilkan menu atas (level 1 = anak dari grup aktif)
+$this->generateTopMenu(1);
+
+// Atau nonaktifkan menu atas
+$this->generateTopMenu(0); // Menampilkan grup utama sebagai gantinya
+```
+
+### 3. Sumber Menu
+Konfigurasi file YAML mana yang akan dimuat:
+```php
+// config/core/app.php
+'app_nav_path' => 'views/partials/app/dms',
+'app_nav_file' => 'navnext',
+
+// Di constructor AdminController
+$core_menu = MenuUtil::loadResYaml('user', 'views/partials/app/sys')->toArray();
+$dir_menu = MenuUtil::loadResYaml('nav', 'views/partials/app/directory')->toArray();
+```
+
+## Perilaku Responsif
+
+### Mobile/Tablet
+- Sidebar menjadi overlay alih-alih persisten
+- Navigasi atas beradaptasi dengan layar yang lebih kecil
+- Item menu dapat ditumpuk atau menjadi dropdown
+
+### Desktop
+- Sidebar dapat ditoggle antara mode rail dan penuh
+- Navigasi atas penuh dengan semua item kontekstual terlihat
+- Status hover dan transisi yang mulus
+
+## Pemecahan Masalah
+
+### Masalah Umum
+
+**1. Menu atas menampilkan item yang salah**
+- Periksa apakah komponen halaman mengirim prop `top_menu` ke AppLayout
+- Verifikasi `generateTopMenu()` dipanggil di controller
+- Pastikan status aktif menu ditetapkan dengan benar
+
+**2. Highlighting menu tidak berfungsi**
+- Periksa normalisasi URL di MenuUtil
+- Verifikasi logika pencocokan path
+- Pastikan URL menu memiliki format yang konsisten
+
+**3. Ikon tidak tampil**
+- Verifikasi nama ikon sesuai dengan komponen Lucide Vue Next
+- Periksa registri ikon di komponen NavTopMenubar
+- Pastikan ikon dimuat dengan benar di MenuUtil::getIcons()
+
+**4. Item menu berbasis izin tidak muncul**
+- Periksa implementasi AuthUtil::checkItem()
+- Verifikasi izin pengguna
+- Pastikan properti 'auth' ditetapkan dengan benar di YAML
+
+### Langkah Debug
+1. Periksa konsol browser untuk error
+2. Verifikasi struktur data menu di Vue DevTools
+3. Uji normalisasi URL dengan debug logging
+4. Validasi sintaks dan struktur YAML
+5. Periksa alur pemrosesan menu controller

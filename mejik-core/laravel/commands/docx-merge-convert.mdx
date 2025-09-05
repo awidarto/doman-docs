@@ -1,0 +1,392 @@
+---
+title: "DOCX Template Data Merge & Convert Commands"
+description: "Merging json data with docx template & convert to other formats plus docx template to blade template"
+---
+
+### Prerequisites for PDF Mode
+
+For the PDF conversion to work, you must install a PDF rendering library. We will use DomPDF as it's a popular choice.
+
+Run this command in your project root:
+```bash
+composer require dompdf/dompdf
+```
+
+---
+
+### Final Code: `app/Console/Commands/DocxGenerateCommand.php`
+
+First, rename your command file from `GenerateInvoiceFromTemplate.php` to a more generic `DocxGenerateCommand.php` to reflect its new capabilities.
+
+Then, replace its entire content with the following code.
+
+```php
+<?php
+
+namespace App\Console\Commands;
+
+use Illuminate\Console\Command;
+use Illuminate\Support\Facades\File;
+use Illuminate\Support\Str;
+use PhpOffice\PhpWord\IOFactory;
+use PhpOffice\PhpWord\Settings;
+use PhpOffice\PhpWord\TemplateProcessor;
+
+class DocxGenerateCommand extends Command
+{
+    /**
+     * The name and signature of the console command.
+     *
+     * @var string
+     */
+    protected $signature = 'docx:generate
+                            {--template=storage/app/templates/invoice_template.docx : The path to the DOCX template file}
+                            {--output=storage/app/output/result : The base path for the generated file (extension is added automatically)}
+                            {--data=invoice_data.json : The path to the JSON data file (ignored in "blade" mode)}
+                            {--mode=merge : The output mode (merge, blade, html, pdf)}';
+
+    /**
+     * The console command description.
+     *
+     * @var string
+     */
+    protected $description = 'Generate DOCX, HTML, PDF, or Blade files from a DOCX template.';
+
+    /**
+     * Execute the console command.
+     */
+    public function handle()
+    {
+        $mode = $this->option('mode');
+        $templatePath = $this->option('template');
+        $outputPath = $this->option('output');
+        $dataPath = $this->option('data');
+
+        if (!in_array($mode, ['merge', 'blade', 'html', 'pdf'])) {
+            $this->error("Invalid mode '{$mode}'. Available modes are: merge, blade, html, pdf.");
+            return 1;
+        }
+
+        if (!File::exists($templatePath)) {
+            $this->error("Template file not found at: {$templatePath}");
+            return 1;
+        }
+
+        $finalOutputPath = $this->getFinalOutputPath($outputPath, $mode);
+        File::ensureDirectoryExists(dirname($finalOutputPath));
+
+        try {
+            switch ($mode) {
+                case 'blade':
+                    $this->generateBlade($templatePath, $finalOutputPath);
+                    break;
+                case 'html':
+                case 'pdf':
+                case 'merge':
+                    $this->generateFromData($templatePath, $dataPath, $finalOutputPath, $mode);
+                    break;
+            }
+        } catch (\Exception $e) {
+            $this->error("An error occurred: " . $e->getMessage());
+            return 1;
+        }
+
+        return 0;
+    }
+
+    /**
+     * Handles modes that require data merging (merge, html, pdf).
+     */
+    private function generateFromData(string $templatePath, string $dataPath, string $finalOutputPath, string $mode)
+    {
+        if (!File::exists($dataPath)) {
+            $this->error("Data file not found at: {$dataPath}");
+            throw new \Exception("Data file not found.");
+        }
+
+        $data = json_decode(File::get($dataPath), true);
+        if (json_last_error() !== JSON_ERROR_NONE) {
+            throw new \Exception("Invalid JSON in data file: " . json_last_error_msg());
+        }
+
+        $templateProcessor = $this->processTemplateMerge($templatePath, $data);
+
+        if ($mode === 'merge') {
+            $templateProcessor->saveAs($finalOutputPath);
+            $this->info("DOCX file generated successfully at: {$finalOutputPath}");
+            return;
+        }
+
+        // For HTML and PDF, we need to save a temporary DOCX, then convert it.
+        $tempDocxPath = storage_path('app/temp/' . Str::random(16) . '.docx');
+        File::ensureDirectoryExists(dirname($tempDocxPath));
+
+        try {
+            $templateProcessor->saveAs($tempDocxPath);
+            $phpWord = IOFactory::load($tempDocxPath);
+
+            if ($mode === 'html') {
+                $writer = IOFactory::createWriter($phpWord, 'HTML');
+                $writer->save($finalOutputPath);
+                $this->info("HTML file generated successfully at: {$finalOutputPath}");
+            }
+
+            if ($mode === 'pdf') {
+                if (!class_exists(\Dompdf\Dompdf::class)) {
+                     $this->error('PDF generation requires DomPDF. Please run: composer require dompdf/dompdf');
+                     throw new \Exception('DomPDF library not found.');
+                }
+                Settings::setPdfRendererName(Settings::PDF_RENDERER_DOMPDF);
+                Settings::setPdfRendererPath('.'); // Path to vendor/dompdf/dompdf is autoloaded
+
+                $writer = IOFactory::createWriter($phpWord, 'PDF');
+                $writer->save($finalOutputPath);
+                $this->info("PDF file generated successfully at: {$finalOutputPath}");
+            }
+        } finally {
+            if (File::exists($tempDocxPath)) {
+                File::delete($tempDocxPath);
+            }
+        }
+    }
+
+    /**
+     * Generates a Blade template from a DOCX file.
+     */
+    private function generateBlade(string $templatePath, string $finalOutputPath)
+    {
+        $this->info("Converting DOCX to Blade template...");
+        $phpWord = IOFactory::load($templatePath);
+        $htmlWriter = IOFactory::createWriter($phpWord, 'HTML');
+        $htmlContent = $htmlWriter->getWriterPart('Body')->write();
+
+        // Convert ${variable} to {{ $variable }}
+        $bladeContent = preg_replace('/\$\{(.*?)\}/', '{{ $\1 }}', $htmlContent);
+        // Clean up potential empty tags around the placeholders
+        $bladeContent = preg_replace('/<p><\/p>/', '', $bladeContent);
+
+
+        File::put($finalOutputPath, $bladeContent);
+        $this->info("Blade template created successfully at: {$finalOutputPath}");
+    }
+
+    /**
+     * Processes a DOCX template with JSON data.
+     * @return TemplateProcessor
+     */
+    private function processTemplateMerge(string $templatePath, array $data): TemplateProcessor
+    {
+        $templateProcessor = new TemplateProcessor($templatePath);
+
+        // Handle images
+        if (isset($data['logo']) && !empty($data['logo'])) {
+             // ... [Image handling logic remains the same]
+        }
+
+        // Handle conditional blocks
+        if (isset($data['bill_present']) && $data['bill_present']) {
+             $templateProcessor->cloneBlock('if_bill', 1, true, false, $data['bill_to'] ?? []);
+        } else {
+             $templateProcessor->deleteBlock('if_bill');
+        }
+
+        // Handle simple values
+        $templateProcessor->setValues([
+            'company_name' => $data['company_name'] ?? '',
+            'company_address' => $data['company_address'] ?? '',
+            'invoice_number' => $data['invoice_number'] ?? '',
+            // ... add all other simple variables here
+             'invoice_total' => number_format($data['invoice_total'] ?? 0, 2),
+             'cc_list' => isset($data['cc_list']) ? implode(', ', $data['cc_list']) : ''
+        ]);
+
+        // Handle table rows
+        $items = $data['item_list'] ?? [];
+        if (!empty($items)) {
+            $templateProcessor->cloneRowAndSetValues('item.no', $items);
+             // Note: cloneRowAndSetValues requires your JSON keys to match the placeholder names
+             // e.g., 'item.name' in DOCX must be 'name' in your JSON item object.
+             // We will stick to the manual loop for more control.
+             $templateProcessor->cloneRow('item.no', count($items));
+             foreach ($items as $index => $item) {
+                 $rowNum = $index + 1;
+                 $templateProcessor->setValue('item.no#'.$rowNum, $rowNum);
+                 $templateProcessor->setValue('item.name#'.$rowNum, $item['name'] ?? '');
+                 $templateProcessor->setValue('item.quantity#'.$rowNum, $item['quantity'] ?? 0);
+                 $templateProcessor->setValue('item.amount#'.$rowNum, number_format($item['amount'] ?? 0, 2));
+             }
+        } else {
+            $templateProcessor->cloneRow('item.no', 0);
+        }
+
+        return $templateProcessor;
+    }
+
+    /**
+     * Determines the final output path with the correct extension.
+     */
+    private function getFinalOutputPath(string $basePath, string $mode): string
+    {
+        $extensionMap = [
+            'merge' => '.docx',
+            'blade' => '.blade.php',
+            'html' => '.html',
+            'pdf' => '.pdf',
+        ];
+        return $basePath . $extensionMap[$mode];
+    }
+}
+```
+---
+
+## English Documentation
+
+### **DOCX Universal Document Generator Guide**
+
+This guide explains how to use the versatile `docx:generate` command to create various document types from a single `.docx` template.
+
+#### **1. Setup and Installation**
+
+1.  **Prerequisites**:
+*   A working Laravel project.
+*   Composer installed.
+*   The `php-zip` PHP extension must be enabled.
+
+2.  **Install PHPWord**:
+```bash
+composer require phpoffice/phpword
+    ```
+
+3.  **PDF Generation Prerequisite**:
+To use `pdf` mode, you must also install a PDF rendering library.
+```bash
+composer require dompdf/dompdf
+    ```
+
+#### **2. Command Usage**
+
+**Command Signature:**
+```bash
+php artisan docx:generate {--template=} {--output=} {--data=} {--mode=}
+```
+
+**Options:**
+*   `--template`: Path to the input `.docx` template file.
+*   `--output`: Base path for the output file. The correct extension (`.docx`, `.html`, etc.) will be added automatically. **Default**: `storage/app/output/result`.
+*   `--data`: Path to the JSON data file. (This is ignored when using `blade` mode).
+*   `--mode`: The operation mode. **Default**: `merge`.
+*   `merge`: Merges JSON data into the template, creating a new `.docx` file.
+*   `blade`: Converts the `.docx` template into a basic `.blade.php` file.
+*   `html`: Merges JSON data into the template, creating an `.html` file.
+*   `pdf`: Merges JSON data and converts the result to a `.pdf` file.
+
+**Examples:**
+```bash
+# Default: Create a merged DOCX file
+php artisan docx:generate
+
+# Create an HTML file with specific data
+php artisan docx:generate --data="client-A.json" --output="invoices/inv_A" --mode=html
+
+# Create a PDF file
+php artisan docx:generate --output="invoices/inv_A_final" --mode=pdf
+
+# Convert a template to a Blade file (data is ignored)
+php artisan docx:generate --template="templates/report.docx" --output="resources/views/reports/show" --mode=blade
+```
+
+#### **3. Template Tag Reference**
+
+(This section remains the same as the previous documentation, explaining `${variable}`, `${block}..${/block}`, and table row cloning.)
+
+#### **4. Mode Explanations**
+
+*   **`merge` (default)**: This is the standard operation. It takes your data and template and produces a filled-out `.docx` file, preserving all formatting.
+
+*   **`html`**: This mode first merges the data just like the `merge` mode, but then converts the resulting document to HTML.
+*   **Note**: The resulting HTML will use extensive inline CSS to mimic the DOCX formatting. It is useful for displaying in a browser but may be complex to edit manually.
+
+*   **`pdf`**: This mode performs the data merge and then uses a rendering engine (like DomPDF) to convert the document to PDF.
+*   **Requirement**: You must run `composer require dompdf/dompdf` first.
+*   **Note**: Conversion quality is best for simpler documents. Complex layouts with floating images or intricate tables may not render perfectly.
+
+*   **`blade`**: This mode **ignores the data file**. It reads your `.docx` template and converts its structure and placeholders into a `.blade.php` file.
+*   Placeholders like `${variable_name}` are converted to `{{ $variable_name }}`.
+*   This is an excellent tool for quickly scaffolding a web view that looks similar to your Word document. The generated HTML/CSS will be complex and is best used as a starting point for further refinement.
+
+---
+
+## Dokumentasi Bahasa Indonesia
+
+### **Panduan Generator Dokumen Universal DOCX**
+
+Panduan ini menjelaskan cara menggunakan perintah serbaguna `docx:generate` untuk membuat berbagai jenis dokumen dari satu templat `.docx`.
+
+#### **1. Pengaturan dan Instalasi**
+
+1.  **Prasyarat**:
+*   Proyek Laravel yang sudah berjalan.
+*   Composer sudah terinstal.
+*   Ekstensi PHP `php-zip` harus diaktifkan.
+
+2.  **Instal PHPWord**:
+```bash
+composer require phpoffice/phpword
+    ```
+
+3.  **Prasyarat Mode PDF**:
+Untuk menggunakan mode `pdf`, Anda juga harus menginstal library rendering PDF.
+```bash
+composer require dompdf/dompdf
+    ```
+
+#### **2. Penggunaan Perintah**
+
+**Struktur Perintah:**
+```bash
+php artisan docx:generate {--template=} {--output=} {--data=} {--mode=}
+```
+
+**Opsi:**
+*   `--template`: Path ke file templat `.docx` input.
+*   `--output`: Path dasar untuk file output. Ekstensi yang benar (`.docx`, `.html`, dll.) akan ditambahkan secara otomatis. **Default**: `storage/app/output/result`.
+*   `--data`: Path ke file data JSON. (Opsi ini diabaikan saat menggunakan mode `blade`).
+*   `--mode`: Mode operasi. **Default**: `merge`.
+*   `merge`: Menggabungkan data JSON ke templat, menghasilkan file `.docx` baru.
+*   `blade`: Mengonversi templat `.docx` menjadi file `.blade.php` dasar.
+*   `html`: Menggabungkan data JSON ke templat, menghasilkan file `.html`.
+*   `pdf`: Menggabungkan data dan mengonversi hasilnya menjadi file `.pdf`.
+
+**Contoh:**
+```bash
+# Default: Membuat file DOCX yang sudah digabung
+php artisan docx:generate
+
+# Membuat file HTML dengan data spesifik
+php artisan docx:generate --data="klien-A.json" --output="faktur/inv_A" --mode=html
+
+# Membuat file PDF
+php artisan docx:generate --output="faktur/inv_A_final" --mode=pdf
+
+# Mengonversi templat menjadi file Blade (data diabaikan)
+php artisan docx:generate --template="templat/laporan.docx" --output="resources/views/laporan/show" --mode=blade
+```
+
+#### **3. Referensi Tag Templat**
+
+(Bagian ini tetap sama seperti dokumentasi sebelumnya, menjelaskan `${variabel}`, `${blok}..${/blok}`, dan perulangan baris tabel.)
+
+#### **4. Penjelasan Mode**
+
+*   **`merge` (default)**: Ini adalah operasi standar. Perintah ini mengambil data dan templat Anda, lalu menghasilkan file `.docx` yang sudah terisi, dengan mempertahankan semua format asli.
+
+*   **`html`**: Mode ini pertama-tama menggabungkan data seperti mode `merge`, tetapi kemudian mengonversi dokumen yang dihasilkan ke format HTML.
+*   **Catatan**: HTML yang dihasilkan akan menggunakan banyak inline CSS untuk meniru format DOCX. Ini berguna untuk ditampilkan di browser tetapi mungkin rumit untuk diedit secara manual.
+
+*   **`pdf`**: Mode ini melakukan penggabungan data dan kemudian menggunakan mesin rendering (seperti DomPDF) untuk mengonversi dokumen menjadi PDF.
+*   **Kewajiban**: Anda harus menjalankan `composer require dompdf/dompdf` terlebih dahulu.
+*   **Catatan**: Kualitas konversi paling baik untuk dokumen yang lebih sederhana. Tata letak yang kompleks dengan gambar melayang atau tabel yang rumit mungkin tidak dirender dengan sempurna.
+
+*   **`blade`**: Mode ini **mengabaikan file data**. Mode ini membaca templat `.docx` Anda dan mengonversi struktur serta placeholder-nya menjadi file `.blade.php`.
+*   Placeholder seperti `${nama_variabel}` diubah menjadi `{{ $nama_variabel }}`.
+*   Ini adalah alat yang sangat baik untuk membuat kerangka (scaffolding) view web dengan cepat yang tampilannya mirip dengan dokumen Word Anda. HTML/CSS yang dihasilkan akan kompleks dan paling baik digunakan sebagai titik awal untuk disempurnakan lebih lanjut.

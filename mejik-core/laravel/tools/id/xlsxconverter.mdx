@@ -1,0 +1,137 @@
+---
+title: "XLSX Converter"
+description: "Generate file excel dengan data atau file blade menggunakan template Excel"
+---
+
+## Dokumentasi: Perintah `convert:xlsx-matrix-tpl2blade`
+
+### 1. Gambaran Umum
+
+Perintah `convert:xlsx-matrix-tpl2blade` adalah sebuah *Artisan command* yang canggih, dirancang untuk menggunakan file Microsoft Excel (`.xlsx`) sebagai templat yang kompleks. Perintah ini dapat beroperasi dalam dua mode utama:
+
+1.  **Penggabungan Data (Data Merging):** Mengambil templat XLSX dan file data JSON untuk menghasilkan dokumen akhir yang sudah terisi. Hasilnya bisa berupa file XLSX baru (cocok untuk membuat laporan) atau file HTML yang sudah memiliki gaya (dalam format literal atau format "lean" yang bersih).
+2.  **Konversi Templat Blade:** Secara cerdas mengubah struktur dan tata letak dari templat XLSX langsung menjadi file Laravel Blade (`.blade.php`) yang bersih dan mudah dibaca manusia. Ini memungkinkan Anda untuk merancang *view* yang dinamis dan kompleks secara visual di dalam spreadsheet.
+
+Panduan ini akan mencakup cara membuat templat, menyusun data, dan menggunakan berbagai opsi perintah untuk penyimpanan lokal maupun *remote*.
+
+### 2. Panduan Pengguna (Superuser Guide)
+
+Bagian ini ditujukan untuk pengguna yang akan membuat templat dan menjalankan perintah.
+
+#### 2.1. Tanda Tangan Perintah (Command Signature)
+
+Struktur dasar perintah adalah sebagai berikut:
+
+```bash
+php artisan convert:xlsx-matrix-tpl2blade --template=<path> --out=<path> [options]
+```
+
+**Argumen yang Wajib Diisi:**
+
+| Argumen | Deskripsi | Contoh |
+| :--- | :--- | :--- |
+| `--template` | Path, URL, atau path disk (`disk:path`) menuju file templat `.xlsx`. | `s3:templates/memo.xlsx` |
+| `--out` | Path atau path disk (`disk:path`) untuk file hasil yang akan dibuat. | `s3:reports/memo-final.xlsx` |
+
+**Argumen Opsional:**
+
+| Argumen | Deskripsi |
+| :--- | :--- |
+| `--data` | Path, URL, atau path disk menuju file data `.json`. **Wajib** untuk format `html` dan `xlsx`. |
+| `--format` | Menentukan format output. Bisa `xlsx`, `html`, atau `blade`. (Default: `html`) |
+| `--body-only`| Untuk format `html` atau `blade`. Menghasilkan hanya konten inti tanpa pembungkus layout `@extends`. |
+| `--section` | Untuk format `html` atau `blade`. Menentukan nama `@section` Blade yang akan digunakan. (Default: `content`) |
+| `--lean` | Untuk format `html` atau `blade`. Menghasilkan `<table>` yang bersih dan semantik, bukan konversi literal yang berantakan. **Sangat Direkomendasikan.** |
+
+---
+
+#### 2.2. Membuat Templat XLSX
+
+Templat XLSX adalah tempat Anda merancang tata letak dokumen. Anda bisa menggunakan format Excel standar (tebal, warna, *merged cells*, dll.), dan perintah ini akan menjaganya. Kekuatannya datang dari direktif khusus yang diletakkan di dalam sel.
+
+##### **A. Aturan Sintaks Placeholder (Sangat Penting!)**
+Sintaks yang dibutuhkan untuk placeholder bergantung pada format output yang Anda pilih.
+
+| Format | Mode | Sintaks yang Diperlukan | Deskripsi |
+| :--- | :--- | :--- | :--- |
+| `xlsx` | (N/A) | `{{ docNo }}` | Gaya Vue, tanpa tanda dolar. |
+| `html` | (Default / Literal) | `{{ docNo }}` | Gaya Vue, tanpa tanda dolar. |
+| `html` | `--lean` | `{{ $docNo }}` | **Gaya Blade, dengan tanda dolar.** |
+| `blade` | (Apapun) | `{{ $docNo }}` | **Gaya Blade, dengan tanda dolar.** |
+
+##### **B. Placeholder Sederhana**
+-   **Tujuan:** Mengganti placeholder dengan nilai string atau angka sederhana dari file JSON.
+-   **Contoh (mode `xlsx`):** Sebuah sel dengan `{{ docNo }}` akan diganti dengan nilai dari *key* `docNo`.
+-   **Contoh (mode `blade`):** Sebuah sel dengan `{{ $docNo }}` akan diubah menjadi teks literal `{{ $docNo }}` di file Blade.
+
+##### **C. Daftar Sederhana (`list`)**
+-   **Sintaks:** `{{ list:key }}`
+-   **Tujuan:** Mengganti satu sel menjadi daftar item vertikal dari sebuah *array* sederhana di file JSON.
+-   **Contoh (mode `xlsx`):** Jika `ccTo` adalah `["Jane", "Jake"]`, sebuah sel dengan `{{ list:ccTo }}` akan diperluas menjadi dua baris.
+-   **Contoh (mode `blade`):** Sebuah sel dengan `{{ list:ccTo }}` akan diubah menjadi perulangan `@foreach` Blade.
+
+##### **D. Daftar URL (`urllist`)**
+-   **Sintaks:** `{{ urllist:key }}`
+-   **Tujuan:** Mengganti satu sel menjadi daftar *hyperlink* vertikal yang bisa diklik. Data JSON harus berupa *array of objects*, masing-masing dengan *key* `label` dan `url`.
+-   **Contoh (mode `blade`):** Sebuah sel dengan `{{ urllist:attachments }}` akan diubah menjadi perulangan `@foreach` yang menghasilkan tag `<a>`.
+
+##### **E. Daftar Matriks (Beberapa Daftar dalam Satu Baris)**
+-   **Aturan:** Perintah ini dapat menangani beberapa direktif `list` atau `urllist` dalam satu baris yang sama. Ia akan secara otomatis memperluas baris sesuai tinggi daftar yang *paling panjang*.
+-   **Contoh Templat:**
+| | C | D | E |
+|---|---|---|---|
+| **10** | `{{ list:ccTo }}` | BCC | `{{ list:bccTo }}` |
+
+##### **F. Tabel Data (`@tablehead` & `@tabledata`)**
+-   **Tujuan:** Untuk menghasilkan tabel multi-baris dan multi-kolom dari sebuah *array of objects*.
+-   **Sintaks & Aturan:**
+1.  Buat baris "header". Di sel `A`, tulis **`@tablehead`**. Di sel sebelah kanannya, tulis judul kolom (misalnya, "Nama Produk").
+2.  Buat baris "templat data". Di sel `A`, tulis **`@tabledata:key`**, di mana `key` adalah nama *array of objects* di JSON Anda (misalnya, `@tabledata:items`).
+3.  Di sel sebelah kanannya, tulis *key* yang sesuai dari objek JSON Anda (misalnya, `itemName`).
+
+##### **G. Direktif Blade (Hanya untuk `--format=blade` atau `html --lean`)**
+-   **Tujuan:** Untuk mengubah struktur spreadsheet menjadi templat Blade yang dinamis.
+-   **Sintaks & Aturan:**
+1.  Letakkan direktif kontrol Blade (misalnya, `@if`, `@foreach`, `@endif`) di sebuah sel, biasanya di kolom `A`.
+2.  Baris yang berisi direktif tersebut **tidak boleh memiliki konten lain**.
+-   **Contoh (mode `--lean`):**
+| | A | B |
+|---|---|---|
+| **16**| `@foreach($items as $item)` | |
+| **17**| `{{ $item->name }}` | `{{ $item->status }}` |
+| **18**| `@endforeach` | |
+
+---
+
+#### 2.3. Menghasilkan Output: Contoh
+
+##### **Format: `xlsx` (Penggabungan Data dengan Gaya Penuh)**
+Membaca templat dari S3 dan menyimpan hasilnya kembali ke S3.
+```bash
+php artisan convert:xlsx-matrix-tpl2blade \
+  --template="s3:templates/memo.xlsx" \
+  --data="s3:data/memo-data.json" \
+  --out="s3:reports/memo-final.xlsx" \
+  --format=xlsx
+```
+
+##### **Format: `html --lean` (Direkomendasikan untuk HTML)**
+Menghasilkan HTML yang bersih dan semantik dengan data yang sudah digabungkan. Templat Anda harus menggunakan sintaks `{{ $var }}` untuk ini.
+```bash
+php artisan convert:xlsx-matrix-tpl2blade \
+  --template="templates/memo-blade-syntax.xlsx" \
+  --data="data.json" \
+  --out="reports/clean-report.html" \
+  --format=html \
+  --lean
+```
+
+##### **Format: `blade` (Konversi Templat)**
+Mengubah struktur templat menjadi file `.blade.php` yang bersih.
+```bash
+php artisan convert:xlsx-matrix-tpl2blade \
+  --template="templates/memo-blade-syntax.xlsx" \
+  --out="resources/views/memos/show.blade.php" \
+  --format=blade \
+  --lean
+```
