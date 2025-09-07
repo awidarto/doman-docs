@@ -1,0 +1,215 @@
+---
+title: 'High Level Graph RAG Neo4J Knowledge Graph Implementation with ACL'
+---
+
+Here is a comprehensive example implementation covering:
+1.  Setting up the Access Control graph structure.
+2.  A single, efficient query to populate Neo4j with document data, vectors, and graph context.
+3.  How to perform a secure, role-based vector search that respects the access rules.
+
+---
+
+### Part 1: Initial Setup - Modeling Access Control in Neo4j
+
+This is a one-time setup (or something you'd manage via an admin panel). We will create the graph structure that represents your RBAC rules.
+
+The core idea is to model **Roles**, **Document Classes**, and the **Hierarchy of Confidentiality** as nodes in the graph.
+
+#### Step 1.1: Create Confidentiality Level Hierarchy
+
+This is the most powerful part. We model the "includes" relationship between levels.
+
+```cypher
+// Create the nodes for each level
+CREATE (:Confidentiality {level: 'Public', rank: 0});
+CREATE (:Confidentiality {level: 'Private', rank: 1});
+CREATE (:Confidentiality {level: 'Confidential', rank: 2});
+CREATE (:Confidentiality {level: 'TopSecret', rank: 3});
+
+// Create the hierarchy relationships
+MATCH (ts:Confidentiality {level: 'TopSecret'}), (c:Confidentiality {level: 'Confidential'}) MERGE (ts)-[:INCLUDES]->(c);
+MATCH (c:Confidentiality {level: 'Confidential'}), (p:Confidentiality {level: 'Private'}) MERGE (c)-[:INCLUDES]->(p);
+MATCH (p:Confidentiality {level: 'Private'}), (pub:Confidentiality {level: 'Public'}) MERGE (p)-[:INCLUDES]->(pub);
+```
+Now, if a role has access to 'Confidential', we can easily query if it also has access to 'Private' by traversing the `[:INCLUDES]` path.
+
+#### Step 1.2: Create Document Classes and Roles
+
+```cypher
+// Create some example Document Classes
+CREATE (:DocClass {name: 'ResearchPaper'});
+CREATE (:DocClass {name: 'FinancialReport'});
+CREATE (:DocClass {name: 'InternalMemo'});
+
+// Create some example Roles from your Laravel app
+CREATE (:Role {name: 'Admin'});
+CREATE (:Role {name: 'Researcher'});
+CREATE (:Role {name: 'FinanceAnalyst'});
+```
+
+#### Step 1.3: Assign Permissions to Roles
+
+Now we connect the roles to the rules.
+
+```cypher
+// --- Assign Permissions ---
+
+// Admins can access everything up to TopSecret
+MATCH (r:Role {name: 'Admin'}), (c:Confidentiality {level: 'TopSecret'})
+MERGE (r)-[:HAS_ACCESS_UP_TO]->(c);
+// (Admins don't need DocClass rules if they can see all of them. Or you can add them for explicitness)
+MATCH (r:Role {name: 'Admin'}), (dc:DocClass)
+MERGE (r)-[:CAN_ACCESS]->(dc);
+
+
+// Researchers can access ResearchPapers up to a Confidential level
+MATCH (r:Role {name: 'Researcher'}), (dc:DocClass {name: 'ResearchPaper'})
+MERGE (r)-[:CAN_ACCESS]->(dc);
+MATCH (r:Role {name: 'Researcher'}), (c:Confidentiality {level: 'Confidential'})
+MERGE (r)-[:HAS_ACCESS_UP_TO]->(c);
+
+
+// FinanceAnalysts can access FinancialReports up to a Confidential level
+MATCH (r:Role {name: 'FinanceAnalyst'}), (dc:DocClass {name: 'FinancialReport'})
+MERGE (r)-[:CAN_ACCESS]->(dc);
+MATCH (r:Role {name: 'FinanceAnalyst'}), (c:Confidentiality {level: 'Confidential'})
+MERGE (r)-[:HAS_ACCESS_UP_TO]->(c);
+
+// Also let FinanceAnalyst see public internal memos
+MATCH (r:Role {name: 'FinanceAnalyst'}), (dc:DocClass {name: 'InternalMemo'})
+MERGE (r)-[:CAN_ACCESS]->(dc);
+// Note: Their max confidentiality level is already set, so they can only see Public/Private memos.
+```
+
+With this graph structure in place, the foundation for secure querying is set.
+
+---
+
+### Part 2: Populating Neo4j from Laravel
+
+In your `ProcessDocumentJob`, after getting the results from `docling` and `Gemini`, you will execute a single, powerful Cypher query.
+
+**Assumptions:**
+*   You have created a vector index:
+```cypher
+CREATE VECTOR INDEX document_chunk_embeddings IF NOT EXISTS
+FOR (c:Chunk) ON (c.embedding)
+OPTIONS { indexProvider: 'vector-2.0', dimension: 768, similarityFunction: 'cosine' }
+    ```
+*   Your Laravel job has the following data prepared:
+```php
+$documentData = [
+    'id' => $this->document->id, // Your Laravel document ID
+    'title' => 'Q3 Financial Results',
+    'doc_class' => 'FinancialReport', // From the document object
+    'confidentiality' => 'Confidential', // From the document object
+];
+
+$chunksWithEmbeddings = [
+    ['text' => 'Revenue was up by 15%...', 'embedding' => [0.1, 0.2, ...]],
+    ['text' => 'Operating costs decreased...', 'embedding' => [0.3, 0.4, ...]],
+];
+
+$entities = [
+    ['name' => 'Alice', 'type' => 'Person'],
+    ['name' => 'Q3 Report', 'type' => 'Report'],
+];
+
+$relationships = [
+    ['source' => 'Alice', 'target' => 'Q3 Report', 'type' => 'AUTHORED'],
+];
+    ```
+
+#### The All-in-One Cypher Query
+
+This query will be executed with the data above as parameters.
+
+```cypher
+// 1. Create or update the Document node with its access control properties
+MERGE (doc:Document {id: $documentData.id})
+SET doc.title = $documentData.title,
+    doc.doc_class = $documentData.doc_class,
+    doc.confidentiality = $documentData.confidentiality
+
+// 2. Create chunk nodes, set their vectors, and link them to the document
+WITH doc
+UNWIND $chunks as chunkData
+CREATE (c:Chunk {text: chunkData.text, embedding: chunkData.embedding})
+MERGE (doc)-[:HAS_CHUNK]->(c)
+
+// 3. Merge entities to avoid duplicates across documents
+WITH doc
+UNWIND $entities as entityData
+MERGE (e:Entity {name: entityData.name, type: entityData.type})
+MERGE (doc)-[:MENTIONS]->(e) // Link the document to the entity it mentions
+
+// 4. Create the relationships between the entities
+WITH doc
+UNWIND $relationships as relData
+MATCH (source:Entity {name: relData.source})
+MATCH (target:Entity {name: relData.target})
+MERGE (source)-[r:RELATES_TO {type: relData.type, document_id: doc.id}]->(target)
+
+RETURN count(doc) as success
+```
+
+You would execute this from your Laravel job using a Neo4j client library, passing all your data in one go. This is highly efficient.
+
+---
+
+### Part 3: Secure, Role-Based Querying from Laravel
+
+This is where everything comes together. When a user performs a search in your Laravel app, your backend will:
+1.  Get the user's role (e.g., 'Researcher').
+2.  Convert the user's search query into a vector using the Gemini API.
+3.  Execute the following secure Cypher query, passing the role and query vector as parameters.
+
+#### The Secure Hybrid Query (Vector Search + Access Control)
+
+```cypher
+// Parameters to be passed from Laravel:
+// $userRole: "Researcher"
+// $queryVector: [0.5, 0.6, ...] (embedding of the user's search query)
+// $limit: 10
+
+// 1. Perform the vector search to find candidate chunks
+CALL db.index.vector.queryNodes('document_chunk_embeddings', $limit, $queryVector) YIELD node AS chunk, score
+
+// 2. Find the document containing this chunk
+MATCH (doc:Document)-[:HAS_CHUNK]->(chunk)
+
+// 3. --- THIS IS THE ACCESS CONTROL LOGIC ---
+// Find the role of the current user
+MATCH (userRole:Role {name: $userRole})
+// Find the confidentiality level of the document
+MATCH (docConfidentiality:Confidentiality {level: doc.confidentiality})
+
+// Check the two access rules in the WHERE clause
+WHERE
+    // Rule 1: Does the user's role have permission to access this document's class?
+    EXISTS((userRole)-[:CAN_ACCESS]->(:DocClass {name: doc.doc_class}))
+  AND
+    // Rule 2: Does the user's role have access up to the document's confidentiality level?
+    // This traverses the :INCLUDES hierarchy we created. e.g., if a user has access to Confidential,
+    // this path will exist for documents that are Confidential, Private, or Public.
+    EXISTS((userRole)-[:HAS_ACCESS_UP_TO]->(allowedConf) WHERE (allowedConf)-[:INCLUDES*0..]->(docConfidentiality))
+
+
+// 4. Return the secure results
+RETURN
+  doc.id as documentId,
+  doc.title as documentTitle,
+  chunk.text as relevantText,
+  score
+ORDER BY score DESC
+```
+
+#### How it Works:
+
+*   A **FinanceAnalyst** searching for "company performance" will get results from `FinancialReport` documents. They will **not** see any `ResearchPaper` documents, even if they are a perfect vector match.
+*   A **Researcher** searching for the same term will get results from `ResearchPaper` documents but **not** from `FinancialReport` documents.
+*   If a `TopSecret` document exists, neither the Researcher nor the Analyst will see it in their results, regardless of the query. Only an **Admin** would.
+*   The `[:INCLUDES*0..]` syntax is a variable-length path match. It means "find a path of zero or more `INCLUDES` relationships," which is a very efficient and declarative way to check hierarchical permissions.
+
+By designing your graph this way, you bake your business's access control rules directly into the database structure, leading to queries that are both powerful and secure by default.
+

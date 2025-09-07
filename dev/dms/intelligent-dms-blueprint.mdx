@@ -1,0 +1,806 @@
+---
+title: 'Intelligent DMS Blueprint'
+---
+### Core Components & Architecture
+
+Before diving into the features, let's establish a few core components you'll need in your Laravel app.
+
+1.  **Gemini Service Wrapper:** Create a service class in Laravel (`app/Services/GeminiService.php`) to abstract the Gemini API calls. This will keep your code clean. It should have methods like:
+*   `extractTextFromImage(string $base64Image): string` (Uses Gemini Vision)
+*   `extractStructuredData(string $text, string $schemaPrompt): array` (Uses Gemini for JSON extraction)
+*   `classifyTopic(string $text, array $availableTopics): string` (Uses Gemini for classification)
+*   `generateCypherQuery(string $naturalLanguageQuery): string` (The "RAG" part for retrieval)
+
+2.  **Neo4j Service:** A service to handle all Cypher queries, using a package like `laudis/neo4j-php-client`.
+
+3.  **Call Code Generator Service:** A dedicated service (`app/Services/CallCodeGenerator.php`) responsible for creating your unique identifiers. This is crucial because it needs to query existing data to determine the next sequence number.
+
+---
+
+### Feature 1: Expense Reporting from Image Upload
+
+This is a classic "intelligent document processing" workflow.
+
+**Architectural Blueprint:**
+
+1.  **Laravel Controller (Upload):**
+*   Create an API endpoint, e.g., `POST /api/documents/upload-receipt`.
+*   The controller receives the uploaded file (`$request->file('receipt')`).
+*   It performs basic validation (is it an image? size limit?).
+*   **Crucially, it dispatches a Job.** This is an async process and shouldn't block the user's request.
+*   Return an immediate response to the user like `{'message': 'Receipt received and is being processed.'}`.
+
+```php
+// In DocumentController.php
+public function uploadReceipt(Request $request)
+{
+    $request->validate(['receipt' => 'required|image|max:10240']);
+    $path = $request->file('receipt')->store('temp-receipts');
+
+    ProcessReceiptJob::dispatch(storage_path('app/' . $path), auth()->user());
+
+    return response()->json(['message' => 'Receipt is being processed.'], 202);
+}
+    ```
+
+2.  **Laravel Job (`ProcessReceiptJob`):**
+This is where the magic happens.
+
+*   **Step A: OCR with Gemini Vision:**
+*   Read the image file and base64-encode it.
+*   Call your `GeminiService->extractTextFromImage()`. Gemini Vision is excellent at this.
+
+*   **Step B: Structured Data Extraction with Gemini:**
+*   Take the raw text from Step A.
+*   Create a detailed prompt for Gemini telling it to act as a data entry specialist and extract information into a specific JSON format.
+*   **Prompt Engineering is Key Here:**
+```prompt
+Given the following text from a receipt, extract the information into a valid JSON object. The JSON must have the following keys: "vendor_name", "transaction_date" (in YYYY-MM-DD format), "total_amount" (as a float), "currency", "invoice_number" (if present), and "line_items" (an array of objects with "description" and "price").
+
+Text:
+"""
+{{receipt_text}}
+"""
+            ```
+*   Call `GeminiService->extractStructuredData()` with this prompt. Parse the JSON response.
+
+*   **Step C: Store in MongoDB:**
+*   Use Laravel's MongoDB model to create a new document in your `receipts` collection with the structured data from Step B.
+
+*   **Step D: Create Graph in Neo4j:**
+*   Connect to Neo4j via your service.
+*   Execute a Cypher query to create the nodes and relationships. This builds your knowledge graph.
+*   **Nodes:** `Document`, `Vendor`, `User`, `Department`.
+*   **Relationships:** `[:UPLOADED]`, `[:BELONGS_TO]`, `[:INVOICED_BY]`.
+
+```cypher
+// Example Cypher Query
+MERGE (d:Document {mongo_id: $mongoId, type: 'Receipt'})
+MERGE (u:User {id: $userId})
+MERGE (v:Vendor {name: $vendorName})
+MERGE (dep:Department {name: $userDepartment})
+
+MERGE (u)-[:UPLOADED]->(d)
+MERGE (d)-[:INVOICED_BY]->(v)
+MERGE (d)-[:FILED_BY_DEPARTMENT]->(dep)
+        ```
+
+---
+
+### Feature 2: Financial Data Ingesting from Chat
+
+This is a Natural Language Understanding (NLU) task.
+
+**Architectural Blueprint:**
+
+1.  **Ingestion Endpoint:**
+*   Create a Laravel controller/endpoint (`POST /api/chat-ingest`) that can be called by your app's chatbox, or a webhook for Telegram/WhatsApp.
+*   It receives the user's text message, e.g., `{"message": "paid $45.50 to Shell for gas today", "user_id": 123}`.
+*   Like before, dispatch a job: `ProcessChatMessageJob::dispatch($message, $user)`.
+
+2.  **Laravel Job (`ProcessChatMessageJob`):**
+
+*   **Step A: Entity & Intent Recognition with Gemini:**
+*   This is very similar to Feature 1, Step B.
+*   You'll send the chat message to your `GeminiService` with a prompt designed to extract entities.
+*   **Prompt Example:**
+```prompt
+Analyze the following text from a user and extract the financial transaction details into a JSON object. The keys should be "payee", "amount", "currency", "transaction_date", and "category". Infer today's date if not specified.
+
+Text:
+"""
+{{chat_message}}
+"""
+            ```
+*   **Step B: Data Validation & Enrichment:**
+*   The returned JSON might be incomplete. Your job should validate it.
+*   If a `payee` is found, you can look it up in your `Vendors` table/node to see if it's a known entity.
+*   Enrich the data with user info (department, ownership).
+
+*   **Step C: Store in MongoDB & Neo4j:**
+*   Follow the same logic as Feature 1 (Steps C & D) to store the structured data and create the graph nodes/relationships.
+
+---
+
+### Feature 3: Document Retrieval Interface
+
+This is the core "Retrieval" part of RAG. You're using the graph to answer questions.
+
+**Architectural Blueprint:**
+
+1.  **Frontend (Vue/React/Livewire):**
+*   A chat interface where the user types their query.
+*   A results area that can render a list/table of documents. Each row should be expandable to show metadata.
+
+2.  **Backend API Endpoint (`GET /api/documents/search`):**
+*   Receives the natural language query, e.g., `?q=show me all invoices from ACME Corp in Q4 2023`.
+
+3.  **Controller/Service Logic (The RAG Core):**
+*   **Method A (Recommended for Reliability): Entity Extraction to Query**
+1.  Send the user's query to Gemini with a prompt to extract *search parameters* as JSON.
+```prompt
+Analyze the user's search query and extract the following parameters as a JSON object: "document_type", "vendor_name", "start_date", "end_date", "topic".
+
+Query: "show me all invoices from ACME Corp in Q4 2023"
+
+// Expected Gemini Response:
+{
+  "document_type": "Invoice",
+  "vendor_name": "ACME Corp",
+  "start_date": "2023-10-01",
+  "end_date": "2023-12-31"
+}
+            ```
+2.  In your Laravel code, take this clean JSON and programmatically build a precise Cypher query. This is safer than letting the LLM generate the full query.
+```php
+// In your service
+$cypher = "MATCH (d:Document)-[:INVOICED_BY]->(v:Vendor) WHERE v.name = \$vendorName AND d.date >= date(\$startDate) AND d.date <= date(\$endDate) RETURN d";
+$params = [...];
+$results = $neo4jService->query($cypher, $params);
+            ```
+
+*   **Method B (More Advanced): LLM-Generated Cypher**
+1.  Give Gemini your graph schema and ask it to convert the user's question directly into a Cypher query. This is more powerful but can be less reliable.
+2.  You **must** validate the generated Cypher to prevent injection or errors before executing it.
+
+4.  **Format Response:**
+*   The Neo4j results will be a collection of nodes.
+*   For each `Document` node, fetch its full metadata from MongoDB using the `mongo_id` stored in the node.
+*   Format this into a clean JSON array and send it to the frontend to be rendered.
+
+---
+
+### Feature 4: Automated Categorization and Call Code Generation
+
+This integrates directly into the upload workflow (Feature 1).
+
+**Architectural Blueprint (modifying `ProcessReceiptJob`):**
+
+In your `ProcessReceiptJob` or a similar job for general documents:
+
+1.  **After OCR (Step A):**
+*   Take the full document text.
+
+2.  **New Step: Topic Classification:**
+*   Call your `GeminiService->classifyTopic()`.
+*   The prompt must include the list of predefined topics and their codes.
+```prompt
+Based on the document content below, classify it into one of the following predefined topics. Respond with ONLY the corresponding topic_code.
+
+Available Topics:
+- [FIN-01] Vendor Invoice
+- [FIN-02] Expense Report
+- [HR-01] Employment Contract
+- [LEG-01] Non-Disclosure Agreement
+
+Document Content:
+"""
+{{document_text}}
+"""
+        ```
+*   This will return a `topic_code` like `FIN-01`.
+
+3.  **New Step: Feature Extraction:**
+*   Similar to the classification step, create a prompt to find the specific value for the `feature` part of your Call Code.
+*   You can even make this a multi-step call: first classify, then based on the classification, use a different prompt to extract the feature.
+*   If `topic_code` is `FIN-01`, prompt for "Invoice Number".
+*   If it's an "SO", prompt for "Sales Order No.".
+*   This will return the `feature_value`, e.g., `"INV-98765"`.
+
+4.  **Final Step: Call Code Generation:**
+*   Now you have all the pieces:
+*   `ownership` & `department` (from the `auth()->user()`)
+*   `topic_code` (from classification step)
+*   `feature_value` (from feature extraction step)
+*   Call your `CallCodeGeneratorService`.
+*   This service will query Neo4j/MongoDB to find the highest sequence number for the `ownership-department-topic` combination and calculate the next one.
+```cypher
+// Query to get the max sequence number
+MATCH (d:Document)
+WHERE d.ownership = $ownership AND d.department = $department AND d.topic = $topic
+RETURN max(d.sequence) as maxSequence
+        ```
+*   The service constructs the full Call Code: `USER1-FINANCE-FIN01-INV98765-0012`.
+*   Save this Call Code to both your MongoDB document and the Neo4j node properties.
+
+## Streaming Result
+
+Excellent question. This shows you're thinking deeply about user experience. A long-running AI generation process can feel slow, and streaming the result token-by-token (like ChatGPT does) dramatically improves the perceived performance and engagement.
+
+First, let's clarify the library name. **Laravel Prism** is typically a wrapper for the Prism.js syntax highlighter. It's possible you're thinking of a different library, but the concept you're describing—streaming a response to the browser—is most commonly and efficiently achieved in Laravel using **Server-Sent Events (SSE)** with Laravel's built-in `StreamedResponse`.
+
+This is a *perfect* fit for your **Feature 3 (Document Retrieval Interface)**. Let's design the architecture for that.
+
+### Why Server-Sent Events (SSE)?
+
+*   **Simple:** It's a standard web technology that works over regular HTTP. No complex WebSocket servers are needed.
+*   **Efficient:** It's designed for one-way communication (server to client), which is exactly what you need for an AI response.
+*   **Laravel Support:** Laravel has a first-class `Symfony\Component\HttpFoundation\StreamedResponse` object that makes implementing SSE straightforward.
+
+---
+
+### Architectural Blueprint for Streamed Results (Feature 3)
+
+We'll modify the architecture for Feature 3 to incorporate streaming.
+
+#### 1. Modify Your `GeminiService`
+
+Your service needs to be able to handle a streaming request to the Gemini API. Most modern AI SDKs support this. Instead of returning a single string, the method will now `yield` chunks of the response as they arrive.
+
+```php
+// app/Services/GeminiService.php
+
+use Google\Cloud\AIPlatform\V1\GenerateContentRequest;
+use Google\Cloud\AIPlatform\V1\VertexAI\GeminiClient;
+
+class GeminiService
+{
+    // ... other methods
+
+    /**
+     * Generates a response from Gemini and streams the result.
+     *
+     * @param string $prompt
+     * @return \Generator
+     */
+    public function generateStreamedResponse(string $prompt): \Generator
+    {
+        // Assuming you're using the official Google Cloud PHP library
+        // or a similar SDK that supports streaming.
+
+        $client = new GeminiClient(/* ... your config ... */);
+
+        $request = new GenerateContentRequest();
+        // Setup your request with the prompt...
+
+        // This is the key part: call the streaming method
+        $stream = $client->streamGenerateContent($request);
+
+        foreach ($stream->iterateAllElements() as $response) {
+            // Check for errors
+            if ($response->getCandidates()->get(0)->getFinishReason()) {
+                // You might get stop reasons etc. here
+                continue;
+            }
+
+            // Yield the actual text chunk
+            $textChunk = $response->getCandidates()->get(0)->getContent()->getParts()->get(0)->getText();
+            yield $textChunk;
+        }
+    }
+}
+```
+
+#### 2. Create the Streaming Controller Endpoint
+
+This controller will return a `StreamedResponse`. This response type keeps the HTTP connection open and allows you to send data chunks.
+
+```php
+// app/Http/Controllers/DocumentController.php
+
+use App\Services\GeminiService;
+use Symfony\Component\HttpFoundation\StreamedResponse;
+
+class DocumentController extends Controller
+{
+    // ... other methods
+
+    public function streamSearch(Request $request, GeminiService $geminiService)
+    {
+        $query = $request->input('q', 'list all documents');
+
+        // Create the prompt for Gemini to generate the Cypher query or a summary
+        $prompt = "Based on the user query, provide a natural language summary and then the structured data. Query: '{$query}'";
+
+        $response = new StreamedResponse(function () use ($geminiService, $prompt) {
+            // Set headers for SSE
+            header('Content-Type', 'text/event-stream');
+            header('Cache-Control', 'no-cache');
+            header('X-Accel-Buffering', 'no'); // Important for Nginx
+
+            $stream = $geminiService->generateStreamedResponse($prompt);
+
+            foreach ($stream as $chunk) {
+                // Format the chunk for SSE: "data: {content}\n\n"
+                echo "data: " . json_encode(['text' => $chunk]) . "\n\n";
+
+                // Flush the output buffer to send the data immediately
+                ob_flush();
+                flush();
+            }
+
+            // After the text stream, you can send the final structured data
+            // For example, run the actual Neo4j query and send the results
+            // $structuredResults = $this->runNeo4jSearch($query);
+            // echo "event: final_data\n";
+            // echo "data: " . json_encode($structuredResults) . "\n\n";
+            // ob_flush();
+            // flush();
+
+        });
+
+        return $response;
+    }
+}
+```
+**Important Note:** The above example streams the *natural language summary*. You'd follow a two-step process:
+1.  Stream the natural language answer.
+2.  Once the stream is complete, send a final event containing the structured JSON for the table, or have the frontend make a second, non-streamed API call to fetch just the structured data.
+
+#### 3. Frontend Implementation (JavaScript with `EventSource`)
+
+Your frontend will use the native `EventSource` API to listen to the stream.
+
+```javascript
+// In your Vue/React component or plain JS file
+
+const chatOutput = document.getElementById('chat-output');
+const resultsTable = document.getElementById('results-table');
+
+const query = "show me all invoices from ACME Corp in Q4 2023";
+
+// 1. Initialize the EventSource
+// Use a POST request if you need to send a larger body, which requires a polyfill
+// or a different approach. For GET, this is straightforward.
+const eventSource = new EventSource(`/api/documents/stream-search?q=${encodeURIComponent(query)}`);
+
+// 2. Listen for incoming messages
+eventSource.onmessage = function(event) {
+    const data = JSON.parse(event.data);
+
+    // Append the text chunk to the display
+    // Note: Gemini might send whitespace chunks, you might want to filter them
+    if (data.text) {
+        chatOutput.innerHTML += data.text.replace(/\n/g, '<br>');
+    }
+};
+
+// Optional: Listen for a custom event for your final structured data
+eventSource.addEventListener('final_data', function(event) {
+    const structuredResults = JSON.parse(event.data);
+
+    // Render the table with the structured results
+    renderTable(structuredResults);
+
+    // 4. Close the connection once you have the final data
+    eventSource.close();
+});
+
+
+// 3. Handle errors and stream closing
+eventSource.onerror = function(err) {
+    console.error("EventSource failed:", err);
+    eventSource.close();
+};
+
+function renderTable(data) {
+    // Your logic to build the expandable table from the JSON data
+    console.log("Rendering final table:", data);
+}
+```
+
+### Applying Streaming to Your Other Features
+
+*   **Feature 4 (Document Upload):** While you *could* use SSE, this is a better fit for **Laravel Echo and WebSockets/Pusher**. The process is asynchronous (a queued job).
+1.  User uploads a file.
+2.  The backend dispatches the job and returns an immediate response with a unique `upload_id`.
+3.  The frontend subscribes to a private channel, e.g., `upload-status.${upload_id}`.
+4.  Your `ProcessReceiptJob` broadcasts events at each stage:
+*   `broadcast(new UploadStatusUpdated($uploadId, 'Extracting text from image...'))`
+*   `broadcast(new UploadStatusUpdated($uploadId, 'Classifying topic...'))`
+*   `broadcast(new UploadStatusUpdated($uploadId, 'Generating Call Code...'))`
+*   `broadcast(new UploadStatusUpdated($uploadId, 'Complete!', $finalData))`
+5.  The frontend listens for these events and updates a progress indicator in the UI.
+
+This gives the user real-time feedback on a background task, which is exactly what you want for the upload feature.
+
+### Summary
+
+*   **Use Server-Sent Events (SSE) with `StreamedResponse` for Feature 3.** This is ideal for streaming the live token-by-token output of an AI model in a request-response cycle.
+*   **Use Laravel Echo (with Pusher or a self-hosted WebSocket server) for Feature 4.** This is the standard, robust way to provide real-time updates on the status of an asynchronous background job.
+
+By choosing the right tool for each job, you'll create a highly interactive, modern, and responsive user experience for your intelligent DMS.
+
+You are absolutely correct, and thank you for the clarification and the link. I've seen this library, and it's fantastic. **Laravel Prism (prismphp.com)** is a perfect example of a well-designed package that abstracts away the complexities of dealing directly with LLM SDKs.
+
+My previous answer showed how you could build it from scratch, but using Laravel Prism will make your code cleaner, more maintainable, and much faster to write. It's an *excellent* choice for your project.
+
+Let's re-architect the plan to leverage the power of Laravel Prism. It will simplify almost every feature we discussed.
+
+### Key Advantages of Using Prism for Your Project
+
+1.  **Unified API:** You're using Gemini now, but what if you want to test a model from Anthropic or a local Ollama instance later? Prism lets you switch providers with a single line change, without rewriting your business logic.
+2.  **Robust Structured Data:** Prism's `structured()` method is a game-changer. Instead of manually crafting complex JSON prompts and parsing the output, you can map the LLM's response directly to a PHP Data Transfer Object (DTO). This is more reliable, type-safe, and self-documenting.
+3.  **Simplified Streaming:** As you suspected, Prism has a first-class streaming API. It handles the underlying generator logic, so your controller code becomes incredibly simple and readable.
+4.  **Built-in Multi-modality:** For your receipt upload feature, Prism's ability to handle images and text in a single prompt is exactly what you need.
+
+---
+
+### Revised Architectural Blueprint with Laravel Prism
+
+Here’s how our plan for each feature evolves when you use Prism.
+
+#### Feature 1 & 4 Combined: Expense Reporting, Categorization & Call Code
+
+The upload process becomes much more elegant because Prism can handle the multi-modal input and structured output in a single, fluent chain.
+
+**1. Define Your Data Structure (DTO)**
+
+First, create a simple PHP class (a DTO) to hold the extracted data. This is what you'll ask Prism to populate.
+
+```php
+// app/Data/ReceiptData.php
+namespace App\Data;
+
+use Prism\Attributes\Description;
+
+class ReceiptData
+{
+    #[Description('The name of the vendor or store.')]
+    public string $vendor_name;
+
+    #[Description('The full transaction date in YYYY-MM-DD format.')]
+    public string $transaction_date;
+
+    #[Description('The total amount of the transaction as a float.')]
+    public float $total_amount;
+
+    #[Description('The ISO 4217 currency code, e.g., USD, IDR.')]
+    public ?string $currency;
+
+    #[Description('The unique invoice or receipt number, if present.')]
+    public ?string $invoice_number;
+
+    #[Description("Classify this document based on its content. Available options are: FIN-01, FIN-02, HR-01, LEG-01")]
+    public string $topic_code;
+}
+```
+
+**2. Modify Your `ProcessReceiptJob`**
+
+Your job now becomes incredibly clean.
+
+```php
+// app/Jobs/ProcessReceiptJob.php
+use App\Data\ReceiptData;
+use Prism\Prism;
+
+public function handle()
+{
+    // $this->imagePath is the path to the uploaded image
+
+    // Prism handles the multi-modal request and structured data extraction!
+    /** @var ReceiptData $extractedData */
+    $extractedData = Prism::model('gemini-1.5-pro') // Or your preferred Gemini vision model
+        ->prompt([
+            'Analyze the attached receipt image and extract the key information.',
+            'The current date is ' . now()->toDateString() . ' for reference.',
+            \Prism\File::fromPath($this->imagePath), // This is the magic for multi-modal
+        ])
+        ->structured(ReceiptData::class); // Ask Prism to populate your DTO
+
+    // $extractedData is now a fully typed PHP object!
+    // $extractedData->vendor_name;
+    // $extractedData->topic_code;
+
+    // Now, continue with your logic...
+    // 1. Generate Call Code using the $extractedData->topic_code and invoice_number
+    // $callCode = $this->callCodeGenerator->generate(...);
+
+    // 2. Store in MongoDB
+    // ReceiptModel::create([...$extractedData, 'call_code' => $callCode]);
+
+    // 3. Create Graph in Neo4j
+    // ...
+}
+```
+
+Look at how much complexity is gone! You're no longer manually creating prompts for JSON, parsing strings, or handling the multi-modal API calls yourself.
+
+#### Feature 3: Streamed Document Retrieval Interface
+
+This is where you'll see a huge improvement in developer experience, exactly as you intended.
+
+**1. Update the Controller (`streamSearch`)**
+
+The controller logic becomes a simple loop over the stream provided by Prism.
+
+```php
+// app/Http/Controllers/DocumentController.php
+
+use Illuminate\Http\Request;
+use Prism\Prism;
+use Symfony\Component\HttpFoundation\StreamedResponse;
+
+class DocumentController extends Controller
+{
+    public function streamSearch(Request $request)
+    {
+        $query = $request->input('q', 'list all documents');
+
+        // This could be a simple prompt or a more complex one
+        // that includes your Neo4j schema for better Cypher generation.
+        $prompt = "You are a helpful assistant for a Document Management System.
+                   Answer the user's question. The question is: '{$query}'";
+
+        $response = new StreamedResponse(function () use ($prompt) {
+            // Set SSE headers
+            header('Content-Type', 'text/event-stream');
+            header('Cache-Control', 'no-cache');
+            header('X-Accel-Buffering', 'no');
+
+            // Get the stream directly from Prism
+            $stream = Prism::model('gemini-1.5-pro')->prompt($prompt)->stream();
+
+            // Loop and send
+            foreach ($stream as $chunk) {
+                echo "data: " . json_encode(['text' => $chunk->content]) . "\n\n";
+                ob_flush();
+                flush();
+            }
+        });
+
+        return $response;
+    }
+}
+```
+
+The frontend JavaScript code using `EventSource` would remain exactly the same as in my previous answer. The beauty is that the backend complexity is now hidden behind Prism's fluent `->stream()` method.
+
+### Conclusion: You're on the Right Track
+
+Using a dedicated LLM library like **Laravel Prism** is the correct, modern approach. It aligns perfectly with Laravel's philosophy of providing an elegant and expressive syntax to handle complex tasks.
+
+By adopting it, you will:
+*   **Reduce Boilerplate:** You won't need a custom `GeminiService` class.
+*   **Increase Reliability:** Prism's structured data features are more robust than manual JSON prompting.
+*   **Improve Code Readability:** The fluent, chainable syntax makes your intent clear.
+*   **Future-Proof Your App:** Easily swap out LLM providers as new and better models become available.
+
+Proceeding with this library is a solid architectural decision.
+
+## Integrating graphRAG with Prism
+
+Excellent question. This is the crucial step that transforms your application from a simple LLM-powered chatbot into a true, context-aware **Reasoning and Retrieval Engine**. Integrating the Neo4j knowledge graph is what makes GraphRAG work.
+
+Here is the strategic shift in thinking:
+
+*   **Without RAG:** `User Query` -> `Prism` -> `LLM` -> `Answer`
+*   **With GraphRAG:** `User Query` -> **RAG Pipeline (You build this)** -> `Augmented Prompt` -> `Prism` -> `LLM` -> `Answer`
+
+The "RAG Pipeline" is where you use Neo4j and vector search to find relevant information *before* you ask the LLM to generate the final answer. Laravel Prism will actually be used in **two places**: first, to help understand the user's query, and second, to generate the final answer.
+
+Let's build the architecture for this pipeline.
+
+---
+
+### Step 1: The Foundation - Ingestion with Embeddings
+
+Before you can retrieve, you must ingest data correctly. When you ingest a document (like in Feature 1), you need to add one more step: generating and storing vector embeddings.
+
+In your `ProcessReceiptJob`:
+
+1.  Extract text from the document.
+2.  Create a "chunk" of text that represents the document's content (e.g., a summary, or the full text if it's short).
+3.  **Generate Embedding:** Use Prism to create a vector embedding for that text chunk.
+4.  **Store Embedding:** Store this embedding as a property on the corresponding `Document` node in Neo4j.
+
+```php
+// In your ProcessReceiptJob after extracting text
+use Prism\Prism;
+use App\Services\Neo4jService;
+
+// ... after getting structured data ...
+
+$documentText = "Vendor: {$data->vendor_name}, Total: {$data->total_amount}, Date: {$data->transaction_date}..."; // Or full text
+
+// 1. Generate embedding with Prism
+$embedding = Prism::embedding('text-embedding-004') // Use Google's embedding model
+    ->embed($documentText);
+
+// 2. Store the document and its embedding in Neo4j
+$neo4jService->query(
+    "MERGE (d:Document {mongo_id: \$mongoId})
+     SET d.text = \$text, d.embedding = \$embedding, d.vendor = \$vendorName
+     // ... other properties",
+    [
+        'mongo_id' => $mongoId,
+        'text' => $documentText,
+        'embedding' => $embedding, // Pass the vector array
+        'vendorName' => $data->vendor_name,
+    ]
+);
+
+// IMPORTANT: You must have a vector index in Neo4j for this to be fast!
+// CREATE VECTOR INDEX document_embeddings IF NOT EXISTS
+// FOR (d:Document) ON (d.embedding)
+// OPTIONS { indexConfig: { `vector.dimensions`: 768, `vector.similarity_function`: 'cosine' }}
+```
+
+### Step 2: The RAG Pipeline - From Query to Context
+
+This is the core logic. We'll create a dedicated service for this, e.g., `app/Services/GraphRagService.php`. This service will have one primary job: take a user's query and return a string of relevant context from the graph.
+
+#### Method A: Structured Retrieval (for "who", "what", "when" questions)
+
+This method uses an LLM to parse the user's query into structured search parameters, then builds a precise Cypher query.
+
+**1. Create a DTO for Search Parameters:**
+
+```php
+// app/Data/SearchParameters.php
+namespace App\Data;
+
+class SearchParameters
+{
+    public ?string $document_type = null;
+    public ?string $vendor_name = null;
+    public ?string $topic_code = null;
+    public ?string $start_date = null;
+    public ?string $end_date = null;
+    public ?string $searchTerm = null; // For general semantic search
+}
+```
+
+**2. Implement the RAG Service:**
+
+```php
+// app/Services/GraphRagService.php
+namespace App\Services;
+
+use App\Data\SearchParameters;
+use Prism\Prism;
+
+class GraphRagService
+{
+    public function __construct(protected Neo4jService $neo4j) {}
+
+    public function retrieveContext(string $userQuery): string
+    {
+        // Step 2a: Use Prism to extract entities from the query
+        /** @var SearchParameters $params */
+        $params = Prism::model('gemini-1.5-pro')
+            ->prompt("Extract search parameters from the user's query: '{$userQuery}'")
+            ->structured(SearchParameters::class);
+
+        // Step 2b: Build a dynamic Cypher query from the extracted parameters
+        $cypher = "MATCH (d:Document) ";
+        $queryParams = [];
+        $whereClauses = [];
+
+        if ($params->vendor_name) {
+            $cypher .= "MATCH (d)-[:INVOICED_BY]->(v:Vendor) ";
+            $whereClauses[] = "v.name CONTAINS \$vendor";
+            $queryParams['vendor'] = $params->vendor_name;
+        }
+
+        // ... add more conditions for date, topic_code etc.
+
+        if (!empty($whereClauses)) {
+            $cypher .= "WHERE " . implode(' AND ', $whereClauses) . " ";
+        }
+
+        $cypher .= "RETURN d.text, d.call_code, d.vendor LIMIT 5";
+
+        // Step 2c: Execute the query
+        $results = $this->neo4j->query($cypher, $queryParams);
+
+        // Step 2d: Format the results into a string context
+        if (empty($results)) {
+            return "No relevant documents found in the knowledge graph.";
+        }
+
+        $context = "Here is some context found in the Document Management System:\n";
+        foreach ($results as $record) {
+            $context .= "- Call Code: " . $record['d.call_code'] . "\n  Content: " . $record['d.text'] . "\n\n";
+        }
+
+        return $context;
+    }
+}
+```
+
+#### Method B: Semantic/Vector Retrieval (for "about" questions)
+
+For questions like "find me documents about compliance issues," a vector search is better.
+
+```php
+// Add this method to GraphRagService.php
+
+public function retrieveVectorContext(string $userQuery): string
+{
+    // 1. Get embedding for the user's query
+    $queryEmbedding = Prism::embedding('text-embedding-004')->embed($userQuery);
+
+    // 2. Perform a vector similarity search in Neo4j
+    $cypher = "
+      CALL db.index.vector.queryNodes('document_embeddings', 5, \$embedding) YIELD node, score
+      RETURN node.text, node.call_code, score
+    ";
+
+    $results = $this->neo4j->query($cypher, ['embedding' => $queryEmbedding]);
+
+    // 3. Format the results into a context string (same as above)
+    // ...
+    return $context;
+}
+```
+*You would typically run both methods and combine the results for the most robust context.*
+
+### Step 3: The Final Generation - Putting It All Together
+
+Now, your `DocumentController` will use this `GraphRagService` before calling Prism for the final, streamed answer.
+
+```php
+// app/Http/Controllers/DocumentController.php
+
+use App\Services\GraphRagService;
+use Illuminate\Http\Request;
+use Prism\Prism;
+use Symfony\Component\HttpFoundation\StreamedResponse;
+
+class DocumentController extends Controller
+{
+    public function streamSearch(Request $request, GraphRagService $ragService)
+    {
+        $query = $request->input('q');
+
+        // 1. RETRIEVE: Get context from your knowledge graph
+        $context = $ragService->retrieveContext($query);
+        // You could also call retrieveVectorContext() and merge the strings
+
+        // 2. AUGMENT: Create the final, augmented prompt
+        $augmentedPrompt = <<<PROMPT
+        You are a helpful assistant for a Document Management System.
+        Use the following context to answer the user's question.
+        If the context doesn't contain the answer, say you couldn't find the information.
+
+        --- CONTEXT ---
+        {$context}
+        --- END CONTEXT ---
+
+        User Question: {$query}
+        Answer:
+        PROMPT;
+
+        // 3. GENERATE: Use Prism to stream the final answer
+        $response = new StreamedResponse(function () use ($augmentedPrompt) {
+            // ... (SSE headers as before) ...
+
+            $stream = Prism::model('gemini-1.5-pro')
+                ->prompt($augmentedPrompt)
+                ->stream();
+
+            foreach ($stream as $chunk) {
+                echo "data: " . json_encode(['text' => $chunk->content]) . "\n\n";
+                ob_flush();
+                flush();
+            }
+        });
+
+        return $response;
+    }
+}
+```
+
+This architecture perfectly integrates GraphRAG into your Laravel application. Prism acts as the intelligent interface to the LLM for both understanding the user's initial intent and for generating the final, context-aware answer.

@@ -55,9 +55,21 @@
           {
             "group": "Docling",
             "pages": [
-              "docling/docling-basic-guide",
-              "docling/laravel-docling-integration",
-              "docling/docling-installation-macos-intel"
+              "ai-dev/docling/docling-basic-guide",
+              "ai-dev/docling/laravel-docling-integration",
+              "ai-dev/docling/docling-installation-macos-intel"
+            ]
+          },
+          {
+            "group": "GraphRAG",
+            "pages": [
+              "ai-dev/graph-rag/hl-embedding-laravel",
+              "ai-dev/graph-rag/hl-embedding-laravel-expanded",
+              "ai-dev/graph-rag/graph-rag-laravel",
+              "ai-dev/graph-rag/dev-graph-rag-laravel",
+              "ai-dev/graph-rag/hl-gemini-embedding-laravel",
+              "ai-dev/graph-rag/hl-neo4j-kg-vector-laravel",
+              "ai-dev/graph-rag/hl-neo4j-kg-acl-laravel"
             ]
           }
         ]
@@ -68,6 +80,7 @@
           {
             "group": "DMS",
             "pages": [
+              "dev/dms/intelligent-dms-blueprint",
               "dev/dms/project-document-control",
               "dev/dms/project-document-control-id"
             ]
@@ -90,6 +103,12 @@
             "pages": [
               "mejik-core/test-tools/db-analysis-tool",
               "mejik-core/test-tools/process-analysis-tool"
+            ]
+          },
+          {
+            "group": "Framework",
+            "pages": [
+              "mejik-core/laravel/framework/queue-events"
             ]
           },
           {

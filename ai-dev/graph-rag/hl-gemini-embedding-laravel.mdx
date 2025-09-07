@@ -1,0 +1,182 @@
+---
+title: 'High Level Graph RAG Gemini Embedding'
+---
+
+### The Goal of the Embedding Process
+
+The goal is to convert each meaningful chunk of text from your document (provided by `docling`) into a **vector**. A vector is simply an array of numbers (e.g., `[0.012, -0.45, 0.89, ..., -0.11]`).
+
+The magic of modern embedding models is that **semantically similar texts will have vectors that are numerically close to each other in multi-dimensional space**. This is what enables powerful "semantic search" or "similarity search," where you can find document chunks related to a user's query even if they don't use the exact same keywords.
+
+### Why Use the Gemini API?
+
+*   **State-of-the-Art:** Google's models are highly advanced and produce high-quality embeddings.
+*   **Managed Service:** You don't need to host, manage, or scale any complex AI models yourself.
+*   **Cost-Effective:** It's a pay-as-you-go service, which is very efficient for variable workloads.
+*   **Good Integration:** There are solid PHP libraries for interacting with the API.
+
+The specific model we'll be using is `text-embedding-004` (or the latest equivalent), which is optimized for this task. It takes text as input and outputs a 768-dimension vector.
+
+---
+
+### Step-by-Step Integration into Your Laravel Job
+
+Here’s how to modify your `ProcessDocumentJob` to include this step.
+
+#### Step 1: Install the Gemini PHP Client
+
+First, you need a way to communicate with the Gemini API. The community-driven `google-gemini-php/client` is a great choice.
+
+```bash
+composer require google-gemini-php/client
+```
+
+#### Step 2: Configure Your API Key
+
+Never hardcode your API key. Store it in your `.env` file.
+
+```ini
+# .env file
+GEMINI_API_KEY="your_google_ai_studio_api_key"
+```
+
+It's also good practice to create a config file to make it accessible throughout your app cleanly.
+
+```bash
+php artisan make:config gemini
+```
+
+Now, edit `config/gemini.php`:
+
+```php
+// config/gemini.php
+return [
+    'api_key' => env('GEMINI_API_KEY'),
+];
+```
+
+#### Step 3: Modify the `ProcessDocumentJob`
+
+We will create a dedicated private method within the job to handle the embedding logic. This keeps the main `handle()` method clean.
+
+The key to efficiency here is **batching**. Instead of making one API call for every single text chunk (which would be very slow and inefficient), we will send multiple chunks to the Gemini API in a single request.
+
+Here's the refined `ProcessDocumentJob.php`:
+
+```php
+// In app/Jobs/ProcessDocumentJob.php
+
+namespace App\Jobs;
+
+use App\Models\Document;
+use Gemini\Laravel\Facades\Gemini; // Using the Laravel facade for simplicity
+use Illuminate\Bus\Queueable;
+// ... other use statements
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Storage;
+
+class ProcessDocumentJob implements ShouldQueue
+{
+    // ... (constructor and properties remain the same)
+
+    public function handle(): void
+    {
+        try {
+            // 1. Update Status & Fetch File
+            $this->document->update(['status' => 'processing']);
+            $fileContents = Storage::disk('s3')->get($this->document->storage_path);
+
+            // 2. Call Docling API
+            $doclingResponse = Http::post('http://your-docling-api.com/process', ['file' => $fileContents]);
+            $data = $doclingResponse->json();
+
+            // 3. Create Vector Embeddings and Save to Supabase (The new part)
+            $this->document->update(['status' => 'creating_embeddings']);
+            $this->generateAndStoreEmbeddings($data['chunks']); // <-- MODIFIED LINE
+
+            // 4. Create Knowledge Graph in Neo4j
+            $this->document->update(['status' => 'building_graph']);
+            $this->saveGraphToNeo4j($data['entities'], $data['relationships']);
+
+            // 5. Final Success Status
+            $this->document->update(['status' => 'completed']);
+
+        } catch (\Throwable $e) {
+            $this->document->update([
+                'status' => 'failed',
+                'error_message' => $e->getMessage()
+            ]);
+            throw $e;
+        }
+    }
+
+    /**
+     * Generates embeddings for text chunks using Gemini and saves them to Supabase.
+     */
+    private function generateAndStoreEmbeddings(array $chunks): void
+    {
+        // 1. Extract just the text content for the API call
+        $textContents = array_column($chunks, 'content');
+        if (empty($textContents)) {
+            return; // Nothing to process
+        }
+
+        // 2. Call Gemini API in batch mode
+        // The client handles making one or more requests if the batch is too large.
+        $response = Gemini::embedContent($textContents);
+
+        // 3. Prepare data for bulk insert
+        $vectorsToInsert = [];
+        foreach ($response->getEmbeddings() as $index => $embedding) {
+            // The pgvector extension expects vectors as a string like '[1.2,3.4,-5.6]'
+            $vectorString = '[' . implode(',', $embedding->getValues()) . ']';
+
+            $vectorsToInsert[] = [
+                'document_id' => $this->document->id,
+                'content'     => $textContents[$index], // Match the embedding to its original text
+                'embedding'   => $vectorString,
+                'created_at'  => now(),
+                'updated_at'  => now(),
+            ];
+        }
+
+        // 4. Perform a single, efficient bulk insert operation
+        if (!empty($vectorsToInsert)) {
+            // Assumes you have a 'supabase' connection in config/database.php
+            // that points to your Supabase Postgres instance.
+            DB::connection('supabase')->table('document_chunks')->insert($vectorsToInsert);
+        }
+    }
+
+    // ... (saveGraphToNeo4j method remains the same)
+}
+```
+
+### Important Considerations
+
+1.  **Chunk Size:** `docling` should be configured to produce text chunks of a reasonable size. Very long chunks can lose semantic detail, while very short chunks might lack context. A good starting point is around 200-500 words per chunk. This also ensures you don't exceed the token limit for the Gemini embedding model.
+2.  **Cost Management:** Every call to the Gemini API will incur a cost. Batching significantly reduces the number of requests but the cost is based on the total number of tokens processed. Monitor your usage in the Google AI Platform dashboard.
+3.  **Rate Limiting & Error Handling:** The Gemini API has rate limits (e.g., requests per minute). The client library may throw exceptions when these limits are hit. Because this code runs in a Laravel Job, Laravel's queue system will automatically retry the job based on your queue configuration (e.g., retry 3 times with an exponential backoff), which is perfect for handling temporary rate limiting or network issues.
+4.  **Database Connection:** Ensure your `config/database.php` has a separate connection configured for Supabase. This allows you to use Laravel's standard `DB` facade while keeping your main app's database separate.
+
+```php
+// config/database.php
+'connections' => [
+    // ... your default mysql/pgsql connection
+    'supabase' => [
+        'driver' => 'pgsql',
+        'host' => env('SUPABASE_DB_HOST'),
+        'port' => env('SUPABASE_DB_PORT'),
+        'database' => env('SUPABASE_DB_DATABASE'),
+        'username' => env('SUPABASE_DB_USERNAME'),
+        'password' => env('SUPABASE_DB_PASSWORD'),
+        'charset' => 'utf8',
+        'prefix' => '',
+        'schema' => 'public',
+        'sslmode' => 'prefer',
+    ],
+]
+    ```
+
+This detailed approach provides a robust, efficient, and maintainable way to integrate a powerful external AI service directly into your Laravel application's asynchronous workflow.

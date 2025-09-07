@@ -1,0 +1,220 @@
+---
+title: 'Graph RAG Laravel Implementation'
+---
+### High-Level Workflow (The Big Picture)
+
+Before we dive into the technical details, let's outline the end-to-end process for both ingestion and querying.
+
+**A. Ingestion & Graph Building (Asynchronous Process):**
+1.  **Document Upload:** A new document is uploaded to your Laravel app and stored in Minio. A record is created in MongoDB.
+2.  **Trigger Processing:** A job is dispatched to a queue to process this new document.
+3.  **Document Processing (Docling):** The job sends the document (or a pre-signed URL to it) to the `docling` service. `docling` extracts text, identifies entities (e.g., people, projects, dates, invoice numbers), and understands the relationships between them. It returns this structured data as a JSON object.
+4.  **Graph Construction (Neo4j):** The job receives the structured data from `docling`. It then translates this data into Cypher queries and populates the Neo4j graph. For example, it creates `(:Person {name: 'John Doe'})`, `(:Project {name: 'Q4 Report'})`, and a relationship `[:WORKED_ON]`.
+5.  **Indexing:** Key text chunks from the document are also stored in the graph (or a vector database, but Neo4j can handle this with vector indexes) and linked to their source nodes.
+
+**B. Querying (The GraphRAG Process):**
+1.  **User Question:** A user asks a question in your Laravel application's UI, e.g., "What projects did Jane Doe work on in Q2?"
+2.  **Entity Extraction:** Laravel (using Gemini or a simpler local model) extracts key entities from the user's question (e.g., "Jane Doe", "Q2").
+3.  **Graph Retrieval:** Laravel queries the Neo4j graph to find relevant subgraphs based on the extracted entities. For example, it finds the "Jane Doe" node and traverses its relationships to find connected "Project" nodes within the Q2 timeframe.
+4.  **Context Augmentation:** The data retrieved from the graph (nodes, relationships, and associated text chunks) is compiled into a context string.
+5.  **LLM Prompting (Gemini):** Laravel, using the `Prism AI` library, constructs a detailed prompt for Gemini. The prompt includes the original user question and the context retrieved from Neo4j.
+*   *Example Prompt:* `"Based on the following context, answer the user's question. Context: [Data from Neo4j...]. Question: What projects did Jane Doe work on in Q2?"*
+6.  **Response Generation:** Gemini processes the prompt and generates a natural language answer based *only* on the provided context.
+7.  **Display Answer:** The Laravel app displays the answer to the user, often with links to the source documents.
+
+---
+
+### 1. Server / VM Network Topology
+
+Here is a logical network topology. For production, you'd ideally have these on separate VMs or containers (e.g., using Docker Compose or Kubernetes). For development, they could run on a single powerful machine.
+
+```
+                  +---------------------------------------------------+
+                  |                 Public Internet                 |
+                  +---------------------------------------------------+
+                                        | (HTTPS: 443)
+                                        |
++---------------------------------------+---------------------------------------+
+|                       Your Private Network (VPC)                              |
+|                                                                               |
+|   +-----------------------+       +-----------------------+                   |
+|   |   Load Balancer       |-----> |  Laravel App Server   |                   |
+|   |  (e.g., Nginx, Caddy) |       |  (Web/API Requests)   |                   |
+|   +-----------------------+       +-----------+-----------+                   |
+|           ^                                   |                               |
+|           |                                   | (Dispatches Jobs)             |
+|           |                                   v                               |
+|   +-----------------------+       +-----------+-----------+                   |
+|   |  Laravel Queue Worker | <---- |   Queue Service       |                   |
+|   | (e.g., Supervisor)    |       | (e.g., Redis, SQS)    |                   |
+|   +-----------------------+       +-----------------------+                   |
+|           |        |                                                          |
+|  (Calls)  |        +---------------------------------+                        |
+|           v                                          |                        |
+|   +-----------------------+                          | (Connects)             |
+|   |  Docling Service      |                          |                        |
+|   | (HTTP API: e.g., 8001)|                          |                        |
+|   +-----------------------+                          v                        |
+|                                           +-----------------------+           |
+|                                           |  Neo4j Database       |           |
+|                                           | (Bolt: 7687, HTTP: 7474) |        |
+|                                           +-----------------------+           |
+|                                                                               |
+|---------------------------------- Internal Service Connections ----------------|
+|                                                                               |
+|   Both Laravel App & Worker need access to:                                   |
+|                                                                               |
+|   +-----------------------+       +-----------------------+                   |
+|   |  MongoDB Database     |       |  Minio Storage        |                   |
+|   | (Port: 27017)         |       | (S3 API: 9000)        |                   |
+|   +-----------------------+       +-----------------------+                   |
+|                                                                               |
+|   +-----------------------+                                                   |
+|   |  n8n (Optional)       |  <-- (Webhook from Laravel)                       |
+|   |  (HTTP API: 5678)     |  --> (Can call Docling, Neo4j, etc.)              |
+|   +-----------------------+                                                   |
+|                                                                               |
++-------------------------------------------------------------------------------+
+                                        |
+                                        | (Outbound HTTPS: 443)
+                                        |
+                  +---------------------------------------------------+
+                  |         Google Cloud / Gemini API Endpoint        |
+                  +---------------------------------------------------+
+
+```
+
+**Component Breakdown:**
+
+*   **Laravel App Server:** Handles user-facing HTTP requests. This is where the user submits questions. It validates input and either handles the request directly (for RAG) or dispatches a job (for ingestion).
+*   **Laravel Queue Worker:** A separate process (or set of processes) that runs in the background. It pulls jobs from the queue (like Redis) and executes them. **This is critical for performance.** Document processing is slow and must not block web requests.
+*   **Docling Service:** A self-contained service (likely a Docker container) that exposes an HTTP API. It receives a document, performs NLP/entity extraction, and returns structured JSON.
+*   **Neo4j Database:** The graph database. Needs to be accessible by the Laravel Queue Worker (for writing) and the Laravel App Server (for reading/RAG).
+*   **n8n (Optional):** If you use n8n, it acts as an orchestrator. Laravel would send a webhook to n8n, and n8n would manage the multi-step process of calling `docling`, formatting data, and writing to `Neo4j`. This is great for visualizing and modifying the workflow without changing your Laravel code.
+*   **Existing Stack (Mongo, Minio):** They remain central to your DMS. The new services will interact with them as needed.
+
+---
+
+### 2. Required APIs
+
+This details the "contracts" between your services.
+
+1.  **Laravel -> Docling API (Internal REST API)**
+*   **Endpoint:** `POST /process`
+*   **Request Body (Example):**
+```json
+{
+  "source_type": "minio_url",
+  "url": "https://minio.yourdomain.com/documents/doc123.pdf?presigned_url_params...",
+  "document_id": "mongo_document_object_id"
+}
+        ```
+*   **Response Body (Example):**
+```json
+{
+  "document_id": "mongo_document_object_id",
+  "entities": [
+    {"id": "e1", "label": "Person", "name": "Jane Doe"},
+    {"id": "e2", "label": "Project", "name": "Q2 Financials"}
+  ],
+  "relationships": [
+    {"source": "e1", "target": "e2", "type": "AUTHORED"}
+  ],
+  "chunks": [
+    {"text": "...", "metadata": {"page": 1}}
+  ]
+}
+        ```
+
+2.  **Laravel -> Neo4j API (using a Driver)**
+*   This isn't a REST API but a connection via the Bolt protocol. You'll use a PHP library like `laudis/neo4j-php-client`.
+*   **Write Operation (from Queue Worker):**
+```cypher
+// Example Cypher query generated by Laravel
+MERGE (p:Person {name: 'Jane Doe'})
+MERGE (proj:Project {name: 'Q2 Financials'})
+MERGE (p)-[:AUTHORED]->(proj)
+        ```
+*   **Read Operation (from App Server for RAG):**
+```cypher
+// Find projects related to 'Jane Doe'
+MATCH (p:Person {name: 'Jane Doe'})-[r]-(related_node)
+RETURN p, r, related_node
+        ```
+
+3.  **Laravel -> Gemini API (via Prism AI)**
+*   `Prism AI` will handle the complexity of the REST API call to Google. Your Laravel code will be simple.
+*   **Example Laravel Code:**
+```php
+use Prism\Prism;
+
+$context = "...text retrieved from Neo4j...";
+$question = "What projects did Jane Doe work on in Q2?";
+
+$response = Prism::gemini()->chat()->create([
+    'model' => 'gemini-1.5-flash-latest',
+    'messages' => [
+        ['role' => 'system', 'content' => 'You are a helpful assistant. Answer based only on the provided context.'],
+        ['role' => 'user', 'content' => "Context: {$context}\n\nQuestion: {$question}"],
+    ],
+]);
+
+$answer = $response->choices[0]->message->content;
+        ```
+
+---
+
+### 3. Required Processes (Queues, Artisan Commands)
+
+This is how you'll implement and manage the workflow within Laravel.
+
+#### Queues and Jobs
+
+Using Laravel's Queue system is non-negotiable for this architecture.
+
+1.  **`App\Jobs\ProcessDocumentForGraph.php`**
+*   **Triggered:** When a document is marked for archival or a new one is uploaded.
+*   **Constructor:** `__construct(Document $document)`
+*   **`handle()` method logic:**
+1.  Generate a pre-signed temporary URL for the document in Minio.
+2.  Make an HTTP call to your `docling` service API with this URL.
+3.  Wait for the response from `docling`.
+4.  On success, dispatch the next job: `BuildGraphFromProcessedData::dispatch($document, $doclingResponseData)`.
+5.  Handle errors (e.g., `docling` fails, requeue the job with a delay).
+
+2.  **`App\Jobs\BuildGraphFromProcessedData.php`**
+*   **Triggered:** By the `ProcessDocumentForGraph` job.
+*   **Constructor:** `__construct(Document $document, array $processedData)`
+*   **`handle()` method logic:**
+1.  Parse the `$processedData` array (entities, relationships).
+2.  Connect to the Neo4j service.
+3.  Build a series of Cypher `MERGE` queries to create nodes and relationships without duplication. Wrap this in a transaction.
+4.  Execute the queries against Neo4j.
+5.  On success, update the document's status in MongoDB (e.g., `graph_status: 'processed'`).
+6.  Handle database errors.
+
+#### Artisan Commands
+
+These are essential for backfilling your existing data and for maintenance.
+
+1.  **`php artisan docs:process-archive`**
+*   **Purpose:** To process all your existing archived documents.
+*   **Logic:**
+*   Find all documents in MongoDB that need processing (e.g., where `graph_status` is not `'processed'`).
+*   You can add options: `--all` for everything, `--limit=100` for testing, `--since=YYYY-MM-DD` for recent ones.
+*   Loop through the documents and dispatch `ProcessDocumentForGraph::dispatch($document)` for each one.
+*   Use chunking (`->chunkById(100, ...`) to avoid loading millions of documents into memory at once.
+
+2.  **`php artisan docs:reprocess <document-id>`**
+*   **Purpose:** Manually re-trigger the processing for a single document, which is invaluable for debugging.
+*   **Logic:**
+*   Find the document by its ID.
+*   Clear any existing graph data related to this document from Neo4j (this is an important step!).
+*   Dispatch `ProcessDocumentForGraph::dispatch($document)`.
+
+3.  **`php artisan graph:stats`**
+*   **Purpose:** A simple health-check command.
+*   **Logic:**
+*   Connect to Neo4j.
+*   Run simple queries like `MATCH (n) RETURN count(n)` and `MATCH ()-[r]->() RETURN count(r)`.
+*   Output the number of nodes and relationships to the console. This confirms your connection is working.

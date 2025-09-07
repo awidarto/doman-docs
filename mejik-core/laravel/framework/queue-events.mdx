@@ -1,0 +1,295 @@
+---
+title: 'Queue Event Listener'
+description: 'Queue logging and monitoring using events and event listeners'
+---
+
+Laravel's queue event system is **driver-agnostic**. The events are emitted by the Laravel Queue Worker itself, not by the underlying driver (MongoDB, Redis, SQS, etc.).
+
+This means the exact same event listener class you used for your MongoDB queue will work perfectly with your Redis queue without any changes to the listener's logic. You just need to switch your queue driver in your configuration.
+
+Let's break down how it works and provide a full example implementation.
+
+### The Core Concept: The Emitter is the Worker
+
+You don't need to create an "emitter." The Laravel queue worker (`php artisan queue:work`) is the component that does the emitting. Its process looks like this:
+
+1.  **Fetch Job:** The worker asks the configured queue driver (e.g., Redis) for the next available job.
+2.  **Emit `JobProcessing`:** Before executing the job, the worker fires the `Illuminate\Queue\Events\JobProcessing` event.
+3.  **Execute Job:** The worker calls the `handle()` method on your job class.
+4.  **Handle Outcome:**
+*   **Success:** If the `handle()` method completes without an exception, the worker fires the `Illuminate\Queue\Events\JobProcessed` event and deletes the job from the queue.
+*   **Failure:** If the `handle()` method throws an exception, the worker fires `Illuminate\Queue\Events\JobExceptionOccurred`. If the job has exhausted all its retries, it then fires `Illuminate\Queue\Events\JobFailed`.
+
+This entire flow is the same no matter which driver is being used.
+
+---
+
+### Example Implementation: Listener for a Redis Queue
+
+Let's build a complete, practical example for monitoring and logging queue jobs using Redis.
+
+#### Step 1: Configure Laravel to Use Redis for Queues
+
+First, ensure your `.env` file is set up to use Redis as the queue connection.
+
+**.env**
+```dotenv
+QUEUE_CONNECTION=redis
+REDIS_HOST=127.0.0.1
+REDIS_PASSWORD=null
+REDIS_PORT=6379
+```
+
+You'll also need to have the `predis/predis` or `phpredis` extension installed.
+`composer require predis/predis`
+
+#### Step 2: Create a Job to Dispatch
+
+Let's create a sample job. This job will be the "payload" that gets processed.
+
+```bash
+php artisan make:job ProcessOrder
+```
+
+Now, let's edit the job to accept some data and log a message.
+
+**app/Jobs/ProcessOrder.job**
+```php
+<?php
+
+namespace App\Jobs;
+
+use App\Models\Order;
+use Illuminate\Bus\Queueable;
+use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Foundation\Bus\Dispatchable;
+use Illuminate\Queue\InteractsWithQueue;
+use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\Log;
+
+class ProcessOrder implements ShouldQueue
+{
+    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+
+    /**
+     * The order instance.
+     *
+     * @var \App\Models\Order
+     */
+    public $order;
+
+    /**
+     * Create a new job instance.
+     *
+     * @return void
+     */
+    public function __construct(Order $order)
+    {
+        $this->order = $order;
+    }
+
+    /**
+     * Execute the job.
+     *
+     * @return void
+     */
+    public function handle()
+    {
+        // Simulate processing the order
+        Log::info("Actually processing Order ID: {$this->order->id}");
+        sleep(2); // Simulate work
+
+        // To test a failure, uncomment the line below
+        // throw new \Exception("Could not connect to payment gateway!");
+
+        Log::info("Finished processing Order ID: {$this->order->id}");
+    }
+}
+```
+*(Note: This assumes you have an `Order` model. You can replace `Order $order` with a simple integer like `int $orderId` for testing purposes.)*
+
+#### Step 3: Create the Event Listener (The Subscriber)
+
+Instead of creating one listener per event, it's often cleaner to create a "Subscriber" class that listens for multiple queue-related events.
+
+```bash
+php artisan make:listener QueueEventSubscriber
+```
+
+Now, let's modify this class to listen for the key queue events and log useful information.
+
+**app/Listeners/QueueEventSubscriber.php**
+```php
+<?php
+
+namespace App\Listeners;
+
+use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Queue\Events\JobFailed;
+use Illuminate\Queue\Events\JobProcessed;
+use Illuminate\Queue\Events\JobProcessing;
+use Illuminate\Queue\InteractsWithQueue;
+use Illuminate\Support\Facades\Log;
+
+class QueueEventSubscriber
+{
+    /**
+     * Handle job processing events.
+     */
+    public function handleJobProcessing(JobProcessing $event)
+    {
+        $jobName = $event->job->resolveName();
+        $jobId = $event->job->getJobId();
+        Log::channel('queue')->info("STARTING: [{$jobId}] {$jobName}");
+    }
+
+    /**
+     * Handle job processed events.
+     */
+    public function handleJobProcessed(JobProcessed $event)
+    {
+        $jobName = $event->job->resolveName();
+        $jobId = $event->job->getJobId();
+        Log::channel('queue')->info("SUCCESS: [{$jobId}] {$jobName}");
+
+        // You could also calculate duration here for monitoring
+        // For example, store the start time in a cache/db in handleJobProcessing
+        // and calculate the difference here.
+    }
+
+    /**
+     * Handle job failed events.
+     */
+    public function handleJobFailed(JobFailed $event)
+    {
+        $jobName = $event->job->resolveName();
+        $jobId = $event->job->getJobId();
+        $exceptionMessage = $event->exception->getMessage();
+
+        Log::channel('queue')->error("FAILED: [{$jobId}] {$jobName}", [
+            'exception' => $exceptionMessage,
+            'payload' => $event->job->getRawBody() // Be careful logging payloads with sensitive data!
+        ]);
+
+        // You could send a notification to Slack or an admin here
+        // \Notification::route('slack', 'YOUR_SLACK_WEBHOOK_URL')
+        //              ->notify(new JobFailedNotification($event));
+    }
+
+
+    /**
+     * Register the listeners for the subscriber.
+     *
+     * @param  \Illuminate\Events\Dispatcher  $events
+     * @return void
+     */
+    public function subscribe($events)
+    {
+        $events->listen(
+            JobProcessing::class,
+            [QueueEventSubscriber::class, 'handleJobProcessing']
+        );
+
+        $events->listen(
+            JobProcessed::class,
+            [QueueEventSubscriber::class, 'handleJobProcessed']
+        );
+
+        $events->listen(
+            JobFailed::class,
+            [QueueEventSubscriber::class, 'handleJobFailed']
+        );
+    }
+}
+```
+*(I've also added a custom `queue` log channel for clarity. You can configure this in `config/logging.php` or just let it write to the default log file.)*
+
+#### Step 4: Register the Subscriber
+
+Now, we need to tell Laravel about our subscriber class.
+
+**app/Providers/EventServiceProvider.php**
+```php
+<?php
+
+namespace App\Providers;
+
+use App\Listeners\QueueEventSubscriber; // Import the class
+use Illuminate\Foundation\Support\Providers\EventServiceProvider as ServiceProvider;
+use Illuminate\Support\Facades\Event;
+
+class EventServiceProvider extends ServiceProvider
+{
+    /**
+     * The event listener mappings for the application.
+     *
+     * @var array
+     */
+    protected $listen = [
+        // ... other listeners
+    ];
+
+    /**
+     * The subscriber classes to register.
+     *
+     * @var array
+     */
+    protected $subscribe = [
+        QueueEventSubscriber::class, // Add your subscriber here
+    ];
+
+    /**
+     * Register any events for your application.
+     *
+     * @return void
+     */
+    public function boot()
+    {
+        //
+    }
+}
+```
+
+#### Step 5: Test It Out!
+
+1.  **Dispatch the job** from a route, controller, or Tinker:
+```php
+// In routes/web.php for a quick test
+use App\Jobs\ProcessOrder;
+use App\Models\Order;
+
+Route::get('/dispatch', function () {
+    // Assuming you have an order with ID 1
+    $order = Order::find(1);
+    ProcessOrder::dispatch($order);
+    return 'Order processing job has been dispatched!';
+});
+    ```
+
+2.  **Run the queue worker** in your terminal:
+```bash
+php artisan queue:work
+    ```
+
+3.  **Check your log file** (`storage/logs/laravel.log` or your custom queue log). You will see the output from your subscriber:
+
+**On Success:**
+```log
+[2023-10-27 10:30:01] local.INFO: STARTING: [job-id-string] App\Jobs\ProcessOrder
+[2023-10-27 10:30:01] local.INFO: Actually processing Order ID: 1
+[2023-10-27 10:30:03] local.INFO: Finished processing Order ID: 1
+[2023-10-27 10:30:03] local.INFO: SUCCESS: [job-id-string] App\Jobs\ProcessOrder
+    ```
+
+**On Failure** (if you uncomment the `throw new \Exception(...)` line):
+```log
+[2023-10-27 10:35:05] local.INFO: STARTING: [job-id-string] App\Jobs\ProcessOrder
+[2023-10-27 10:35:05] local.INFO: Actually processing Order ID: 1
+// (The job will retry a few times depending on your config)
+// After the final attempt fails...
+[2023-10-27 10:35:15] local.ERROR: FAILED: [job-id-string] App\Jobs\ProcessOrder {"exception":"Could not connect to payment gateway!","payload":"{...json...}"}
+    ```
+
+### Conclusion
+
+As you can see, the implementation of the emitter (the queue worker) and the listener (`QueueEventSubscriber`) is completely independent of the queue driver. Your existing logic for logging and monitoring will work seamlessly when you switch `QUEUE_CONNECTION` from `mongodb` to `redis`. This is one of the most powerful features of Laravel's abstraction layers.

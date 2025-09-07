@@ -1,0 +1,331 @@
+---
+title: 'Graph RAG Laravel Dev Setup'
+---
+Setting up a streamlined local development environment is crucial for building and testing this system efficiently. Let's get this documented.
+
+### The Core Question: `docling` CLI vs. API
+
+You've hit on a key architectural point. While having `docling` as a CLI is great for one-off tests, for an application integration, you absolutely want a containerized API version.
+
+**Why you need the API version:**
+
+1.  **Decoupling:** Your Laravel application should not depend on a specific executable being in a specific path on the host machine. It should communicate with a service over a network protocol (HTTP). This makes your app portable and mirrors a production setup.
+2.  **Process Management:** Calling a CLI from a PHP queue worker (`shell_exec` or `Process`) is complex to manage. You have to handle stdout/stderr, process timeouts, and potential hangs. An HTTP API is far more robust and predictable.
+3.  **Concurrency:** A dedicated API service can handle multiple concurrent requests from your queue workers far more gracefully than spawning multiple CLI processes.
+4.  **State & Caching:** The API version can maintain state or caches (like loaded models) in memory, making subsequent calls much faster. The CLI has to bootstrap from scratch every single time.
+
+**Conclusion:** We will proceed with the setup assuming `docling` runs as a containerized HTTP service.
+
+---
+
+### Minimal Development Environment Topology
+
+On a single machine, your services will run in their own processes/containers but communicate over `localhost`. This diagram shows the logical flow.
+
+```
++-------------------------------------------------------------------------+
+|                        Your Development Machine (localhost)             |
+|                                                                         |
+|  +--------------------+  (HTTP:8000)  +---------------------------+     |
+|  |   Your Browser     | <-----------> |  Laravel Dev Server       |     |
+|  +--------------------+               |  (php artisan serve)      |     |
+|                                       |                           |     |
+|                                       |  (Dispatches Job)         |     |
+|                                       +-------------+-------------+     |
+|                                                     |                   |
+|                                                     v (Pushes to queue) |
+|      +-------------------------+          +---------+---------+         |
+|      | Laravel Queue Worker    | <------->|  Redis / DB Queue |         |
+|      | (php artisan queue:work)|(Pulls Job)+-------------------+         |
+|      +-----------+-------------+                                        |
+|                  |                                                      |
+|  (1. Calls API)  |                                                      |
+|                  v                                                      |
+|      +-----------+-------------+        (2. Writes Graph Data)          |
+|      | Docling API Container   |                                        |
+|      | (Docker, Port 8001)     |-------------------------------------> +-------------------+
+|      +-------------------------+                                        | Neo4j             |
+|                                                                         | (Bolt: 7687)      |
+|                                                                         +-------------------+
+|                                                                         |
+|                                                                         |
+|      (Your existing running services, which Laravel connects to)        |
+|      +-------------------------+        +--------------------------+    |
+|      | MongoDB                 |        | Minio                    |    |
+|      | (Port 27017)            |        | (Ports 9000, 9001)       |    |
+|      +-------------------------+        +--------------------------+    |
+|                                                                         |
++-------------------------------------------------------------------------+
+      |
+      | (Outbound API Call)
+      v
++-------------------+
+|   Google Gemini   |
+|   API Endpoint    |
++-------------------+
+```
+
+---
+
+### Setting Up The Development Environment
+
+Here is a step-by-step guide to integrate the new AI components into your existing setup.
+
+#### Prerequisites
+
+*   Your existing Laravel DMS, MongoDB, and Minio are running.
+*   Neo4j is running and accessible (we'll assume on `localhost`).
+*   **Docker** and **Docker Compose** are installed on your machine.
+
+---
+
+#### Step 1: Run `docling` as an API Service
+
+We will use Docker Compose to define and run the `docling` service. This is clean and easily manageable.
+
+1.  **Create a `docker-compose.yml` file** in the root of your Laravel project (or a dedicated folder).
+
+2.  **Add the `docling` service definition** to this file. The official `docling` documentation should specify the image name. We'll use a placeholder `ghcr.io/docling-ai/docling:latest`.
+
+```yaml
+# docker-compose.yml
+version: '3.8'
+
+services:
+  docling:
+    # Replace with the official docling image if different
+    image: ghcr.io/docling-ai/docling:latest
+    container_name: docling_api
+    ports:
+      - "8001:8001" # Expose the service on localhost:8001
+    # Add any required environment variables for docling here, if any.
+    # environment:
+    #   - MODEL_CACHE=/models
+    # volumes:
+    #   - ./models:/models
+    restart: unless-stopped
+    ```
+
+3.  **Start the service:** Open your terminal in the same directory as the `docker-compose.yml` file and run:
+```bash
+docker-compose up -d
+    ```
+
+4.  **Verify it's running:** You can check the logs with `docker-compose logs -f docling`. After a minute, test the API endpoint (the exact path may vary, check `docling` docs). A simple health-check endpoint is common.
+```bash
+# Example test command, adjust endpoint as needed
+curl http://localhost:8001/health
+    ```
+
+---
+
+#### Step 2: Configure Your Laravel Application
+
+Now, we need to tell Laravel how to connect to all these new services.
+
+1.  **Install Required PHP Libraries:**
+```bash
+# For connecting to Neo4j
+composer require laudis/neo4j-php-client
+
+# For the Gemini API via Prism (as per your plan)
+composer require prism-php/gemini
+    ```
+
+2.  **Update Your `.env` file:** Add the connection details for the new services.
+```dotenv
+# .env
+
+# Queue Configuration (Redis is recommended for local dev)
+QUEUE_CONNECTION=redis
+# If you don't have Redis, you can use `database` for testing,
+# but run `php artisan queue:table` and `php artisan migrate` first.
+
+# Neo4j Connection Details
+NEO4J_HOST=localhost
+NEO4J_PORT=7687
+NEO4J_USER=neo4j
+NEO4J_PASSWORD=your_neo4j_password
+
+# Docling Service URL
+DOCLING_API_URL=http://localhost:8001/process
+
+# Gemini API Key
+GEMINI_API_KEY=your_google_ai_studio_api_key
+    ```
+
+3.  **(Optional but Recommended) Create a Config File:** To keep things clean, create a config file for your services.
+
+`config/services.php`
+```php
+// config/services.php
+return [
+    // ... other services
+
+    'neo4j' => [
+        'host' => env('NEO4J_HOST', 'localhost'),
+        'scheme' => 'bolt',
+        'port' => env('NEO4J_PORT', 7687),
+        'user' => env('NEO4J_USER', 'neo4j'),
+        'password' => env('NEO4J_PASSWORD', 'password'),
+    ],
+
+    'docling' => [
+        'url' => env('DOCLING_API_URL'),
+    ],
+
+    'gemini' => [
+        'key' => env('GEMINI_API_KEY'),
+    ],
+];
+    ```
+
+---
+
+#### Step 3: Set Up and Run the Laravel Queue Worker
+
+The worker is the background process that will do all the heavy lifting.
+
+1.  **Open a new terminal window** and navigate to your Laravel project root.
+2.  **Run the queue worker:** This command starts a worker that will listen for jobs on the queue you configured in `.env`.
+```bash
+php artisan queue:work
+    ```
+Keep this terminal window open. You will see output here when jobs are processed.
+
+---
+
+#### Step 4: Implement the Core Logic (Artisan Commands & Jobs)
+
+Now you can start building the pieces that connect everything.
+
+1.  **Create the Main Job:** This job will orchestrate the call to `docling` and then write to Neo4j.
+```bash
+php artisan make:job ProcessDocumentForGraph
+    ```
+`app/Jobs/ProcessDocumentForGraph.php`
+```php
+<?php
+
+namespace App\Jobs;
+
+use App\Models\Document; // Your Document model
+use Illuminate\Bus\Queueable;
+use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Foundation\Bus\Dispatchable;
+use Illuminate\Queue\InteractsWithQueue;
+use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\Log;
+use Laudis\Neo4j\ClientBuilder;
+
+class ProcessDocumentForGraph implements ShouldQueue
+{
+    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+
+    public function __construct(public Document $document) {}
+
+    public function handle(): void
+    {
+        Log::info("Processing document for graph: {$this->document->id}");
+
+        // 1. Get a temp URL from Minio for the document
+        $fileUrl = $this->document->getTemporaryUrl(); // Implement this method in your model
+
+        // 2. Call Docling API
+        $doclingUrl = config('services.docling.url');
+        $response = Http::timeout(300)->post($doclingUrl, [
+            'url' => $fileUrl,
+            'document_id' => $this->document->id,
+        ]);
+
+        if ($response->failed()) {
+            Log::error("Docling processing failed for document {$this->document->id}", $response->json());
+            $this->fail(); // Mark the job as failed
+            return;
+        }
+
+        $graphData = $response->json();
+        Log::info("Docling response received.", $graphData);
+
+
+        // 3. Write to Neo4j
+        $this->writeToNeo4j($graphData);
+
+        // 4. Update document status in MongoDB
+        $this->document->update(['graph_status' => 'processed']);
+        Log::info("Successfully processed and stored graph for document: {$this->document->id}");
+    }
+
+    private function writeToNeo4j(array $data)
+    {
+        $client = ClientBuilder::create()
+            ->withDriver('default', config('services.neo4j.scheme').'://'.config('services.neo4j.user').':'.config('services.neo4j.password').'@'.config('services.neo4j.host').':'.config('services.neo4j.port'))
+            ->build();
+
+        // Example: Create nodes and relationships. This needs to be robust.
+        $cypher = "MERGE (d:Document {mongo_id: \$docId}) ";
+        foreach ($data['entities'] as $entity) {
+            // IMPORTANT: Sanitize labels and properties
+            $label = preg_replace('/[^a-zA-Z0-9_]/', '', $entity['label']);
+            $cypher .= "MERGE (e:{$label} {name: \$entity_name_{$entity['id']}}) ";
+            $cypher .= "MERGE (d)-[:CONTAINS_ENTITY]->(e) ";
+        }
+
+        // This is a simplified example. You'll need a more dynamic query builder.
+        // ... build the rest of your query dynamically ...
+
+        // In a real app, you would pass parameters instead of building a huge string
+        // $client->run($cypher, $parameters);
+
+        Log::info("Executing Cypher query for document {$this->document->id}");
+        // For now, this is just a placeholder for the actual logic.
+    }
+}
+    ```
+
+2.  **Create the Artisan Command for Backfilling:**
+```bash
+php artisan make:command ProcessArchiveForGraph
+    ```
+`app/Console/Commands/ProcessArchiveForGraph.php`
+```php
+<?php
+
+namespace App\Console\Commands;
+
+use App\Jobs\ProcessDocumentForGraph;
+use App\Models\Document;
+use Illuminate\Console\Command;
+
+class ProcessArchiveForGraph extends Command
+{
+    protected $signature = 'docs:process-archive {--limit=100}';
+    protected $description = 'Dispatch jobs to process archived documents and build the knowledge graph.';
+
+    public function handle()
+    {
+        $this->info("Fetching documents to process...");
+
+        Document::query()
+            ->where('graph_status', '!=', 'processed') // Or whatever your criteria is
+            ->limit($this->option('limit'))
+            ->get()
+            ->each(function (Document $document) {
+                $this->line("Dispatching job for document: {$document->id}");
+                ProcessDocumentForGraph::dispatch($document);
+            });
+
+        $this->info("All jobs have been dispatched.");
+        return 0;
+    }
+}
+    ```
+
+With this setup, your development workflow is:
+1.  Run `docker-compose up -d` once to start `docling`.
+2.  Start your Laravel dev server (`php artisan serve`).
+3.  Start your queue worker in another terminal (`php artisan queue:work`).
+4.  Run `php artisan docs:process-archive` to kick off the ingestion process.
+5.  Watch the queue worker terminal for job processing logs.
+6.  Query Neo4j Browser (`http://localhost:7474`) to see your graph being built.

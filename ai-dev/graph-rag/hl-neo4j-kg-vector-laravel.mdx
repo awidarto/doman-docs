@@ -1,0 +1,118 @@
+---
+title: 'High Level Graph RAG Neo4J Knowledge Graph'
+---
+
+### Part 1: The Purpose of the Knowledge Graph in This Context
+
+While vector search is fantastic for finding semantically *similar* content, a knowledge graph is designed to understand and query explicit *relationships and context*. It moves you from simple document retrieval to genuine knowledge discovery.
+
+In your application, `docling` extracts two types of information:
+1.  **Unstructured Content:** The text chunks you use for vector embeddings.
+2.  **Structured Entities & Relationships:** Things like `(Person: "Alice")-[WORKED_ON]->(Project: "Titan")` or `(Company: "Acme Corp")-[ACQUIRED]->(Company: "Beta Inc")`.
+
+The knowledge graph in Neo4j is where you store and leverage this second type of structured data. Here’s its purpose:
+
+#### 1. Answering Complex, Multi-Hop Questions
+
+Vector search can answer "Find me documents about AI in finance." A knowledge graph can answer questions that require traversing connections:
+
+*   **"Show me all projects that 'John Doe' worked on, and also list his colleagues on those projects."**
+*   *Cypher Query:* `MATCH (p:Person {name: "John Doe"})-[:WORKED_ON]->(proj:Project)<-[:WORKED_ON]-(colleague:Person) RETURN proj.name, colleague.name`
+*   **"Which documents mention a company that was later acquired by 'Google'?"**
+*   *Cypher Query:* `MATCH (doc:Document)-[:MENTIONS]->(c:Company)<-[:ACQUIRED]-(g:Company {name: "Google"}) RETURN doc.title`
+
+These kinds of queries are nearly impossible with vector search alone because they rely on the explicit relationships between entities.
+
+#### 2. Discovering Hidden Connections and Patterns
+
+A user might be reading a document about "Project Alpha." The UI, powered by Neo4j, can automatically show a panel with:
+*   People involved in Project Alpha.
+*   Technologies mentioned in relation to it.
+*   Other projects that share the same team members or technologies.
+
+This allows users to explore your document corpus like a web, jumping from one concept to the next and discovering information they didn't even know to search for.
+
+#### 3. Creating a Canonical "Single Source of Truth" for Entities
+
+Over time, you will process hundreds of documents. The name "John Doe" might appear in 50 of them. Instead of treating these as 50 separate strings, Neo4j allows you to create a **single** `:Person {name: "John Doe"}` node. All 50 document mentions then point to this one node.
+
+This is called **Entity Resolution**, and it provides immense value:
+*   **Data Consistency:** It cleans and consolidates your data.
+*   **360-Degree View:** You can click on the "John Doe" node and see everything related to him across all documents instantly.
+*   **Analytics:** You can run queries like `MATCH (p:Person) RETURN p.name, size((p)-[:WORKED_ON]->()) as project_count ORDER BY project_count DESC` to find the most prolific people in your dataset.
+
+#### 4. Powering Advanced RAG (Retrieval-Augmented Generation)
+
+This is a state-of-the-art use case. When you ask a Large Language Model (LLM) a question:
+*   **Standard RAG:** You first do a vector search to find relevant text chunks and feed them to the LLM as context.
+*   **Knowledge Graph RAG:** You do the vector search, but you *also* query the knowledge graph for structured facts about the entities found in those chunks. You feed the LLM *both* the unstructured text *and* the structured facts.
+
+This results in dramatically more accurate, factual, and less "hallucinated" answers from the LLM because it has both narrative context and a structured, factual backbone to work with.
+
+---
+
+### Part 2: Can Neo4j Be Used as a Vector Database?
+
+**Yes, absolutely.** Neo4j has invested heavily in this area and offers first-class vector search capabilities. This is a game-changer because it allows you to store your graph relationships and vector embeddings **in the same database**.
+
+#### How it Works
+
+1.  **Storing Vectors:** You can add a `vector` property type directly to nodes. For example, each document chunk can be its own node.
+```cypher
+// Storing a chunk from a document with its embedding
+MATCH (d:Document {id: 123})
+CREATE (c:Chunk {text: "The quick brown fox..."})
+SET c.embedding = [0.12, -0.45, ..., 0.89] // The vector from Gemini
+CREATE (d)-[:HAS_CHUNK]->(c)
+    ```
+
+2.  **Creating a Vector Index:** To perform fast searches, you create a vector index on that property. This is crucial for performance.
+```cypher
+CREATE VECTOR INDEX chunk_embeddings IF NOT EXISTS
+FOR (c:Chunk) ON (c.embedding)
+OPTIONS { indexProvider: 'vector-2.0', dimension: 768, similarityFunction: 'cosine' }
+    ```
+*   `dimension`: Must match your embedding model's output (e.g., 768 for Gemini's `text-embedding-004`).
+*   `similarityFunction`: Usually `cosine` for text embeddings.
+
+3.  **Querying:** You use a procedure to find the nearest neighbors to a query vector.
+```cypher
+// 1. Get the query vector for "fast brown animals" from Gemini
+WITH $queryVector as queryVector
+
+// 2. Use the index to find the top 5 most similar chunks
+CALL db.index.vector.queryNodes('chunk_embeddings', 5, queryVector) YIELD node AS similarChunk, score
+RETURN similarChunk.text, score
+    ```
+
+#### When Should You Use Neo4j as Your Vector Database? (Pros vs. Cons)
+
+This is the key strategic question.
+
+✅ **Use Neo4j for Vectors WHEN...**
+
+1.  **You Need Powerful Hybrid Queries:** This is the killer feature. You want to combine graph traversal and vector search in a single, atomic query.
+*   **Example:** "Find text chunks *similar* to 'machine learning applications' but only from documents authored by someone in the 'Research Department'."
+```cypher
+CALL db.index.vector.queryNodes('chunk_embeddings', 10, $queryVector) YIELD node AS chunk
+MATCH (author:Person)-[:WORKS_IN]->(:Department {name: 'Research'})
+MATCH (author)-[:AUTHORED]->(:Document)-[:HAS_CHUNK]->(chunk)
+RETURN chunk.text, author.name
+    ```
+This elegant query is extremely difficult and slow to perform with two separate databases.
+
+2.  **Context is as Important as Similarity:** You want to enrich your vector search results with the surrounding graph context. The result of your search isn't just a list of texts; it's a set of nodes within a rich graph that you can explore further.
+
+3.  **You Want Operational Simplicity:** You prefer to manage, back up, and secure **one database** instead of two (e.g., Neo4j + Pinecone/Weaviate). This reduces architectural complexity and total cost of ownership.
+
+❌ **Consider a DEDICATED Vector Database WHEN...**
+
+1.  **Your Sole Use Case is Vector Search at Extreme Scale:** If you need to store billions of vectors and your only query pattern is k-Nearest Neighbor (k-NN) search with some simple metadata filtering, a specialized database like Pinecone, Weaviate, or Milvus might offer performance advantages.
+
+2.  **You Have No Need for Graph Relationships:** If the entities and relationships from `docling` are not important to you and you will never query them, then Neo4j is overkill. You'd be using a powerful graph database as a simple key-value store.
+
+### Recommendation for Your Project
+
+For your application, **using Neo4j for both the knowledge graph and vector storage is a highly compelling and recommended approach.**
+
+Your primary goal is to manage and understand documents. This inherently involves both semantic similarity (vectors) and explicit connections between entities (graph). By combining them in Neo4j, you simplify your architecture and unlock uniquely powerful hybrid query capabilities that would be impossible otherwise. Your Laravel worker would simply connect to Neo4j to write both the graph structure and the vector properties in one go.

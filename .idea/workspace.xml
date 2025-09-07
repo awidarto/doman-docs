@@ -6,6 +6,10 @@
   <component name="ChangeListManager">
     <list default="true" id="f5ee46ac-8460-424d-9b8a-dfe584e81db0" name="Changes" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/docling/docling-basic-guide.mdx" beforeDir="false" afterPath="$PROJECT_DIR$/ai-dev/docling/docling-basic-guide.mdx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/docling/docling-installation-macos-intel.mdx" beforeDir="false" afterPath="$PROJECT_DIR$/ai-dev/docling/docling-installation-macos-intel.mdx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/docling/laravel-docling-integration.mdx" beforeDir="false" afterPath="$PROJECT_DIR$/ai-dev/docling/laravel-docling-integration.mdx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/docs.json" beforeDir="false" afterPath="$PROJECT_DIR$/docs.json" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -40,7 +44,7 @@
     "dart.analysis.tool.window.visible": "false",
     "git-widget-placeholder": "main",
     "kotlin-language-version-configured": "true",
-    "last_opened_file_path": "/Users/awidarto/WebProjects/MejikDocs/doman-docs/dev/dms",
+    "last_opened_file_path": "/Users/awidarto/WebProjects/MejikDocs/doman-docs/ai-dev/graph-rag",
     "node.js.detected.package.eslint": "true",
     "node.js.detected.package.tslint": "true",
     "node.js.selected.package.eslint": "(autodetect)",
@@ -54,7 +58,14 @@
 }]]></component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
+      <recent name="$PROJECT_DIR$/ai-dev/graph-rag" />
+      <recent name="$PROJECT_DIR$/mejik-core/laravel" />
+      <recent name="$PROJECT_DIR$/dev/dms" />
       <recent name="$PROJECT_DIR$" />
+    </key>
+    <key name="MoveFile.RECENT_KEYS">
+      <recent name="$PROJECT_DIR$/mejik-core/laravel/framework" />
+      <recent name="$PROJECT_DIR$/ai-dev" />
     </key>
   </component>
   <component name="SharedIndexes">
@@ -75,7 +86,9 @@
       <workItem from="1756706236005" duration="4438000" />
       <workItem from="1756872258799" duration="701000" />
       <workItem from="1756882213633" duration="726000" />
-      <workItem from="1756893647212" duration="8597000" />
+      <workItem from="1756893647212" duration="10304000" />
+      <workItem from="1757059991774" duration="316000" />
+      <workItem from="1757069749455" duration="6249000" />
     </task>
     <servers />
   </component>

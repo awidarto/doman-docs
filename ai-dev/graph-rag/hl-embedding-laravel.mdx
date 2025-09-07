@@ -1,0 +1,213 @@
+---
+title: 'High Level Graph RAG Laravel  Architecture'
+---
+Using the built-in Laravel Queue with Redis and an Artisan command as the worker is a **highly pragmatic and excellent approach**.
+
+While it might be marginally less performant in raw execution speed compared to a dedicated Go or Python service for a hyper-scaled application, the benefits in terms of development speed, simplicity, and maintainability are often far more valuable. For most applications, this method is more than "optimal enough" and is a standard pattern in the Laravel world.
+
+Let's reformulate the flow using this "all-in-one-codebase" approach.
+
+### Architecture: Laravel-Centric Asynchronous Processing
+
+The core principle remains the same: decouple the heavy lifting from the web request. The only change is that the "worker" is now a Laravel process itself.
+
+#### Visual Flow Diagram
+
+```
+[User] -> [1. Laravel App (Controller)] -> [2. File Storage (S3/Supabase)]
+                      |
+                      v
+          [3. Laravel Queue (Redis)]
+                      |
+                      v
+[4. Laravel Worker (`php artisan queue:work`)]
+   |
+   |--> [5. Docling API]
+   |--> [6. Supabase/Postgres (Vectors)]
+   `--> [7. Neo4j (Knowledge Graph)]
+
+// Status updates happen directly inside the worker, no API calls needed.
+```
+
+---
+
+### Detailed Step-by-Step Flow (Laravel Queue & Worker)
+
+#### Step 1: Document Upload and Job Dispatch (Controller)
+
+This part is nearly identical, but becomes even simpler.
+
+1.  **User Uploads PDF:** A user submits a form with the PDF.
+2.  **Initial Record & Storage:** Your `DocumentController` does the following:
+*   Validates the request.
+*   Creates a `Document` record in your database with `status = 'pending'`.
+*   Uploads the file to a shared storage (S3, Supabase Storage, etc.).
+*   Updates the `Document` record with the `storage_path`.
+3.  **Dispatch the Job:** This is where Laravel's elegance shines. You create a dedicated Job class and dispatch it.
+
+```php
+// In your DocumentController.php
+
+use App\Jobs\ProcessDocumentJob;
+use App\Models\Document;
+
+// ... after saving the file
+$document = Document::create([
+    'user_id' => auth()->id(),
+    'original_filename' => $file->getClientOriginalName(),
+    'storage_path' => $path, // e.g., 'documents/unique-id.pdf'
+    'status' => 'pending',
+]);
+
+// Dispatch the job to the queue
+ProcessDocumentJob::dispatch($document);
+
+return response()->json(['message' => 'Your document is being processed.'], 202);
+    ```
+
+You would first create this job class using the artisan command: `php artisan make:job ProcessDocumentJob`.
+
+#### Step 2: The Processing Pipeline (The Laravel Job)
+
+All the complex logic now lives inside the `handle()` method of your `App\Jobs\ProcessDocumentJob.php` file. The worker is a long-running process started on your server via `php artisan queue:work`.
+
+Here is a skeleton of what your Job class would look like:
+
+```php
+// In app/Jobs/ProcessDocumentJob.php
+
+namespace App\Jobs;
+
+use App\Models\Document;
+use Illuminate\Bus\Queueable;
+use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Foundation\Bus\Dispatchable;
+use Illuminate\Queue\InteractsWithQueue;
+use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
+use Laudis\Neo4j\ClientBuilder; // Example Neo4j client library
+
+class ProcessDocumentJob implements ShouldQueue
+{
+    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+
+    // The Eloquent model is automatically passed and unserialized
+    public Document $document;
+
+    public function __construct(Document $document)
+    {
+        $this->document = $document;
+    }
+
+    /**
+     * Execute the job.
+     */
+    public function handle(): void
+    {
+        try {
+            // 1. Update Status & Fetch File
+            $this->document->update(['status' => 'processing']);
+            $fileContents = Storage::disk('s3')->get($this->document->storage_path);
+
+            // 2. Call Docling API
+            $doclingResponse = Http::withBody($fileContents, 'application/pdf')
+                ->post('http://your-docling-api.com/process');
+
+            if ($doclingResponse->failed()) {
+                throw new \Exception('Docling API failed.');
+            }
+            $data = $doclingResponse->json(); // Contains chunks, entities, etc.
+
+            // 3. Create Vector Embeddings and Save to Supabase
+            $this->document->update(['status' => 'creating_embeddings']);
+            $this->saveVectorsToSupabase($data['chunks']);
+
+            // 4. Create Knowledge Graph in Neo4j
+            $this->document->update(['status' => 'building_graph']);
+            $this->saveGraphToNeo4j($data['entities'], $data['relationships']);
+
+            // 5. Final Success Status
+            $this->document->update(['status' => 'completed']);
+
+        } catch (\Throwable $e) {
+            // Laravel's queue will automatically handle retries.
+            // If all retries fail, it will call the failed() method.
+            $this->document->update([
+                'status' => 'failed',
+                'error_message' => $e->getMessage()
+            ]);
+
+            // Re-throw the exception to let the queue worker know it failed
+            throw $e;
+        }
+    }
+
+    private function saveVectorsToSupabase(array $chunks)
+    {
+        // Assuming you have an embedding service (e.g., OpenAI)
+        $vectorsToInsert = [];
+        foreach ($chunks as $chunk) {
+            // This is a conceptual call to an embedding service
+            $embedding = $this->getEmbeddingForText($chunk['content']);
+
+            $vectorsToInsert[] = [
+                'document_id' => $this->document->id,
+                'content'     => $chunk['content'],
+                'embedding'   => '[' . implode(',', $embedding) . ']', // Format for pgvector
+            ];
+        }
+
+        // Use a direct DB connection for performance.
+        // Assumes you have a 'supabase' connection in config/database.php
+        DB::connection('supabase')->table('document_chunks')->insert($vectorsToInsert);
+    }
+
+    private function saveGraphToNeo4j(array $entities, array $relationships)
+    {
+        $client = ClientBuilder::create()
+            ->withDriver('bolt', 'bolt://user:pass@your-neo4j-host:7687')
+            ->build();
+
+        // Use a transaction for the entire operation
+        $client->writeTransaction(function ($transaction) use ($entities, $relationships) {
+            // Cypher queries to build the graph
+            // ... (as shown in the previous answer)
+        });
+    }
+
+    // You can define a failed() method for final error logging
+    public function failed(\Throwable $exception): void
+    {
+        // Send a notification to an admin, etc.
+        \Log::error("Job failed for document ID {$this->document->id}: {$exception->getMessage()}");
+    }
+}
+```
+
+### Pros and Cons of this Approach
+
+#### Pros (Advantages)
+
+1.  **Unified Codebase & Simplicity:** Your entire application logic lives in one place. No need to manage, test, and deploy a separate service in a different language.
+2.  **Developer Experience:** It's pure Laravel. You use tools you already know: Eloquent, the `Http` client, Jobs, Queues, etc.
+3.  **Seamless Model Access:** The job gets the actual `Document` Eloquent model. Updating status is as simple as `$this->document->update([...])`. There is no need for internal API calls/webhooks between services.
+4.  **Built-in Error Handling:** Laravel's queue system has robust, built-in support for retries, timeouts, and a `failed_jobs` table for easy inspection.
+5.  **Simplified Deployment:** You deploy one application. To scale the processing, you just run more `php artisan queue:work` processes on one or more servers.
+
+#### Cons (The "Less Optimal" Aspects)
+
+1.  **Language Ecosystem:** Python has a richer ecosystem for data science, machine learning, and AI tasks (e.g., libraries for generating embeddings locally). In PHP, you will almost always rely on calling external APIs for these tasks.
+2.  **Resource Management:** If you run your queue workers on the same server as your web server (e.g., Forge, Ploi default setup), a very intensive job could potentially impact web request performance. The solution is to run workers on separate, dedicated servers, which is a common scaling pattern.
+3.  **Single Point of Failure:** If your Laravel app goes down, both the web front-end and the processing back-end go down. (This is true for any monolith).
+
+### Conclusion: The Recommended Path
+
+For your use case, **using the Laravel Queue with an Artisan worker is the optimal choice to start with.**
+
+The benefits of simplicity, speed of development, and maintainability are immense. The performance of this entire flow is dictated by the external APIs (`docling`, embedding API) and database writes, not by the execution speed of PHP. Therefore, the "cons" are largely academic until you reach a massive scale where a microservice architecture might become necessary.
+
+**To get this running in production, you will need:**
+1.  Configure your queue driver to `redis` in `.env`.
+2.  Install a process manager like **Supervisor** on your server to run `php artisan queue:work` and ensure it stays running.

@@ -1,0 +1,122 @@
+---
+title: 'High Level Graph RAG Laravel Architecture ( expanded )'
+---
+Of course. This is an excellent architecture problem that benefits from a decoupled, asynchronous approach. Here is a high-level flow and a breakdown of the optimal methods for your Laravel application.
+
+### High-Level Goal
+
+The primary goal is to offload the heavy, time-consuming document processing from your main Laravel application to ensure the user experience is fast and the system is scalable and resilient. The Laravel app will act as the orchestrator and status monitor, but not the worker.
+
+### Recommended Architecture: Asynchronous & Event-Driven
+
+The most optimal method is a decoupled, event-driven architecture using a message queue. This prevents your Laravel app from being blocked and allows each part of the system to scale independently.
+
+#### Visual Flow Diagram
+
+```
+[User] -> [1. Laravel App] -> [2. File Storage (S3/Supabase)]
+                      |
+                      v
+            [3. Message Queue (RabbitMQ/SQS)]
+                      |
+                      v
+        [4. Ingestion & Enrichment Service (Worker)] --calls--> [5. Docling API]
+                      |
+                      |---(saves to)--> [6. Supabase/Postgres (Vectors)]
+                      |
+                      |---(saves to)--> [7. Neo4j (Knowledge Graph)]
+                      |
+                      `--(notifies)--> [1. Laravel App API (Status Update)]
+```
+
+---
+
+### Detailed Step-by-Step Flow
+
+#### Step 1: Document Upload and Job Dispatch (Laravel App)
+
+1.  **User Uploads PDF:** A user uploads a PDF document through your Laravel application's front end.
+2.  **Initial Record Creation:** Laravel creates a record in its own database (e.g., a `documents` table). This record should have a `status` column, initialized to `'pending'`.
+*   `documents` table: `id`, `user_id`, `original_filename`, `storage_path`, `status` (`pending`, `processing`, `creating_embeddings`, `building_graph`, `completed`, `failed`), `error_message`.
+3.  **Store the File:** Laravel **does not** store the file locally. It immediately uploads the PDF to a shared, cloud-based file storage service like **Amazon S3**, **Google Cloud Storage**, or **Supabase Storage**. This ensures the file is accessible to other services.
+4.  **Dispatch a Job:** Laravel pushes a message to a **Message Queue** (like RabbitMQ, Amazon SQS, or even Redis). This is the key to making the process asynchronous. The message payload is simple and contains the necessary information:
+```json
+{
+  "document_id": 123,
+  "file_path": "s3://my-bucket/documents/unique-file-id.pdf"
+}
+    ```
+5.  **Immediate User Feedback:** The Laravel app immediately returns a response to the user, saying "Your document has been uploaded and is now being processed." The UI can now poll for status updates or use websockets.
+
+#### Step 2: The Processing Pipeline (A Separate Service)
+
+This is a dedicated, stateless worker service. It could be written in Python, Node.js, or Go—whatever is best for data processing and interacting with the various APIs. Its only job is to listen to the message queue and process documents.
+
+1.  **Consume the Message:** A worker from your pipeline service picks up the job message from the queue.
+2.  **Update Status:** The very first thing the worker does is make an API call back to your Laravel application to update the document's status. This provides real-time feedback.
+*   `PUT /api/documents/123` with payload `{"status": "processing"}`.
+*   Your Laravel app should have a secure internal API endpoint for this.
+3.  **Fetch the Document:** The worker uses the `file_path` from the message to download the PDF from the shared file storage (S3).
+4.  **Call Docling API:** The worker sends the PDF to your `docling` API server for processing. It waits for `docling` to return the structured data (e.g., text chunks, entities, relationships in a JSON format).
+
+#### Step 3: Vector Embedding & Storage (In the Worker)
+
+1.  **Update Status:** Worker notifies Laravel: `PUT /api/documents/123` with `{"status": "creating_embeddings"}`.
+2.  **Generate Embeddings:** The worker takes the text chunks from the `docling` response. For each chunk, it calls an embedding model (e.g., OpenAI's API, a self-hosted sentence-transformer model) to get a vector.
+3.  **Save to Supabase/Postgres:**
+*   **Optimal Method: Direct Database Connection.**
+*   **Why?** Performance. You will be inserting potentially hundreds or thousands of vector rows per document. Using an API (like Supabase Edge Functions or PostgREST) for this would be very slow due to the overhead of one HTTP request per insert.
+*   **How:** The worker service connects directly to your Supabase Postgres database using standard Postgres credentials. It should perform a **bulk `INSERT`** operation to save all the text chunks and their corresponding vectors in a single, efficient database transaction.
+*   **Security:** Ensure the worker service is in a trusted environment (e.g., a VPC) and connects to the database over SSL. Store database credentials securely (e.g., AWS Secrets Manager, Doppler, or environment variables).
+
+*Your Supabase table might look like this:*
+```sql
+CREATE EXTENSION IF NOT EXISTS vector;
+
+CREATE TABLE document_chunks (
+  id BIGINT PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+  document_id BIGINT REFERENCES documents(id),
+  content TEXT,
+  embedding VECTOR(1536) -- Or whatever your model's dimension is
+);
+    ```
+
+#### Step 4: Knowledge Graph Creation (In the Worker)
+
+1.  **Update Status:** Worker notifies Laravel: `PUT /api/documents/123` with `{"status": "building_graph"}`.
+2.  **Parse KG Data:** The worker parses the entities and relationships from the `docling` JSON response.
+3.  **Save to Neo4j:**
+*   **Optimal Method: Direct Connection via Bolt Protocol.**
+*   **Why?** This is the native, standard, and most performant way to interact with Neo4j. An API layer in front of Neo4j for this kind of data ingestion would add unnecessary complexity and latency.
+*   **How:** The worker uses an official Neo4j driver (e.g., for Python, JavaScript). It constructs Cypher queries to create the graph. It's crucial to use `MERGE` instead of `CREATE` to avoid creating duplicate nodes for the same entity across different documents. The entire operation for one document should be wrapped in a single transaction.
+
+*Example Cypher query:*
+```cypher
+UNWIND $entities as entity
+MERGE (n:Entity {name: entity.name, type: entity.type})
+
+UNWIND $relationships as rel
+MATCH (a:Entity {name: rel.source})
+MATCH (b:Entity {name: rel.target})
+MERGE (a)-[r:RELATES_TO {type: rel.type, document_id: $document_id}]->(b)
+    ```
+
+#### Step 5: Final Notification
+
+1.  **On Success:** If all steps complete successfully, the worker makes one final API call to Laravel.
+*   `PUT /api/documents/123` with `{"status": "completed"}`.
+2.  **On Failure:** If any step fails (Docling API error, database connection issue, etc.), the worker should catch the exception and notify Laravel.
+*   `PUT /api/documents/123` with `{"status": "failed", "error_message": "Failed to generate embeddings: ..."}`.
+*   Your pipeline should also have a retry mechanism and a dead-letter queue for jobs that fail repeatedly.
+
+---
+
+### Summary of Optimal Methods
+
+| Task                                 | Optimal Method                                                                 | Rationale                                                                                                                                                                                            |
+| ------------------------------------ | ------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Triggering the Process**           | **Message Queue** (RabbitMQ, SQS)                                              | **Decoupling & Scalability.** Laravel doesn't wait. The queue absorbs spikes in uploads. You can scale the number of worker services independently of the web app.                                   |
+| **Notifying Laravel of Status**      | **Webhook/Callback API** (Worker calls a Laravel API endpoint)                 | **Efficiency & Real-time Updates.** It's a "push" model. The worker actively informs Laravel of progress. This is far better than Laravel constantly "pulling" (polling) the worker for its status. |
+| **Saving Vectors to Supabase**       | **Direct Database Connection** (with bulk inserts)                             | **Performance.** Massively faster for bulk data ingestion than making hundreds of individual API calls. The worker is a trusted backend service, making a direct connection appropriate.      |
+| **Saving Graph to Neo4j**            | **Direct Connection via Bolt Driver** (with transactional Cypher queries)      | **Performance & Native Integration.** This is the standard, most efficient way to interact with Neo4j, designed for high-performance graph operations from backend services.                  |
+| **Sharing the PDF File**             | **Shared Object Storage** (S3, GCS, Supabase Storage)                          | **Accessibility & Statelessness.** All services (Laravel, Worker) can access the file via a common, scalable storage layer without needing a shared file system.                             |
