@@ -1,0 +1,422 @@
+---
+title: 'Graph RAG : Laravel, MongoDB, Neo4j & n8n'
+---
+
+## GraphRAG System Documentation: Laravel, MongoDB, Neo4j & n8n
+
+This document outlines the architecture and implementation of a sophisticated Retrieval-Augmented Generation (RAG) system using a GraphRAG approach. The system is built on a modern stack designed for scalability, data sovereignty, and powerful contextual retrieval.
+
+### English Version
+
+---
+
+### 1. Architectural Overview
+
+The system is designed to ingest unstructured documents (e.g., PDF, DOCX) from a MinIO file store, process them, and build a rich, interconnected knowledge base in Neo4j. This knowledge base serves as the intelligent backend for a RAG application built with Laravel. MongoDB acts as the primary application database and a persistent "golden record" store for ingested documents.
+
+#### 1.1 Core Components
+
+*   **Laravel 12:** The core web application framework, providing API endpoints and business logic.
+*   **MongoDB:** The main application database. In this RAG context, it stores metadata and the original text content of processed documents, acting as an archival source of truth.
+*   **Neo4j:** The heart of the RAG engine. It serves a dual purpose:
+1.  **Knowledge Graph:** Stores entities and their relationships.
+2.  **Vector Database:** Stores text chunks and their vector embeddings, with a native vector search index.
+*   **MinIO (S3-Compatible):** The primary object storage for raw, unstructured files (PDFs, DOCX, etc.).
+*   **docling (API Service):** An external service used for converting various document formats into clean, plain text.
+*   **n8n:** A workflow automation tool used for event-driven, real-time ingestion pipelines.
+*   **Artisan Commands:** Laravel's command-line interface, used for batch processing, backfilling, and scheduled tasks.
+
+#### 1.2 Data Flow Diagram
+
+**Ingestion Workflow:**
+```
+[1. User uploads file to MinIO]
+         |
+         V (Trigger: Webhook/Event)
+[2. n8n Workflow OR Scheduled Artisan Command]
+         |
+         V
+[3. Call Docling API (File URL) -> Get Plain Text]
+         |
+         V
+[4. Save metadata & text to MongoDB (status: 'pending')]
+         |
+         V
+[5. Artisan Command: 'rag:process-documents']
+         |
+         |--> (a) Chunk text
+         |--> (b) Generate embedding for each chunk (LLM API)
+         |--> (c) Create :Document, :Chunk, :Entity nodes in Neo4j
+         |--> (d) Store embedding in :Chunk node
+         |--> (e) Update status in MongoDB (status: 'completed')
+```
+
+**Query (RAG) Workflow:**
+```
+[1. User sends query to Laravel API]
+         |
+         V
+[2. Embed user query (LLM API)]
+         |
+         V
+[3. Execute single, unified query on Neo4j]
+    (Combines vector search on :Chunk nodes with graph traversal)
+         |
+         V
+[4. Retrieve relevant text chunks from Neo4j]
+         |
+         V
+[5. Augment prompt and send to LLM for final answer]
+         |
+         V
+[6. Return generated answer and sources to user]
+```
+
+### 2. Implementation Details
+
+#### 2.1 Neo4j Setup
+
+Ensure you are using **Neo4j 5.11 or newer**. First, create the vector index.
+
+```cypher
+-- Create a vector index on the 'embedding' property of 'Chunk' nodes
+CREATE VECTOR INDEX chunk_embeddings IF NOT EXISTS
+FOR (c:Chunk) ON (c.embedding)
+OPTIONS { indexConfig: {
+  `vector.dimensions`: 1536,          -- Adjust to your embedding model's dimensions
+  `vector.similarity_function`: 'cosine'
+}}
+```
+
+#### 2.2 MongoDB Schema
+
+The `documents` collection will track the state of each file.
+
+```json
+{
+  "_id": "65f...",
+  "file_name": "annual_report_2024.pdf",
+  "minio_path": "/reports/annual_report_2024.pdf",
+  "source_text": "The full text extracted from the document...",
+  "status": "completed", // pending, processing, completed, failed
+  "processed_at": "...",
+  "created_at": "...",
+  "updated_at": "..."
+}
+```
+
+#### 2.3 Laravel Artisan Command (Glue Logic)
+
+This command is the core of your batch processing system. It finds documents in MongoDB that need processing and populates the Neo4j knowledge graph.
+
+`php artisan make:command ProcessDocumentsForRag`
+
+**`app/Console/Commands/ProcessDocumentsForRag.php`:**
+
+```php
+namespace App\Console\Commands;
+
+use Illuminate\Console\Command;
+use App\Models\Document; // Your MongoDB model
+use App\Services\ChunkingService;
+use App\Services\EmbeddingService;
+use App\Services\GraphService; // Your Neo4j service
+use App\Services\LlmService;
+use Illuminate\Support\Facades\Log;
+
+class ProcessDocumentsForRag extends Command
+{
+    protected $signature = 'rag:process-documents {--limit=10} {--force-id=}';
+    protected $description = 'Processes pending documents from MongoDB and indexes them in Neo4j.';
+
+    public function handle(
+        ChunkingService $chunkingService,
+        EmbeddingService $embeddingService,
+        GraphService $graphService,
+        LlmService $llmService
+    ) {
+        $this->info('Starting document processing workflow...');
+
+        $query = Document::where('status', 'pending');
+        if ($this->option('force-id')) {
+            $query = Document::where('_id', $this->option('force-id'));
+        }
+        $documents = $query->limit($this->option('limit'))->get();
+
+        if ($documents->isEmpty()) {
+            $this->info('No pending documents to process.');
+            return 0;
+        }
+
+        foreach ($documents as $doc) {
+            try {
+                $this->line("Processing document: {$doc->file_name} (ID: {$doc->_id})");
+                $doc->status = 'processing';
+                $doc->save();
+
+                // 1. Create parent Document node in Neo4j
+                $graphService->createDocumentNode($doc->_id, $doc->file_name);
+
+                // 2. Chunk the text
+                $textChunks = $chunkingService->split($doc->source_text, 300, 50); // (text, tokens, overlap)
+
+                $progressBar = $this->output->createProgressBar(count($textChunks));
+                $progressBar->start();
+
+                foreach ($textChunks as $index => $chunkText) {
+                    // 3. Generate embedding for the chunk
+                    $embedding = $embeddingService->generate($chunkText);
+                    $chunkId = "{$doc->_id}_chunk_{$index}";
+
+                    // 4. Create :Chunk node in Neo4j with embedding
+                    $graphService->createChunkNode($chunkId, $doc->_id, $chunkText, $embedding);
+
+                    // 5. (Optional but powerful) Extract entities and link them
+                    $entities = $llmService->extractEntities($chunkText);
+                    foreach ($entities as $entity) {
+                        $graphService->createEntityNode($entity);
+                        $graphService->linkChunkToEntity($chunkId, $entity);
+                    }
+                    $progressBar->advance();
+                }
+
+                $progressBar->finish();
+                $this->newLine();
+
+                $doc->status = 'completed';
+                $doc->processed_at = now();
+                $doc->save();
+                $this->info("Successfully processed document: {$doc->file_name}");
+
+            } catch (\Exception $e) {
+                Log::error("Failed to process document {$doc->_id}: {$e->getMessage()}");
+                $doc->status = 'failed';
+                $doc->save();
+                $this->error("Failed to process document {$doc->file_name}. See logs for details.");
+            }
+        }
+        $this->info('Document processing workflow finished.');
+        return 0;
+    }
+}
+```
+
+#### 2.4 n8n Ingestion Workflow (Real-time)
+
+For immediate processing of uploaded files.
+
+1.  **Trigger:** `MinIO Trigger` node (listens for `s3:ObjectCreated:*` events) or a `Webhook` node that MinIO can call.
+2.  **HTTP Request (Docling):** Call the docling API. Pass the pre-signed URL of the new MinIO object.
+3.  **MongoDB Node:** Create a new document in the `documents` collection with the extracted text and a `status` of `pending`.
+4.  **Execute Command Node / HTTP Request (Laravel):** Trigger the Artisan command for the specific new document ID (`php artisan rag:process-documents --force-id=...`) or call a dedicated API endpoint in your Laravel app that kicks off the processing job.
+
+#### 2.5 Laravel RAG Query Logic
+
+This is the code that runs when a user asks a question.
+
+**`app/Services/GraphService.php`**
+```php
+public function graphRagSearch(array $queryVector, int $limit = 5): array
+{
+    // This single query performs vector search and graph traversal
+    $query = "
+        CALL db.index.vector.queryNodes('chunk_embeddings', \$limit, \$queryVector)
+        YIELD node AS similarChunk, score
+        MATCH (doc:Document)-[:HAS_CHUNK]->(similarChunk)
+        RETURN similarChunk.text AS text, score, doc.title AS source
+        ORDER BY score DESC
+    ";
+
+    $result = $this->client->run($query, [
+        'queryVector' => $queryVector,
+        'limit' => $limit
+    ]);
+
+    // Format results for the controller
+    return collect($result->getRecords())->map(function ($record) {
+        return [
+            'text' => $record->get('text'),
+            'score' => $record->get('score'),
+            'source' => $record->get('source')
+        ];
+    })->all();
+}
+```
+
+**`app/Http/Controllers/RAGController.php`**
+```php
+public function ask(Request $request, EmbeddingService $embeddingService, GraphService $graphService, LlmService $llmService)
+{
+    $validated = $request->validate(['query' => 'required|string|max:500']);
+    $userQuery = $validated['query'];
+
+    // 1. Embed user query
+    $queryVector = $embeddingService->generate($userQuery);
+
+    // 2. Search Neo4j for relevant context
+    $contexts = $graphService->graphRagSearch($queryVector, 5);
+
+    if (empty($contexts)) {
+        return response()->json(['answer' => 'I could not find any relevant information to answer your question.']);
+    }
+
+    // 3. Augment prompt and generate answer
+    $contextText = implode("\n---\n", array_column($contexts, 'text'));
+    $prompt = "Based on the following context, please answer the question.\n\nContext:\n{$contextText}\n\nQuestion: {$userQuery}\n\nAnswer:";
+    $answer = $llmService->getCompletion($prompt);
+
+    // 4. Return response with sources
+    return response()->json([
+        'answer' => $answer,
+        'sources' => array_unique(array_column($contexts, 'source'))
+    ]);
+}
+```
+
+---
+
+### Versi Bahasa Indonesia
+
+---
+
+### 1. Gambaran Umum Arsitektur
+
+Sistem ini dirancang untuk menyerap (ingest) dokumen tidak terstruktur (misalnya PDF, DOCX) dari penyimpanan file MinIO, memprosesnya, dan membangun basis pengetahuan (knowledge base) yang kaya dan saling terhubung di Neo4j. Basis pengetahuan ini berfungsi sebagai backend cerdas untuk aplikasi RAG yang dibangun dengan Laravel. MongoDB bertindak sebagai basis data aplikasi utama dan tempat penyimpanan "golden record" yang persisten untuk dokumen yang diserap.
+
+#### 1.1 Komponen Inti
+
+*   **Laravel 12:** Kerangka kerja (framework) aplikasi web inti, menyediakan endpoint API dan logika bisnis.
+*   **MongoDB:** Basis data aplikasi utama. Dalam konteks RAG ini, MongoDB menyimpan metadata dan konten teks asli dari dokumen yang diproses, berfungsi sebagai sumber kebenaran (source of truth) untuk arsip.
+*   **Neo4j:** Jantung dari mesin RAG. Komponen ini memiliki dua fungsi utama:
+1.  **Knowledge Graph:** Menyimpan entitas dan hubungan antar entitas tersebut.
+2.  **Vector Database:** Menyimpan potongan teks (chunk) dan *vector embedding*-nya, dilengkapi dengan indeks pencarian vektor native.
+*   **MinIO (S3-Compatible):** Penyimpanan objek utama untuk file mentah yang tidak terstruktur (PDF, DOCX, dll.).
+*   **docling (Layanan API):** Layanan eksternal yang digunakan untuk mengubah berbagai format dokumen menjadi teks biasa (plain text) yang bersih.
+*   **n8n:** Alat otomatisasi alur kerja (workflow) yang digunakan untuk pipeline ingesti *event-driven* secara *real-time*.
+*   **Perintah Artisan (Artisan Command):** Antarmuka baris perintah (CLI) dari Laravel, digunakan untuk pemrosesan batch, pengisian data historis (backfilling), dan tugas terjadwal.
+
+#### 1.2 Diagram Alur Data
+
+**Alur Kerja Ingesti (Ingestion Workflow):**
+```
+[1. Pengguna mengunggah file ke MinIO]
+         |
+         V (Pemicu: Webhook/Event)
+[2. Alur Kerja n8n ATAU Perintah Artisan Terjadwal]
+         |
+         V
+[3. Panggil API Docling (URL File) -> Dapatkan Teks Biasa]
+         |
+         V
+[4. Simpan metadata & teks ke MongoDB (status: 'pending')]
+         |
+         V
+[5. Perintah Artisan: 'rag:process-documents']
+         |
+         |--> (a) Pecah teks menjadi potongan (chunking)
+         |--> (b) Buat embedding untuk setiap chunk (API LLM)
+         |--> (c) Buat node :Document, :Chunk, :Entity di Neo4j
+         |--> (d) Simpan embedding di dalam node :Chunk
+         |--> (e) Perbarui status di MongoDB (status: 'completed')
+```
+
+**Alur Kerja Kueri (Query RAG Workflow):**
+```
+[1. Pengguna mengirim kueri ke API Laravel]
+         |
+         V
+[2. Buat embedding untuk kueri pengguna (API LLM)]
+         |
+         V
+[3. Eksekusi satu kueri terpadu di Neo4j]
+    (Menggabungkan pencarian vektor pada node :Chunk dengan penelusuran graf)
+         |
+         V
+[4. Ambil potongan teks yang relevan dari Neo4j]
+         |
+         V
+[5. Susun prompt dan kirim ke LLM untuk mendapatkan jawaban akhir]
+         |
+         V
+[6. Kembalikan jawaban yang dihasilkan beserta sumbernya ke pengguna]
+```
+
+### 2. Detail Implementasi
+
+#### 2.1 Pengaturan Neo4j
+
+Pastikan Anda menggunakan **Neo4j versi 5.11 atau yang lebih baru**. Pertama, buat indeks vektor.
+
+```cypher
+-- Membuat indeks vektor pada properti 'embedding' dari node 'Chunk'
+CREATE VECTOR INDEX chunk_embeddings IF NOT EXISTS
+FOR (c:Chunk) ON (c.embedding)
+OPTIONS { indexConfig: {
+  `vector.dimensions`: 1536,          -- Sesuaikan dengan dimensi model embedding Anda
+  `vector.similarity_function`: 'cosine'
+}}
+```
+
+#### 2.2 Skema MongoDB
+
+Koleksi `documents` akan melacak status dari setiap file.
+
+```json
+{
+  "_id": "65f...",
+  "file_name": "laporan_tahunan_2024.pdf",
+  "minio_path": "/reports/laporan_tahunan_2024.pdf",
+  "source_text": "Teks lengkap yang diekstrak dari dokumen...",
+  "status": "completed", // Opsi: pending, processing, completed, failed
+  "processed_at": "...",
+  "created_at": "...",
+  "updated_at": "..."
+}
+```
+
+#### 2.3 Perintah Artisan Laravel (Logika Perekat)
+
+Perintah ini adalah inti dari sistem pemrosesan batch Anda. Perintah ini mencari dokumen di MongoDB yang perlu diproses dan mengisi *knowledge graph* di Neo4j.
+
+`php artisan make:command ProcessDocumentsForRag`
+
+**`app/Console/Commands/ProcessDocumentsForRag.php`:**
+
+```php
+// ... (Kode sama persis seperti versi Bahasa Inggris, hanya komentar yang bisa diterjemahkan)
+// Contoh komentar yang diterjemahkan:
+// 1. Buat node induk Document di Neo4j
+// 2. Pecah teks menjadi potongan-potongan (chunking)
+// 3. Buat embedding untuk setiap chunk
+// 4. Buat node :Chunk di Neo4j beserta embeddingnya
+// 5. (Opsional tapi sangat berguna) Ekstrak entitas dan hubungkan
+```
+
+#### 2.4 Alur Kerja Ingesti n8n (Real-time)
+
+Untuk pemrosesan file yang baru diunggah secara langsung.
+
+1.  **Pemicu (Trigger):** Node `MinIO Trigger` (mendengarkan event `s3:ObjectCreated:*`) atau node `Webhook` yang dapat dipanggil oleh MinIO.
+2.  **HTTP Request (Docling):** Panggil API docling. Kirim URL *pre-signed* dari objek baru di MinIO.
+3.  **Node MongoDB:** Buat dokumen baru di koleksi `documents` dengan teks yang telah diekstrak dan `status` `pending`.
+4.  **Node Execute Command / HTTP Request (Laravel):** Picu perintah Artisan untuk ID dokumen yang spesifik (`php artisan rag:process-documents --force-id=...`) atau panggil endpoint API khusus di aplikasi Laravel Anda yang memulai prosesnya.
+
+#### 2.5 Logika Kueri RAG di Laravel
+
+Ini adalah kode yang berjalan ketika pengguna mengajukan pertanyaan.
+
+**`app/Services/GraphService.php`**
+```php
+// Kode sama dengan versi Bahasa Inggris.
+// Kueri Cypher ini melakukan pencarian vektor dan penelusuran graf secara bersamaan.
+```
+
+**`app/Http/Controllers/RAGController.php`**
+```php
+// Kode sama dengan versi Bahasa Inggris.
+// Logika:
+// 1. Buat embedding dari kueri pengguna.
+// 2. Cari konteks yang relevan di Neo4j.
+// 3. Susun prompt dan hasilkan jawaban.
+// 4. Kembalikan respons beserta sumbernya.
+```

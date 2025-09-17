@@ -63,6 +63,7 @@
           {
             "group": "GraphRAG",
             "pages": [
+              "ai-dev/graph-rag/graph-rag-system",
               "ai-dev/graph-rag/hl-embedding-laravel",
               "ai-dev/graph-rag/hl-embedding-laravel-expanded",
               "ai-dev/graph-rag/graph-rag-laravel",
