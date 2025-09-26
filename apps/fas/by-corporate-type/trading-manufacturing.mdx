@@ -1,0 +1,239 @@
+---
+title: Trading & Manufacturing
+---
+
+### Part 1: General Trading Company
+
+A general trading company's business model is **"Buy-Store-Sell."** Its core competency is in procurement, logistics, and sales. It does not manufacture anything. The most critical asset is **Inventory**. The key operational cycles are **Procure-to-Pay** (buying from suppliers) and **Order-to-Cash** (selling to customers).
+
+Here are the standard modules for a trading company's enterprise application.
+
+#### **Core Business Flow:**
+`Purchase Order -> Goods Receipt -> Vendor Bill -> Sales Order -> Shipment/Delivery -> Sales Invoice -> Customer Payment`
+
+---
+
+### 1. Module: Procurement / Purchasing
+
+**Purpose:** To manage the entire process of buying goods from suppliers, from creating a purchase request to receiving the items. This is a primary operational module.
+
+**Key Forms / Processes:**
+*   **Purchase Order (PO):** A formal document sent to a supplier to order goods.
+*   **Goods Receipt Note (GRN):** A document to record the physical receipt of goods into the warehouse. This is the trigger to increase inventory levels.
+
+#### **Form Layout: Purchase Order (PO)**
+
+```
++--------------------------------------------------------------------------+
+|                              PURCHASE ORDER                              |
+|                                                                          |
+| Your Company Inc.                                 PO Number: PO-23-1109    |
+| 123 Warehouse Rd.                                 Date:      Oct 26, 2023  |
+|                                                   Delivery By: Nov 15, 2023  |
++--------------------------------------------------------------------------+
+| VENDOR:                                  | SHIP TO:                       |
+|   Global Electronics Mfg.                |   Your Company Inc.            |
+|   456 Factory Lane                         |   Central Warehouse            |
+|                                          |   123 Warehouse Rd.            |
++------------------+------------------+----------+----------+----------------+
+| Item Code        | Description      | Quantity | Unit Cost|   Line Total   |
++------------------+------------------+----------+----------+----------------+
+| HW-IOT-SNSR-01   | IoT Temp Sensor  |   500    | $15.00   |   $7,500.00    |
+| HW-IOT-CTLR-05   | IoT Controller   |   250    | $35.00   |   $8,750.00    |
+|                  |                  |          |          |                |
++------------------+------------------+----------+----------+----------------+
+|                                                      SUBTOTAL: | $16,250.00   |
+|                                                  FREIGHT/TAXES: |  $1,300.00   |
+|                                                          TOTAL: | $17,550.00   |
++--------------------------------------------------------------------------+
+| Approved By: [ Signature / Digital Stamp ]                               |
++--------------------------------------------------------------------------+
+```
+
+---
+
+### 2. Module: Inventory / Warehouse Management
+
+**Purpose:** This is the heart of a trading company. It provides a real-time view of all products, including quantity on hand, location in the warehouse, value, and movement history.
+
+**Key Forms / Processes:**
+*   **Item Master:** The master record for every product sold.
+*   **Stock Adjustment:** To record changes in inventory due to damage, loss, or cycle counts.
+*   **Warehouse Transfer:** To move stock between different physical locations.
+
+#### **Form Layout: Item Master**
+
+```
++--------------------------------------------------------------------------+
+|                                ITEM MASTER                               |
++--------------------------------------------------------------------------+
+| -- General Information --                                                |
+|   Item Code: HW-IOT-SNSR-01       Description: IoT Temperature Sensor V2.1 |
+|   Item Type: [ Inventory ]        UOM (Unit of Measure): [ Pcs ]           |
+|   Item Group: [ Sensors ]         Status: [ Active ]                       |
+|                                                                          |
+| -- Purchasing Details --                                                 |
+|   Preferred Supplier: [ Global Electronics Mfg. ]                        |
+|   Supplier Item Code: GEM-TS21                                           |
+|   Standard Cost: $15.00                                                  |
+|                                                                          |
+| -- Sales Details --                                                      |
+|   Standard Selling Price: $39.99                                         |
+|                                                                          |
+| -- Inventory Details --                                                  |
+|   Costing Method: [ FIFO ] [ LIFO ] [ Weighted Average ]                 |
+|   Reorder Point: 100 units        Safety Stock Level: 20 units           |
+|   Current Qty On Hand: 780        Qty On Order (PO): 500                 |
+|   Warehouse Location: Aisle 5, Bay 2, Shelf C                            |
++--------------------------------------------------------------------------+
+```
+
+---
+
+### 3. Module: Sales Order Management
+
+**Purpose:** To capture customer orders and create a commitment to sell. This module checks inventory availability and triggers the fulfillment process in the warehouse.
+
+**Key Forms / Processes:**
+*   **Sales Quotation:** A non-binding offer to a customer.
+*   **Sales Order (SO):** A confirmed order from a customer. This allocates inventory.
+
+#### **Form Layout: Sales Order (SO)**
+
+```
++--------------------------------------------------------------------------+
+|                                SALES ORDER                               |
+|                                                                          |
+|                                                  SO Number: SO-23-1542     |
+|                                                  Date:      Nov 01, 2023   |
+|                                                  Cust. PO #: C-98765       |
++--------------------------------------------------------------------------+
+| CUSTOMER:                                | SHIP TO:                        |
+|   Smart Home Solutions Inc.              |   Smart Home Solutions Inc.     |
+|   789 Tech Park                          |   Receiving Dept                |
+|                                          |   789 Tech Park                 |
++------------------+------------------+----------+----------+----------------+
+| Item Code        | Description      | Quantity | Unit Price|  Line Total    |
++------------------+------------------+----------+----------+----------------+
+| HW-IOT-SNSR-01   | IoT Temp Sensor  |   150    | $39.99   |   $5,998.50    |
+| HW-IOT-CTLR-05   | IoT Controller   |    75    | $74.99   |   $5,624.25    |
++------------------+------------------+----------+----------+----------------+
+|                                                          TOTAL: | $11,622.75   |
++--------------------------------------------------------------------------+
+| [ Check Inventory ]  [ Create Pick List / Fulfill Order ]                |
++--------------------------------------------------------------------------+
+```
+
+*Financial modules (AP, AR, GL) are also present and function similarly to previous examples, but their triggers are different (e.g., an AP bill is created from a GRN/PO, and an AR invoice is created from a shipment/SO).*
+
+---
+
+### Part 2: IoT Device Manufacturing Company
+
+A manufacturing company's model is **"Make-Store-Sell."** It includes all the modules of a trading company but adds a complex and critical layer: **Production**. It must manage raw materials, the assembly process, and finished goods.
+
+#### **Core Business Flow:**
+`Sales Forecast -> MRP Run -> [Purchase Order (Raw Materials) & Work Order (Production)] -> Production -> Finished Goods -> Sales Order -> Shipment -> Invoice -> Payment`
+
+---
+
+This company uses all the modules from the General Trading Company (Purchasing, Sales, Inventory, etc.), but with some key differences and several new, essential modules.
+
+**Inventory Difference:** The Inventory module is now segmented into:
+*   **Raw Materials:** Components bought from suppliers (e.g., circuit boards, casings, screws).
+*   **Work-in-Progress (WIP):** The value of partially assembled goods on the factory floor.
+*   **Finished Goods:** Completed, sellable IoT devices.
+
+### **New Manufacturing-Specific Modules**
+
+### 1. Module: Bill of Materials (BOM) & Routing
+
+**Purpose:** To define the "recipe" and the "instructions" for making a product. This is master data that is foundational for production and costing.
+*   **BOM:** Lists all the raw materials and sub-assemblies required to make one unit of a finished product.
+*   **Routing:** Lists the sequence of operations (e.g., Assemble, Solder, Test, Pack) and the work centers (e.g., Assembly Line 1, Testing Bench) where they are performed.
+
+#### **Form Layout: Bill of Materials (BOM)**
+
+```
++--------------------------------------------------------------------------+
+|                           BILL OF MATERIALS (BOM)                          |
++--------------------------------------------------------------------------+
+| Parent Item (Finished Good):                                             |
+|   FG-IOT-THS-01      Smart Temp/Humidity Sensor V3                         |
+|                                                                          |
+| Quantity to Produce: 1 unit                                              |
++------------------+---------------------------+----------+-----------------+
+| Item Code (Component) | Description          | Quantity | UOM             |
++------------------+---------------------------+----------+-----------------+
+| RM-PCB-THS-V3    | Main Circuit Board V3     |    1     | Pcs             |
+| RM-CAS-PL-WHT    | White Plastic Casing Set  |    1     | Set             |
+| RM-SEN-DHT22     | Temp/Humidity Sensor Chip |    1     | Pcs             |
+| RM-CON-USB-C     | USB-C Power Connector     |    1     | Pcs             |
+| RM-SCR-M2-4MM    | M2x4mm Screws             |    4     | Pcs             |
++------------------+---------------------------+----------+-----------------+
+```
+
+---
+
+### 2. Module: Material Requirements Planning (MRP)
+
+**Purpose:** Often called the "brain" of the manufacturing system. MRP looks at demand (from sales orders and forecasts) and supply (what's in stock and on order). It then calculates precisely what raw materials need to be **purchased** and what finished goods need to be **manufactured** and when.
+
+**This is a process, not a simple form.** An MRP run generates a list of "Planned Orders."
+
+#### **Output Layout: MRP Suggestions**
+
+```
++--------------------------------------------------------------------------+
+|                          MRP RUN - SUGGESTIONS                           |
+|                    For demand period: Dec 2023 - Jan 2024                |
++------------------+-------------+-----------+---------------+--------------+
+| Type             | Item Code   | Required Qty | Required Date | Action      |
++------------------+-------------+-----------+---------------+--------------+
+| [ Make ]         | FG-IOT-THS-01 |    500    |   12/15/2023  | [ Create WO ]|
+| [ Buy  ]         | RM-PCB-THS-V3 |    550    |   12/08/2023  | [ Create PO ]|
+| [ Buy  ]         | RM-CAS-PL-WHT |    550    |   12/08/2023  | [ Create PO ]|
++------------------+-------------+-----------+---------------+--------------+
+```
+
+---
+
+### 3. Module: Production / Work Order Management
+
+**Purpose:** To manage the actual manufacturing process on the shop floor. A Work Order (also called a Production Order) is the official instruction to produce a specific quantity of a product.
+
+**Key Forms / Processes:**
+*   **Work Order:** The core document authorizing production.
+*   **Material Issuance:** A transaction to move raw materials from the warehouse to the factory floor (WIP).
+*   **Production Completion:** A transaction to move finished goods from WIP into sellable inventory.
+
+#### **Form Layout: Work Order**
+
+```
++--------------------------------------------------------------------------+
+|                                 WORK ORDER                               |
+|                                                                          |
+| Work Order #: WO-23-087                       Status: [ Released ]         |
++--------------------------------------------------------------------------+
+| -- Production Details --                                                 |
+|   Item to Produce: FG-IOT-THS-01 (Smart Temp/Humidity Sensor V3)         |
+|   Quantity to Produce: 500                    BOM Version: V3.1          |
+|   Start Date: 12/15/2023                      Due Date: 12/22/2023       |
+|                                                                          |
+| -- Components Required (from BOM) --                                     |
+|   Item Code        | Required Qty | Issued Qty |                          |
+|   -----------------|--------------|------------|                          |
+|   RM-PCB-THS-V3    |      500     |    [ 500 ]   | [ Issue Materials ]      |
+|   RM-CAS-PL-WHT    |      500     |    [ 500 ]   |                          |
+|   ...              |      ...     |    ...     |                          |
+|                                                                          |
+| -- Routing / Operations --                                               |
+|   Step | Work Center     | Status          |                              |
+|   -----|-----------------|-----------------|                              |
+|   10   | Assembly Line 1 | [ In Progress ] |                              |
+|   20   | Testing Bench 3 | [ Pending ]     |                              |
+|   30   | Packaging       | [ Pending ]     |                              |
+|                                                                          |
+| [ Record Production ] [ Close Work Order ]                               |
++--------------------------------------------------------------------------+
+```

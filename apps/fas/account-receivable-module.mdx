@@ -1,0 +1,262 @@
+---
+title: 'Account Receivable Module'
+description: 'Create AR entry from Customer Invoice'
+---
+
+Of course. This is an excellent request as Accounts Receivable (AR) is the direct counterpart to Accounts Payable. The logic and structures are mirror images of each other.
+
+Here is the complete documentation for an Accounts Receivable implementation, covering the AR form structure, its relation to the sales invoice data, and the creation of an AR Aging report.
+
+---
+
+## **Dokumentasi Lengkap: Alur dan Implementasi Piutang Usaha (Accounts Receivable)**
+
+Dokumen ini menjelaskan alur kerja, struktur data, dan visualisasi untuk modul Piutang Usaha (Accounts Receivable/AR). Alur ini dimulai dari pembuatan invoice untuk pelanggan, yang secara otomatis akan membuat entri AR dan jurnal akuntansi, hingga pemantauan penagihan melalui Laporan Umur Piutang (AR Aging).
+
+---
+
+### **Bagian 1: Struktur Formulir Entri AR / Pembuatan Invoice**
+
+Tidak seperti AP di mana Anda menerima dokumen eksternal, dalam AR, formulir entri *adalah* formulir pembuatan invoice itu sendiri. Saat Anda mengisi formulir ini dan menyimpannya, Anda secara bersamaan membuat invoice untuk pelanggan dan mencatat transaksi piutang di sistem akuntansi Anda.
+
+Formulir ini dibagi menjadi tiga bagian logis:
+
+#### **A. Informasi Header (Kepada Siapa dan Kapan)**
+
+*   **Customer Name (Nama Pelanggan):** Nama pelanggan yang akan ditagih.
+*   *(Praktik Terbaik: Gunakan daftar dropdown yang terhubung ke tabel master pelanggan untuk konsistensi data.)*
+*   **Invoice Number (Nomor Invoice):** Nomor unik yang Anda berikan untuk invoice ini.
+*   *(Sistem harus menghasilkan nomor ini secara otomatis dan berurutan untuk mencegah duplikasi.)*
+*   **Invoice Date (Tanggal Invoice):** Tanggal penerbitan invoice.
+*   **Payment Terms (Syarat Pembayaran):** Syarat pembayaran yang disepakati (misalnya, Net 30, Due on Receipt).
+*   **Due Date (Tanggal Jatuh Tempo):** Tanggal invoice harus dibayar. (Seringkali dihitung otomatis dari `Invoice Date` + `Payment Terms`).
+*   **Sales Order (SO) Number (Nomor Pesanan Penjualan):** Jika invoice ini terkait dengan pesanan penjualan sebelumnya.
+
+#### **B. Rincian Baris / Distribusi Pendapatan (Apa yang Dijual)**
+
+Bagian ini merinci produk atau jasa yang dijual dan menentukan sisi **Kredit** dari jurnal akuntansi Anda.
+
+*   **Product/Service Description (Deskripsi Produk/Jasa):** Deskripsi detail dari item yang dijual.
+*   **Quantity (Kuantitas):** Jumlah unit yang dijual.
+*   **Unit Price (Harga Satuan):** Harga per unit.
+*   **Amount (Jumlah):** Total untuk baris tersebut (`Quantity` x `Unit Price`).
+*   **GL Account (Akun GL):** Akun General Ledger yang akan dikreditkan. Biasanya ini adalah akun **Pendapatan** (misalnya, `4100 - Pendapatan Penjualan`, `4200 - Pendapatan Jasa`).
+*   *(Praktik Terbaik: Tautkan produk/jasa ke akun pendapatan default untuk otomatisasi.)*
+
+#### **C. Ringkasan dan Total (Kontrol dan Pajak)**
+
+*   **Subtotal:** Total dari semua baris `Amount`.
+*   **Sales Tax (Pajak Penjualan/PPN):** Jumlah pajak yang dibebankan.
+*   *(Sistem harus dapat menghitung ini berdasarkan tarif pajak yang berlaku.)*
+*   **Shipping/Freight (Biaya Kirim):** Biaya pengiriman yang dibebankan kepada pelanggan.
+*   **Invoice Total:** Jumlah total akhir yang harus dibayar pelanggan (`Subtotal` + `Tax` + `Shipping`).
+
+---
+
+### **Bagian 2: Struktur Tabel Database & Relasi Kolom**
+
+Saat formulir di atas disimpan, datanya akan mengisi tabel-tabel berikut.
+
+#### **Tabel 1: `Sales_Invoices` (Data Header)**
+
+| Nama Kolom (Field Name) | Deskripsi | Relasi ke Formulir |
+| :--- | :--- | :--- |
+| `sales_invoice_id` | ID unik internal untuk invoice. | (Internal) |
+| `customer_id` | Foreign Key ke tabel `Customers`. | `Customer Name` |
+| `invoice_number` | Nomor unik invoice. | `Invoice Number` |
+| `invoice_date` | Tanggal penerbitan invoice. | `Invoice Date` |
+| `due_date` | Tanggal jatuh tempo. | `Due Date` |
+| `invoice_subtotal` | Total sebelum pajak. | `Subtotal` |
+| `tax_amount` | Jumlah pajak. | `Sales Tax` |
+| `shipping_amount`| Biaya pengiriman. | `Shipping/Freight`|
+| `invoice_total` | Total akhir invoice. | `Invoice Total` |
+| `balance_due` | Sisa saldo yang belum dibayar. | (Dihitung: `invoice_total` - `amount_paid`) |
+
+#### **Tabel 2: `Sales_Invoice_Line_Items` (Data Rincian)**
+
+| Nama Kolom (Field Name) | Deskripsi | Relasi ke Formulir |
+| :--- | :--- | :--- |
+| `line_id` | ID unik internal untuk baris rincian. | (Internal) |
+| `sales_invoice_id`| Foreign Key ke tabel `Sales_Invoices`. | (Internal) |
+| `item_description`| Deskripsi produk/jasa. | `Product/Service Description` |
+| `quantity` | Kuantitas. | `Quantity` |
+| `unit_price` | Harga satuan. | `Unit Price` |
+| `line_total` | Total baris. | `Amount` |
+| `revenue_gl_account_id` | ID Akun GL Pendapatan yang akan dikredit. | `GL Account` |
+
+---
+
+### **Bagian 3: Alur Pembuatan Jurnal Akuntansi**
+
+Ketika formulir invoice disimpan, sistem secara otomatis membuat jurnal berikut.
+
+**Skenario:** Anda menerbitkan invoice `INV-2023-001` kepada "PT Klien Sejahtera" senilai Rp 1.100.000 (Rp 1.000.000 untuk jasa + Rp 100.000 untuk PPN).
+
+**Jurnal Akuntansi yang Dihasilkan:**
+
+| No. Akun | Nama Akun | Debit | Kredit |
+| :--- | :--- | :--- | :--- |
+| `1200` | **Piutang Usaha (Accounts Receivable)** | **Rp 1.100.000** | |
+| `4100` | Pendapatan Jasa | | Rp 1.000.000 |
+| `2200` | Utang PPN (Sales Tax Payable) | | Rp 100.000 |
+| | *Untuk mencatat penjualan ke PT Klien Sejahtera, Inv #INV-2023-001* | | |
+
+*   **Debit** ke **Piutang Usaha** (Akun Aset) untuk mencatat bahwa pelanggan berutang kepada Anda. Nilai ini berasal dari `Invoice Total`.
+*   **Kredit** ke **Akun Pendapatan** untuk mengakui pendapatan yang Anda peroleh. Nilai ini berasal dari `Subtotal` atau total dari baris rincian.
+*   **Kredit** ke **Utang PPN** (Akun Liabilitas) untuk mencatat pajak yang Anda kumpulkan dan harus disetorkan ke negara.
+
+---
+
+### **Bagian 4: Implementasi Laporan Umur Piutang (AR Aging)**
+
+Laporan Umur Piutang sangat penting untuk mengelola arus kas masuk dan melacak pelanggan yang terlambat membayar. Logikanya identik dengan AP Aging, tetapi fokusnya adalah pada uang yang akan diterima.
+
+#### **A. Kebutuhan Data**
+
+Tabel `Sales_Invoices` Anda harus memiliki data berikut untuk setiap invoice yang belum lunas:
+*   `customer_name` (diambil dari tabel `Customers` via `customer_id`)
+*   `invoice_number`
+*   `invoice_date`
+*   `due_date` **(Kolom Kunci)**
+*   `balance_due` **(Nilai yang akan dihitung umurnya)**
+
+#### **B. Logika Perhitungan**
+
+Perhitungan didasarkan pada **Hari Lewat Tempo (Days Overdue)**.
+*   **Rumus:** `Hari Lewat Tempo = Tanggal Hari Ini - Tanggal Jatuh Tempo`
+*   Jika hasilnya **negatif atau nol**, invoice masih **Lancar (Current)**.
+*   Jika hasilnya **positif**, invoice sudah **Lewat Tempo**.
+
+#### **C. Metode Visualisasi**
+
+**1. Laporan Umur Piutang Rinci (Tabel Klasik)**
+Menampilkan setiap invoice yang belum lunas, berguna untuk tim penagihan.
+
+**Laporan Umur Piutang per tanggal: 15-12-2023**
+
+| Nama Pelanggan | No. Invoice | Tgl Jatuh Tempo | Lewat Tempo | Saldo Total | Lancar | 1-30 Hari | 31-60 Hari | 61-90 Hari | 90+ Hari |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| PT Klien Sejahtera | INV-005 | 25-12-2023 | -10 hari | 5.000.000 | 5.000.000 | | | | |
+| Toko Maju Jaya | INV-003 | 20-11-2023 | 25 hari | 12.000.000 | | 12.000.000 | | | |
+| CV Bintang Timur | INV-002 | 15-10-2023 | 61 hari | 3.500.000 | | | | 3.500.000 | |
+| PT Klien Sejahtera | INV-001 | 01-09-2023 | 105 hari | 1.000.000 | | | | | 1.000.000 |
+| **---** | **---** | **---** | **---** | **---** | **---** | **---** | **---** | **---** | **---** |
+| **TOTAL** | | | | **21.500.000** | **5.000.000** | **12.000.000**| **0** | **3.500.000** | **1.000.000**|
+
+**2. Laporan Umur Piutang Ringkas (Per Pelanggan)**
+Berguna untuk manajer penjualan dan keuangan untuk melihat pelanggan mana yang paling banyak berutang dan paling lambat membayar.
+
+**Ringkasan Umur Piutang per tanggal: 15-12-2023**
+
+| Nama Pelanggan | Saldo Total | Lancar | 1-30 Hari | 61-90 Hari | 90+ Hari |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| PT Klien Sejahtera | 6.000.000 | 5.000.000 | | | 1.000.000 |
+| Toko Maju Jaya | 12.000.000 | | 12.000.000 | | |
+| CV Bintang Timur | 3.500.000 | | | 3.500.000 | |
+| **---** | **---** | **---** | **---** | **---** | **---** |
+| **TOTAL** | **21.500.000**| **5.000.000** | **12.000.000**| **3.500.000** | **1.000.000**|
+
+**3. Visualisasi Grafis (Untuk Dasbor)**
+Memberikan gambaran cepat tentang kesehatan piutang perusahaan.
+*   **Grafik Batang Bertumpuk (Stacked Bar Chart):** Menunjukkan total piutang dan seberapa besar porsi yang lancar vs. yang terlambat.
+*   **Grafik Lingkaran (Pie Chart):** Menyoroti persentase piutang yang berisiko tinggi (lewat tempo 90+ hari).
+
+Dengan struktur ini, Anda memiliki alur kerja yang terintegrasi dari pembuatan tagihan hingga pemantauan penagihan, yang sangat penting untuk kesehatan keuangan perusahaan.
+
+### AP Form Layout
+
+Excellent. Here is a simplified sample layout for an Accounts Receivable (AR) form, which is essentially the Sales Invoice creation form. It's designed to be clean, intuitive, and capture all necessary information to generate both the customer-facing invoice and the backend journal entry.
+
+I will provide it in both English and Bahasa Indonesia.
+
+---
+
+### **Sample Form Layout (Simplified) - English**
+
+This layout represents what a user would see when creating a new invoice for a customer.
+
+```
+=====================================================
+            SALES INVOICE / AR ENTRY
+=====================================================
+
+--- CUSTOMER & INVOICE DETAILS ---
+Customer Name: [Dropdown List of Customers]  *Required
+Billing Address:[Auto-populates from Customer]
+
+Invoice #:   [INV-2023-001] (Auto-generated)
+Invoice Date:[Date Picker] *Default: Today
+Pay Terms:   [Dropdown: Net 30, Net 15, Due on Receipt]
+Due Date:    [Auto-calculates] (Read-only)
+SO Number:   [Text Box] (Optional)
+
+--- LINE ITEMS ---
+# | Product/Service            | Description                       | Qty | Unit Price  | Amount
+--|----------------------------|-----------------------------------|-----|-------------|----------------
+1 | [Dropdown/Search] *Req     | [Text Box] (Can auto-fill)        | [Num] | [Number]    | [Auto-calc]
+2 | [Dropdown/Search]          | [Text Box]                        | [Num] | [Number]    | [Auto-calc]
+
+[ + Add Line ]
+
+--- SUMMARY & TOTALS ---
+                                         Subtotal:   [Auto-calculated]
+                                Sales Tax (e.g., 11%):   [Number Input]% -> [Auto-calculated]
+                                     Shipping Cost:   [Number Input]
+                               ---------------------------------------
+                                        **TOTAL DUE:**   **[Auto-calculated]**
+
+--- NOTES & ACTIONS ---
+Notes / Memo for Customer:
+[ Text Area for special instructions, bank details, or terms ]
+
+[ Save as Draft ]  [ Finalize & Send Invoice ]
+```
+
+**Key Features of this Layout:**
+*   **Automation:** Fields like `Invoice #`, `Due Date`, and all totals are calculated automatically to reduce errors.
+*   **Data Integrity:** Using dropdowns for `Customer Name` and `Product/Service` ensures consistent data entry by pulling from master lists.
+*   **Clear Workflow:** The action buttons (`Save as Draft`, `Finalize & Send`) define the next steps in the process.
+*   **User-Friendly:** The form flows logically from who you're billing, to what you're selling, to the final costs.
+
+---
+
+### **Contoh Tata Letak Formulir (Sederhana) - Bahasa Indonesia**
+
+Berikut adalah terjemahan dari tata letak formulir di atas untuk konteks Bahasa Indonesia.
+
+```
+=====================================================
+        INVOICE PENJUALAN / ENTRI PIUTANG
+=====================================================
+
+--- DETAIL PELANGGAN & INVOICE ---
+Nama Pelanggan: [Daftar Dropdown Pelanggan]  *Wajib diisi
+Alamat Tagihan:[Otomatis terisi dari data Pelanggan]
+
+No. Invoice:   [INV-2023-001] (Dibuat otomatis)
+Tgl. Invoice:[Pemilih Tanggal] *Default: Hari Ini
+Syarat Bayar:  [Dropdown: Net 30, Net 15, Langsung Lunas]
+Tgl. Jatuh Tempo:[Dihitung otomatis] (Read-only)
+No. SO:      [Kolom Teks] (Opsional)
+
+--- RINCIAN BARANG / JASA ---
+# | Produk/Jasa                | Deskripsi                         | Jml | Harga Satuan | Jumlah
+--|----------------------------|-----------------------------------|-----|--------------|----------------
+1 | [Dropdown/Cari] *Wajib     | [Kolom Teks] (Bisa terisi otomatis)| [Angka] | [Angka]    | [Otomatis]
+2 | [Dropdown/Cari]            | [Kolom Teks]                      | [Angka] | [Angka]    | [Otomatis]
+
+[ + Tambah Baris ]
+
+--- RINGKASAN & TOTAL ---
+                                         Subtotal:   [Dihitung otomatis]
+                                 Pajak (PPN, cth: 11%):   [Input Angka]% -> [Dihitung otomatis]
+                                      Biaya Kirim:   [Input Angka]
+                               ---------------------------------------
+                                  **TOTAL TAGIHAN:**   **[Dihitung otomatis]**
+
+--- CATATAN & TINDAKAN ---
+Catatan / Memo untuk Pelanggan:
+[ Area Teks untuk instruksi khusus, detail rekening bank, dll. ]
+
+[ Simpan sebagai Draf ]  [ Finalisasi & Kirim Invoice ]
+```

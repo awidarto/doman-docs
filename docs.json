@@ -68,6 +68,42 @@
         ]
       },
       {
+        "tab": "FAS",
+        "groups": [
+          {
+            "group": "Accounting",
+            "pages": [
+              "apps/fas/standard-accounting-process",
+              "apps/fas/account-payable-module",
+              "apps/fas/account-receivable-module",
+              "apps/fas/chart-of-accounts",
+              "apps/fas/coa-cost-revenue-map"
+            ]
+          },
+          {
+            "group": "Accounting By Company Type",
+            "pages": [
+              "apps/fas/by-corporate-type/software-consulting",
+              "apps/fas/by-corporate-type/trading-manufacturing",
+              "apps/fas/by-corporate-type/culinary-business-cogs"
+            ]
+          },
+          {
+            "group": "GraphRAG",
+            "pages": [
+              "ai-dev/graph-rag/graph-rag-system",
+              "ai-dev/graph-rag/hl-embedding-laravel",
+              "ai-dev/graph-rag/hl-embedding-laravel-expanded",
+              "ai-dev/graph-rag/graph-rag-laravel",
+              "ai-dev/graph-rag/dev-graph-rag-laravel",
+              "ai-dev/graph-rag/hl-gemini-embedding-laravel",
+              "ai-dev/graph-rag/hl-neo4j-kg-vector-laravel",
+              "ai-dev/graph-rag/hl-neo4j-kg-acl-laravel"
+            ]
+          }
+        ]
+      },
+      {
         "tab": "AI Dev",
         "groups": [
           {

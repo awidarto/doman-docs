@@ -1,0 +1,209 @@
+---
+title: Culinary Business with COGS module
+---
+The culinary business, combining restaurant and catering operations, presents a fascinating challenge for enterprise systems due to its high-transaction volume, perishable inventory, and the need to cost complex "recipes" instead of simple items.
+
+Here is a design for the standard modules of a culinary business, followed by a dedicated design for a COGS calculation module.
+
+---
+
+### Core Business Flow
+
+*   **Restaurant:** `Customer Order (POS) -> Kitchen Production (KDS) -> Service -> Payment`
+*   **Catering:** `Client Inquiry -> Event Proposal -> Confirmed Booking (BEO) -> Bulk Procurement & Prep -> Event Execution -> Invoicing`
+*   **Backend (Universal):** `Recipe Costing -> Menu Engineering -> Inventory & Purchasing -> Financials`
+
+---
+
+### Standard Modules for a Culinary Business
+
+### 1. Module: Recipe & Menu Management
+
+**Purpose:** This is the **Bill of Materials (BOM)** for the culinary world and the absolute foundation of cost control. It breaks down every menu item into its precise ingredients, calculates its cost, and manages menu offerings.
+
+**Key Forms / Processes:**
+*   **Recipe Card:** Defines a single dish or component.
+*   **Menu Engineering:** Analyzing the profitability and popularity of menu items.
+
+#### **Form Layout: Recipe Card**
+
+```
++--------------------------------------------------------------------------+
+|                                RECIPE CARD                               |
++--------------------------------------------------------------------------+
+| -- General Information --                                                |
+|   Recipe Name: Classic Beef Burger      Final Menu Item: [X] Yes [ ] No  |
+|   Recipe Code: DISH-BURG-01             Category: [ Main Courses ]         |
+|   Portion Size: 1 Burger                Menu Price: $15.99                 |
+|                                                                          |
+| -- Ingredients (Sub-Recipes & Raw Materials) --                          |
+|   Item Code      | Description          | Qty   | UOM   | Unit Cost | Line Cost |
+|   ---------------|----------------------|-------|-------|-----------|-----------|
+|   SUB-PATTY-01   | 6oz Beef Patty       | 1     | Each  | $2.10     | $2.10     |
+|   ING-BUN-BRIOCHE| Brioche Bun          | 1     | Each  | $0.55     | $0.55     |
+|   ING-CHE-CHEDD  | Cheddar Cheese Slice | 1     | Slice | $0.20     | $0.20     |
+|   ING-VEG-LETTUCE| Lettuce Leaf         | 20    | grams | $10/kg    | $0.20     |
+|   ING-VEG-TOMATO | Tomato Slice         | 25    | grams | $8/kg     | $0.20     |
+|   SUB-SAUCE-SPEC | Special Burger Sauce | 30    | ml    | $15/L     | $0.45     |
+|                                                                          |
+| -- Preparation Instructions --                                           |
+|   1. Toast the brioche bun.                                              |
+|   2. Grill beef patty to medium, melting cheese on top in the last minute.|
+|   3. ...                                                                 |
++--------------------------------------------------------------------------+
+|                                  THEORETICAL COST: | $3.70                |
+|                                  FOOD COST %:      | 23.1% (=3.70/15.99)  |
++--------------------------------------------------------------------------+
+```
+
+---
+
+### 2. Module: Inventory Management
+
+**Purpose:** To track all food and beverage stock in real-time. This is critical due to perishability. The module must handle multiple units of measure (e.g., buying potatoes by the 50kg bag, but using them in recipes by the gram).
+
+**Key Forms / Processes:**
+*   **Item Master:** Master record for each ingredient.
+*   **Stock Count Sheet:** For performing physical inventory counts.
+*   **Wastage Log:** To record spoiled, dropped, or expired items.
+
+#### **Form Layout: Inventory Item Master**
+
+```
++--------------------------------------------------------------------------+
+|                          INVENTORY ITEM MASTER                           |
++--------------------------------------------------------------------------+
+|   Item Code: ING-VEG-LETTUCE          Description: Romaine Lettuce       |
+|   Category: [ Produce ]               Status: [ Active ]                 |
+|                                                                          |
+| -- Units of Measure (UOM) --                                             |
+|   Storage/Recipe UOM: Grams (g)                                          |
+|   Purchase UOM: Kilograms (kg)      Conversion: 1 kg = 1000 g            |
+|   Purchase UOM 2: Case (cs)           Conversion: 1 cs = 10 kg           |
+|                                                                          |
+| -- Supplier & Cost --                                                    |
+|   Primary Supplier: [ Fresh Produce Co. ] Last Cost: $10.00 / kg         |
+|                                                                          |
+| -- On Hand Levels --                                                     |
+|   Current Qty On Hand: 5,600 g (5.6 kg)                                  |
+|   Par Level (Reorder Point): 2,000 g                                     |
++--------------------------------------------------------------------------+
+```
+
+---
+
+### 3. Module: Point of Sale (POS) - For Restaurant Operations
+
+**Purpose:** The front-of-house system for taking customer orders, processing payments, and managing tables. It's the primary source of sales data.
+
+**This is a user interface, not a traditional form.** When an order is placed:
+1.  It sends the order to the Kitchen Display System (KDS).
+2.  It creates a sales transaction record in the background.
+3.  Upon payment, it finalizes the transaction, which is then sent to the General Ledger.
+
+---
+
+### 4. Module: Event & Catering Management
+
+**Purpose:** To manage the entire lifecycle of a catering event, from initial quote to final invoice. This acts as the CRM and Project Management hub for the catering side of the business.
+
+**Key Forms / Processes:**
+*   **Banquet Event Order (BEO):** The master document for a confirmed catering event.
+*   **Catering Invoice:** The final bill sent to the client.
+
+#### **Form Layout: Banquet Event Order (BEO)**
+
+```
++--------------------------------------------------------------------------+
+|                         BANQUET EVENT ORDER (BEO)                          |
+|                                                                          |
+| BEO #: BEO-23-45                            Event: Annual Gala 2023        |
++--------------------------------------------------------------------------+
+| -- Client & Event Details --                                             |
+|   Client: Acme Corporation                Contact: John Doe                |
+|   Event Date: Nov 25, 2023                Guest Count (Guaranteed): 200    |
+|   Venue: Grand Ballroom                   Time: 7:00 PM - 11:00 PM         |
+|                                                                          |
+| -- Menu Selection (Links to Recipe Module) --                            |
+|   - Passed Appetizers: Mini Quiche (250 units), Bruschetta (250 units)   |
+|   - Main Course (Plated): Choice of Beef Tenderloin (120) or Salmon (80) |
+|   - Beverage Package: Premium Open Bar                                   |
+|                                                                          |
+| -- Staffing & Rentals --                                                 |
+|   - Chefs: 3, Servers: 10, Bartenders: 2                                 |
+|   - Rentals: Linen Tablecloths (20), China Settings (200)                |
+|                                                                          |
+| -- Financial Summary --                                                  |
+|   Food Subtotal: $15,000      Beverage Subtotal: $8,000                  |
+|   Staffing: $3,500            Service Charge (20%): $5,300               |
+|   TOTAL ESTIMATE: $31,800     Deposit Received: $15,900                  |
++--------------------------------------------------------------------------+
+```
+*(Purchasing, AP, AR, and GL modules are also required and function as previously described.)*
+
+---
+
+### Module Design: Cost of Goods Sold (COGS) Calculation
+
+**Purpose:** This is one of the most critical modules for a culinary business. Its purpose is to calculate the actual cost of ingredients consumed to generate revenue. It provides the data needed to analyze profitability, identify waste, and make pricing decisions.
+
+**Core Logic:** The module works by comparing **Theoretical COGS** (what you *should have* used based on sales and recipes) with **Actual COGS** (what you *actually* used based on inventory counts). The difference is **Variance**, which highlights problems like waste, theft, or incorrect portioning.
+
+#### **Process Flow for COGS Calculation (Typically run weekly or monthly)**
+
+1.  **Data Capture (Automated):**
+*   The module continuously pulls **sales data** from the POS and Catering modules. It knows exactly how many "Classic Beef Burgers" were sold.
+*   It pulls **purchase data** from the Procurement module.
+*   It knows the **cost of each ingredient** from the Inventory module and the **composition of each dish** from the Recipe module.
+
+2.  **Calculate Theoretical COGS:**
+*   The system multiplies the number of units sold for each menu item by the theoretical cost on its Recipe Card.
+*   *Example:* `150 Burgers Sold * $3.70/burger = $555` in theoretical COGS for that item.
+*   It sums this up for all items sold during the period.
+
+3.  **Physical Inventory Count (Manual Task, System-Assisted):**
+*   A manager uses a tablet or count sheet generated by the system to perform a physical count of all inventory.
+*   They enter the final counts into the system to establish the `Ending Inventory` value.
+
+4.  **Calculate Actual COGS:**
+*   The system uses the classic accounting formula:
+`Actual COGS = Beginning Inventory + Purchases - Ending Inventory`
+*   `Beginning Inventory` is simply last period's `Ending Inventory`.
+
+5.  **Generate Variance Report:**
+*   The system presents the final, actionable report comparing the two COGS figures.
+
+#### **Report Layout: COGS & Variance Analysis Report**
+
+```
++--------------------------------------------------------------------------+
+|                       COGS & VARIANCE ANALYSIS REPORT                      |
+|                       For Period: Oct 01, 2023 - Oct 31, 2023              |
++--------------------------------------------------------------------------+
+| Category: Food                                                           |
++--------------------------------------+-----------------------------------+
+| -- Actual COGS Calculation --        | -- Theoretical COGS Calculation --|
+|   Beginning Inventory:   $15,000.00  |   Total Food Sales:    $100,000.00  |
+|   + Purchases:            $25,000.00  |                                   |
+|   - Ending Inventory:    ($12,000.00) |   Theoretical Food Cost %: 27.5%    |
+|   ---------------------------------- |   (From all recipe cards)         |
+|   ACTUAL COGS:            $28,000.00  |   THEORETICAL COGS:    $27,500.00  |
+|                                      |   (= $100k * 27.5%)               |
+|   ACTUAL Food Cost %: 28.0%          |                                   |
++--------------------------------------+-----------------------------------+
+| -- Variance Analysis --                                                  |
+|   Variance ($):   $500.00  (Actual - Theoretical)                         |
+|   Variance (%):    0.5%                                                   |
+|                                                                          |
+| -- Top Variance Items (Ingredient Level) --                              |
+|   Item               | Theoretical Usage | Actual Usage | Variance ($)   |
+|   -------------------|-------------------|--------------|----------------|
+|   Beef, Ground 80/20 | 120 kg            | 125 kg       | $75.00         |
+|   Avocados           | 50 kg             | 58 kg        | $96.00         |
+|   ...                | ...               | ...          | ...            |
++--------------------------------------------------------------------------+
+| Interpretation: The total variance of $500 (0.5%) indicates a slight     |
+| over-consumption. The item-level detail suggests potential issues with   |
+| over-portioning of beef patties and spoilage/waste of avocados.          |
++--------------------------------------------------------------------------+
+```
