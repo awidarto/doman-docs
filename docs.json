@@ -46,6 +46,24 @@
                 ]
               }
             ]
+          },
+          {
+            "group": "Screen by Screen",
+            "pages": [
+              "apps/dms-doc/user-manual/by-screen/index",
+              "apps/dms-doc/user-manual/by-screen/1-login",
+              "apps/dms-doc/user-manual/by-screen/2-dashboard",
+              "apps/dms-doc/user-manual/by-screen/3-repository",
+              {
+                "group": "Repositori Cerdas & Kode Panggil",
+                "pages": [
+                  "apps/dms-doc/user-manual/repository/index",
+                  "apps/dms-doc/user-manual/repository/call-code-breakdown",
+                  "apps/dms-doc/user-manual/repository/practical-example",
+                  "apps/dms-doc/user-manual/repository/admin-reference-tables"
+                ]
+              }
+            ]
           }
         ]
       },

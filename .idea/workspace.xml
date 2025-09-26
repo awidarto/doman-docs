@@ -6,6 +6,7 @@
   <component name="ChangeListManager">
     <list default="true" id="f5ee46ac-8460-424d-9b8a-dfe584e81db0" name="Changes" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/docs.json" beforeDir="false" afterPath="$PROJECT_DIR$/docs.json" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -33,27 +34,28 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent">{
-  &quot;keyToString&quot;: {
-    &quot;RunOnceActivity.OpenProjectViewOnStart&quot;: &quot;true&quot;,
-    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
-    &quot;dart.analysis.tool.window.visible&quot;: &quot;false&quot;,
-    &quot;git-widget-placeholder&quot;: &quot;main&quot;,
-    &quot;kotlin-language-version-configured&quot;: &quot;true&quot;,
-    &quot;last_opened_file_path&quot;: &quot;/Users/awidarto/WebProjects/MejikDocs/doman-docs/ai-dev/graph-rag&quot;,
-    &quot;node.js.detected.package.eslint&quot;: &quot;true&quot;,
-    &quot;node.js.detected.package.tslint&quot;: &quot;true&quot;,
-    &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
-    &quot;node.js.selected.package.tslint&quot;: &quot;(autodetect)&quot;,
-    &quot;nodejs_package_manager_path&quot;: &quot;npm&quot;,
-    &quot;settings.editor.selected.configurable&quot;: &quot;fileTemplates&quot;,
-    &quot;two.files.diff.last.used.file&quot;: &quot;/Users/awidarto/WebProjects/MejikDocs/docs/docs.json&quot;,
-    &quot;two.files.diff.last.used.folder&quot;: &quot;/Users/awidarto/WebProjects/MejikDocs/docs&quot;,
-    &quot;vue.rearranger.settings.migration&quot;: &quot;true&quot;
+  <component name="PropertiesComponent"><![CDATA[{
+  "keyToString": {
+    "RunOnceActivity.OpenProjectViewOnStart": "true",
+    "RunOnceActivity.ShowReadmeOnStart": "true",
+    "dart.analysis.tool.window.visible": "false",
+    "git-widget-placeholder": "main",
+    "kotlin-language-version-configured": "true",
+    "last_opened_file_path": "/Users/awidarto/WebProjects/MejikDocs/doman-docs/apps/dms-doc/user-manual/by-screen",
+    "node.js.detected.package.eslint": "true",
+    "node.js.detected.package.tslint": "true",
+    "node.js.selected.package.eslint": "(autodetect)",
+    "node.js.selected.package.tslint": "(autodetect)",
+    "nodejs_package_manager_path": "npm",
+    "settings.editor.selected.configurable": "fileTemplates",
+    "two.files.diff.last.used.file": "/Users/awidarto/WebProjects/MejikDocs/docs/docs.json",
+    "two.files.diff.last.used.folder": "/Users/awidarto/WebProjects/MejikDocs/docs",
+    "vue.rearranger.settings.migration": "true"
   }
-}</component>
+}]]></component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
+      <recent name="$PROJECT_DIR$/apps/dms-doc/user-manual/by-screen" />
       <recent name="$PROJECT_DIR$/ai-dev/graph-rag" />
       <recent name="$PROJECT_DIR$/mejik-core/laravel" />
       <recent name="$PROJECT_DIR$/dev/dms" />
@@ -98,7 +100,20 @@
       <workItem from="1757860648438" duration="374000" />
       <workItem from="1757867934739" duration="610000" />
       <workItem from="1757927639492" duration="1428000" />
-      <workItem from="1757939911654" duration="457000" />
+      <workItem from="1757939911654" duration="645000" />
+      <workItem from="1758090223034" duration="440000" />
+      <workItem from="1758092208799" duration="1830000" />
+      <workItem from="1758116080344" duration="492000" />
+      <workItem from="1758165052548" duration="377000" />
+      <workItem from="1758204293292" duration="893000" />
+      <workItem from="1758263148519" duration="1003000" />
+      <workItem from="1758376922808" duration="545000" />
+      <workItem from="1758448315829" duration="1185000" />
+      <workItem from="1758520633887" duration="534000" />
+      <workItem from="1758537058821" duration="543000" />
+      <workItem from="1758774824662" duration="597000" />
+      <workItem from="1758804324888" duration="496000" />
+      <workItem from="1758869614060" duration="3301000" />
     </task>
     <servers />
   </component>

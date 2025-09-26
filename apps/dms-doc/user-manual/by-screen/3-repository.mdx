@@ -1,0 +1,151 @@
+---
+title: '3. Repositori Dokumen'
+---
+
+### **1. Halaman Repositori Dokumen**
+![Repository Page](/images/dms-manual/repository.png)
+Repositori adalah pusat penyimpanan semua dokumen. Di sini Anda dapat melihat, mencari, dan mengelola semua dokumen yang ada di dalam sistem.
+
+**Cara Mengakses:**
+*   Dari menu navigasi di sebelah kiri, klik **DOCUMENT MANAGEMENT**, lalu pilih **Repositori**.
+
+**Fitur Halaman Repositori:**
+*   **Daftar Dokumen:** Menampilkan semua dokumen dalam format tabel.
+*   **Pencarian:** Anda dapat mencari dokumen spesifik menggunakan kolom pencarian.
+*   **Tombol Aksi:** Terdapat tombol untuk menambah dokumen baru (`+ Dokumen`), mencetak (`Print`), dan mengekspor data (`XLS`).
+*   **Aksi per Baris:** Setiap baris dokumen memiliki ikon aksi untuk melihat detail, mengedit metadata, atau menghapus.
+
+
+
+---
+
+### **2. Menambah Dokumen Baru (Add Document)**
+![Add Document Page](/images/dms-manual/add-doc.png)
+Untuk menambahkan dokumen baru ke dalam repositori, ikuti langkah-langkah berikut.
+
+**Langkah-langkah:**
+1.  Pada halaman **Repositori**, klik tombol **+ Dokumen** yang berwarna biru di pojok kanan atas.
+2.  Sebuah formulir **Tambah Dokumen** akan muncul.
+3.  Isi semua informasi metadata yang diperlukan seperti **Doc Ref**, **Subject**, **Entity**, **Topic**, dan lainnya pada bagian **Document Meta Data**.
+4.  Unggah file dokumen pada bagian **Process** dengan mengklik **Upload Document**.
+5.  Lengkapi informasi lain seperti **Document Custody**, **Alert & Reminder**, dan **Document Life Cycle**.
+6.  Setelah semua data terisi, klik tombol **Save** di bagian bawah untuk menyimpan dokumen baru.
+
+
+
+---
+
+### **3. Memperbarui Data Dokumen (Update Document)**
+![Update Document Page](/images/dms-manual/update-doc.png)
+
+Jika Anda perlu mengubah atau melengkapi informasi (metadata) dari dokumen yang sudah ada.
+
+**Langkah-langkah:**
+1.  Pada halaman **Repositori**, cari dokumen yang ingin Anda perbarui.
+2.  Klik **ikon tiga titik vertikal** (opsi) di sebelah kanan baris dokumen tersebut.
+3.  Pilih menu **Metadata**.
+4.  Anda akan diarahkan ke halaman formulir yang sudah terisi dengan data dokumen saat ini.
+5.  Ubah informasi yang diperlukan pada kolom-kolom yang tersedia.
+6.  Klik tombol **Save** untuk menyimpan perubahan.
+
+
+
+---
+
+### **4. Melihat File Dokumen (View Document)**
+![Update Document Page](/images/dms-manual/view-doc-from-repo.png)
+Untuk melihat isi dari file dokumen (misalnya PDF) secara langsung di aplikasi.
+
+**Langkah-langkah:**
+1.  Pada halaman **Repositori**, cari dokumen yang ingin Anda lihat.
+2.  Klik pada **Kode Dokumen** atau judul dokumen (contoh: `O-BD-02-01-BIJ24001-0324-01`).
+3.  Sebuah jendela pratinjau (viewer) akan muncul, menampilkan isi dokumen tersebut.
+4.  Anda dapat menggunakan kontrol pada viewer untuk memperbesar/memperkecil, mengunduh, atau mencetak dokumen. Klik tombol `x` untuk menutup pratinjau.
+
+
+
+---
+
+### **5. Melihat Metadata Dokumen (View Metadata Only)**
+![Update Document Page](/images/dms-manual/view-meta-only.png)
+Fitur ini berguna untuk melihat ringkasan informasi (metadata) dokumen dengan cepat tanpa harus masuk ke mode edit.
+
+**Langkah-langkah:**
+1.  Pada halaman **Repositori**, cari dokumen yang ingin Anda lihat metadatanya.
+2.  Klik **ikon mata** yang berada di sisi kiri pada baris dokumen tersebut.
+3.  Sebuah jendela pop-up **Lihat [Kode Dokumen]** akan muncul, menampilkan semua detail metadata dokumen dalam mode *read-only* (hanya lihat).
+4.  Klik tombol `x` di pojok kanan atas jendela untuk menutupnya.
+
+Tentu, saya akan melanjutkan panduan pengguna dengan menambahkan bagian detail dokumen berdasarkan penjelasan yang Anda berikan.
+
+---
+
+## **6. Detail Informasi Dokumen (Document Details)**
+![Update Document Page](/images/dms-manual/view-doc-from-meta-form.png)
+Saat Anda menambah atau memperbarui dokumen, Anda akan berinteraksi dengan sebuah formulir yang berisi beberapa bagian. Setiap bagian berfungsi untuk mencatat informasi spesifik yang penting untuk pengelolaan dokumen secara menyeluruh. Berikut adalah penjelasan untuk setiap bagian:
+
+---
+
+#### **6.1. Document Meta Data**
+
+Bagian ini berisi semua informasi dasar dan deskriptif yang mengidentifikasi dokumen. Metadata yang akurat sangat penting untuk memudahkan pencarian dan kategorisasi.
+
+*   **Tujuan:** Memberikan identitas dan konteks pada dokumen.
+*   **Isi Utama:**
+*   **Doc Ref & Doc Date:** Nomor referensi unik dan tanggal resmi dokumen.
+*   **Subject:** Judul atau subjek utama dari dokumen.
+*   **Entity & Pengirim/Penerima:** Pihak (internal atau eksternal) yang terkait dengan dokumen.
+*   **Topic & Keywords:** Topik spesifik dan kata kunci untuk mempermudah pencarian.
+*   **Type & Origin Format:** Jenis dokumen (misal: Surat, Kontrak) dan format aslinya (misal: Kertas, Email).
+
+---
+
+#### **6.2. Process**
+
+Bagian ini mengelola versi digital (soft copy) dari dokumen dan proses penamaannya di dalam sistem.
+
+*   **Tujuan:** Menyimpan file digital dokumen secara aman dan terstandarisasi.
+*   **Isi Utama:**
+*   **Upload Document:** Fasilitas untuk mengunggah file dokumen (misalnya dalam format PDF).
+*   **Soft File:** File yang diunggah akan disimpan di penyimpanan online (S3 compatible storage).
+*   **Buat Kode Panggil:** Sistem akan secara otomatis mengubah nama file sesuai dengan standar penamaan internal (kode panggil) yang dibentuk dari metadata seperti `Topic Code`, `Company`, `Feature`, dll. Ini memastikan konsistensi dan kemudahan pelacakan.
+
+---
+
+#### **6.3. Document Custody**
+
+Bagian ini digunakan untuk mencatat informasi terkait penyimpanan fisik dokumen (hard copy).
+
+*   **Tujuan:** Melacak lokasi dan kondisi fisik dari dokumen asli.
+*   **Isi Utama:**
+*   **# of Sheets / # of Page:** Jumlah lembar atau halaman dari dokumen fisik.
+*   **Lokasi & Store Note:** Informasi detail tentang di mana dokumen fisik disimpan (misal: nama rak, nomor boks, lantai) beserta catatan tambahan jika ada.
+
+---
+
+#### **6.4. Document Life Cycle**
+
+Bagian ini mengatur siklus hidup dokumen, terutama untuk dokumen fisik, sesuai dengan peraturan atau kebijakan yang berlaku (misalnya Arsip Nasional Republik Indonesia - ANRI).
+
+*   **Tujuan:** Memastikan dokumen dikelola dari masa aktif hingga pemusnahan sesuai dengan jadwal retensi yang telah ditetapkan.
+*   **Isi Utama:**
+*   **Yrs Active (Tahun Aktif):** Jangka waktu dokumen dianggap aktif dan sering diakses.
+*   **Date Transfer (Tanggal Pindah):** Tanggal saat dokumen dipindahkan dari arsip aktif ke inaktif.
+*   **Yrs Retain (Tahun Retensi):** Jangka waktu dokumen wajib disimpan di arsip inaktif.
+*   **Date Disposal (Tanggal Musnah):** Tanggal di mana dokumen fisik dijadwalkan untuk dimusnahkan secara sah.
+
+---
+
+#### **6.5. Alert & Reminder**
+
+Bagian ini berfungsi untuk mengatur pengingat dan notifikasi otomatis terkait tanggal-tanggal penting dokumen.
+
+*   **Tujuan:** Mencegah keterlambatan atau kelalaian dalam mengelola dokumen yang memiliki batas waktu, seperti kontrak yang perlu diperpanjang atau izin yang akan kedaluwarsa.
+*   **Isi Utama:**
+*   **Expired Date:** Tanggal kedaluwarsa atau tanggal penting lainnya dari dokumen.
+*   **Notify Before Due & Notify Every:** Pengaturan untuk mengirimkan notifikasi beberapa hari sebelum tanggal jatuh tempo dan frekuensi pengulangannya.
+*   **Notify To Channel / Persons:** Menentukan siapa saja (pengguna spesifik) atau ke kanal mana (misal: email grup) notifikasi akan dikirimkan.
+
+---
+
+Dengan mengisi semua bagian ini secara lengkap dan akurat, pengelolaan dokumen di dalam perusahaan menjadi lebih terstruktur, aman, dan mudah dilacak baik secara digital maupun fisik.
