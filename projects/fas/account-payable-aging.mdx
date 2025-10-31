@@ -1,0 +1,228 @@
+---
+title: 'Account Payable Aging'
+description: 'AP Aging concept and implementation'
+---
+Visualizing Accounts Payable (AP) Aging is one of the most critical functions of an AP system. It helps a business manage cash flow, prioritize payments, and maintain good relationships with vendors.
+
+Let's break down how to create and visualize an AP Aging report, starting from your datatable of unpaid invoices.
+
+---
+
+### **Part 1: The Concept of AP Aging**
+
+AP Aging categorizes your unpaid invoices based on how long they have been outstanding. The goal is to see not just *how much* you owe, but *how urgent* those payments are. The report is typically broken into time-based "buckets."
+
+A standard set of aging buckets is:
+*   **Current:** Invoices that are not yet due.
+*   **1-30 Days Past Due:** Invoices that are 1 to 30 days overdue.
+*   **31-60 Days Past Due:** Invoices that are 31 to 60 days overdue.
+*   **61-90 Days Past Due:** Invoices that are 61 to 90 days overdue.
+*   **90+ Days Past Due:** Invoices that are more than 90 days overdue.
+
+---
+
+### **Part 2: Data Requirements**
+
+Your datatable of AP entries must contain the following key fields for each unpaid invoice to generate an aging report.
+
+| Field Name | Data Type | Description | Example |
+| :--- | :--- | :--- | :--- |
+| `vendor_name` | Varchar | The name of the supplier. | "CV Jaya Abadi" |
+| `invoice_number` | Varchar | The unique invoice identifier. | `INV-9876` |
+| `invoice_date` | Date | The date on the vendor's invoice. | `2023-10-26` |
+| `due_date` | Date | **Crucial Field.** The date payment is due. | `2023-11-25` |
+| `invoice_total` | Decimal | The total amount of the invoice. | `5,600,000` |
+| `amount_paid` | Decimal | The amount that has already been paid. | `0` |
+| `balance_due` | Decimal | **The value to be aged.** (`invoice_total` - `amount_paid`) | `5,600,000` |
+
+---
+
+### **Part 3: The Calculation Logic**
+
+The entire process hinges on one calculation: **Days Overdue**. This is calculated for each invoice relative to a specific reference date, which is usually today.
+
+**Step 1: Determine the "As of" Date**
+This is the date you are running the report for. Let's assume `Today's Date = 2023-12-15`.
+
+**Step 2: Calculate "Days Overdue" for Each Invoice**
+The formula is: `Days Overdue = Today's Date - Due_Date`
+
+*   If the result is negative or zero, the invoice is "Current" (not yet due).
+*   If the result is positive, the invoice is past due.
+
+**Example Calculations (As of 2023-12-15):**
+
+*   **Invoice A:** Due Date `2023-12-20` -> `15-Dec` - `20-Dec` = **-5 days** (Current)
+*   **Invoice B:** Due Date `2023-11-30` -> `15-Dec` - `30-Nov` = **15 days** (Falls in 1-30 bucket)
+*   **Invoice C:** Due Date `2023-10-25` -> `15-Dec` - `25-Oct` = **51 days** (Falls in 31-60 bucket)
+
+**Step 3: Assign the `balance_due` to the Correct Bucket**
+Using logic (like a `CASE` statement in SQL or an `if/else` block in code), you place the `balance_due` of each invoice into its corresponding aging bucket.
+
+**Pseudocode / SQL Logic:**
+
+```sql
+SELECT
+  vendor_name,
+  invoice_number,
+  due_date,
+  balance_due,
+  (CURRENT_DATE - due_date) AS days_overdue,
+
+  CASE
+    WHEN (CURRENT_DATE - due_date) <= 0 THEN balance_due
+    ELSE 0
+  END AS "Current",
+
+  CASE
+    WHEN (CURRENT_DATE - due_date) BETWEEN 1 AND 30 THEN balance_due
+    ELSE 0
+  END AS "1-30 Days",
+
+  CASE
+    WHEN (CURRENT_DATE - due_date) BETWEEN 31 AND 60 THEN balance_due
+    ELSE 0
+  END AS "31-60 Days",
+
+  CASE
+    WHEN (CURRENT_DATE - due_date) > 60 THEN balance_due
+    ELSE 0
+  END AS "60+ Days"
+
+FROM Unpaid_Invoices_Table
+```
+
+---
+
+### **Part 4: Visualization Methods**
+
+There are three common ways to visualize AP Aging, moving from detailed to high-level summary.
+
+#### **1. Detailed AP Aging Report (The Classic Table)**
+
+This is the most fundamental report. It lists every single unpaid invoice and places its balance in the appropriate bucket. It's used by AP staff for day-to-day work.
+
+**AP Aging Report as of: 2023-12-15**
+
+| Vendor Name | Invoice # | Due Date | Days Overdue | Total Balance | Current | 1-30 Days | 31-60 Days | 61-90 Days | 90+ Days |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| CV Jaya Abadi | INV-1005 | 2023-12-20 | -5 | 2,500,000 | 2,500,000 | | | | |
+| PT Sinar Tech | INV-789 | 2023-11-30 | 15 | 7,000,000 | | 7,000,000 | | | |
+| Supplier Maju | INV-SM-05 | 2023-11-10 | 35 | 4,200,000 | | | 4,200,000 | | |
+| CV Jaya Abadi | INV-987 | 2023-10-01 | 75 | 1,500,000 | | | | 1,500,000 | |
+| PT Sinar Tech | INV-456 | 2023-08-15 | 122 | 3,000,000 | | | | | 3,000,000 |
+| **---** | **---** | **---** | **---** | **---** | **---** | **---** | **---** | **---** | **---** |
+| **TOTALS** | | | | **18,200,000** | **2,500,000** | **7,000,000** | **4,200,000** | **1,500,000** | **3,000,000** |
+
+#### **2. Summary AP Aging Report (Grouped by Vendor)**
+
+This report is more useful for managers. It hides the invoice-level detail and shows the total amount owed to each vendor, broken down by aging bucket.
+
+**AP Aging Summary as of: 2023-12-15**
+
+| Vendor Name | Total Balance | Current | 1-30 Days | 31-60 Days | 61-90 Days | 90+ Days |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| CV Jaya Abadi | 4,000,000 | 2,500,000 | | | 1,500,000 | |
+| PT Sinar Tech | 10,000,000 | | 7,000,000 | | | 3,000,000 |
+| Supplier Maju | 4,200,000 | | | 4,200,000 | | |
+| **---** | **---** | **---** | **---** | **---** | **---** | **---** |
+| **TOTALS** | **18,200,000** | **2,500,000** | **7,000,000** | **4,200,000** | **1,500,000** | **3,000,000** |
+
+#### **3. Graphical Visualization (For Dashboards)**
+
+For a high-level overview, charts are extremely effective. They allow management to see the health of the company's payables at a glance.
+
+*   **Stacked Bar Chart:** This is perfect for showing the total AP balance and the proportion of that total in each aging bucket.
+
+
+*   **Pie Chart:** A simple way to show the percentage of debt in each aging category. It quickly highlights if a large portion of your debt is severely overdue.
+
+
+---
+
+### **Terjemahan dalam Bahasa Indonesia**
+
+### **Cara Membuat dan Memvisualisasikan Laporan Umur Hutang (AP Aging)**
+
+Laporan Umur Hutang (AP Aging) adalah alat vital untuk manajemen arus kas. Berikut adalah cara membuat dan memvisualisasikannya dari data hutang Anda.
+
+---
+
+#### **Bagian 1: Konsep Umur Hutang (AP Aging)**
+
+AP Aging mengelompokkan invoice yang belum dibayar berdasarkan berapa lama invoice tersebut telah beredar (outstanding). Tujuannya adalah untuk melihat urgensi pembayaran. Laporan ini dibagi menjadi beberapa "kelompok waktu" (bucket).
+
+Kelompok waktu standar adalah:
+*   **Lancar (Current):** Invoice yang belum jatuh tempo.
+*   **Lewat Tempo 1-30 Hari:** Invoice yang terlambat 1 hingga 30 hari.
+*   **Lewat Tempo 31-60 Hari:** Invoice yang terlambat 31 hingga 60 hari.
+*   **Lewat Tempo 61-90 Hari:** Invoice yang terlambat 61 hingga 90 hari.
+*   **Lewat Tempo 90+ Hari:** Invoice yang terlambat lebih dari 90 hari.
+
+---
+
+#### **Bagian 2: Kebutuhan Data**
+
+Tabel data entri AP Anda harus memiliki kolom-kolom kunci berikut untuk setiap invoice yang belum dibayar.
+
+| Nama Kolom | Tipe Data | Deskripsi | Contoh |
+| :--- | :--- | :--- | :--- |
+| `vendor_name` | Varchar | Nama pemasok. | "CV Jaya Abadi" |
+| `invoice_number` | Varchar | Nomor unik invoice. | `INV-9876` |
+| `invoice_date` | Date | Tanggal pada invoice. | `2023-10-26` |
+| `due_date` | Date | **Kolom Kritis.** Tanggal jatuh tempo pembayaran. | `2023-11-25` |
+| `invoice_total` | Decimal | Total nilai invoice. | `5,600,000` |
+| `amount_paid` | Decimal | Jumlah yang sudah dibayar. | `0` |
+| `balance_due` | Decimal | **Nilai yang akan dihitung umurnya.** (`invoice_total` - `amount_paid`) | `5,600,000` |
+
+---
+
+#### **Bagian 3: Logika Perhitungan**
+
+Inti dari proses ini adalah menghitung **Hari Lewat Tempo (Days Overdue)**.
+
+**Langkah 1: Tentukan Tanggal Laporan ("As of" Date)**
+Ini adalah tanggal acuan laporan, biasanya adalah hari ini. Misal `Tanggal Hari Ini = 15 Desember 2023`.
+
+**Langkah 2: Hitung "Hari Lewat Tempo"**
+Rumusnya: `Hari Lewat Tempo = Tanggal Hari Ini - Tanggal Jatuh Tempo`
+
+*   Jika hasilnya negatif atau nol, invoice tersebut **Lancar**.
+*   Jika hasilnya positif, invoice tersebut **Lewat Tempo**.
+
+**Langkah 3: Masukkan `balance_due` ke Kelompok Waktu yang Benar**
+Gunakan logika (`CASE` statement di SQL atau `if/else`) untuk menempatkan nilai `balance_due` ke dalam kelompok waktu yang sesuai berdasarkan `Hari Lewat Tempo`.
+
+---
+
+#### **Bagian 4: Metode Visualisasi**
+
+Terdapat tiga cara umum untuk memvisualisasikan Laporan Umur Hutang.
+
+**1. Laporan Umur Hutang Rinci (Tabel Klasik)**
+Ini adalah laporan paling dasar yang menampilkan setiap invoice belum bayar dan menempatkan saldonya di kolom yang sesuai.
+
+**Laporan Umur Hutang per tanggal: 15-12-2023**
+
+| Nama Vendor | No. Invoice | Tgl Jatuh Tempo | Lewat Tempo | Saldo Total | Lancar | 1-30 Hari | 31-60 Hari | 61-90 Hari | 90+ Hari |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| CV Jaya Abadi | INV-1005 | 20-12-2023 | -5 hari | 2.500.000 | 2.500.000 | | | | |
+| PT Sinar Tech | INV-789 | 30-11-2023 | 15 hari | 7.000.000 | | 7.000.000 | | | |
+| Supplier Maju | INV-SM-05 | 10-11-2023 | 35 hari | 4.200.000 | | | 4.200.000 | | |
+| **TOTAL** | | | | **13.700.000** | **2.500.000** | **7.000.000** | **4.200.000** | **0** | **0** |
+
+**2. Laporan Umur Hutang Ringkas (Per Vendor)**
+Laporan ini lebih berguna untuk manajer, menyembunyikan rincian per invoice dan menampilkan total hutang ke setiap vendor.
+
+**Ringkasan Umur Hutang per tanggal: 15-12-2023**
+
+| Nama Vendor | Saldo Total | Lancar | 1-30 Hari | 31-60 Hari | 90+ Hari |
+| :--- | :--- | :--- | :--- | :--- | :--- |
+| CV Jaya Abadi | 4.000.000 | 2.500.000 | | | 1.500.000 |
+| PT Sinar Tech | 10.000.000 | | 7.000.000 | | 3.000.000 |
+| **TOTAL** | **14.000.000** | **2.500.000** | **7.000.000** | **0** | **4.500.000** |
+
+**3. Visualisasi Grafis (Untuk Dasbor)**
+Untuk tinjauan tingkat tinggi, grafik sangat efektif.
+*   **Grafik Batang Bertumpuk (Stacked Bar Chart):** Sempurna untuk menunjukkan total saldo hutang dan proporsi setiap kelompok umurnya.
+*   **Grafik Lingkaran (Pie Chart):** Cara sederhana untuk menampilkan persentase hutang di setiap kategori umur.

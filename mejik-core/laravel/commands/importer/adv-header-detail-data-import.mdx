@@ -1,0 +1,435 @@
+---
+title: "XLSX Import for Header Detail Data - Advanced"
+description: "From XLSX data template with header detail structure into relational database"
+---
+
+This is an excellent evolution of the command, making it significantly more versatile for both SQL (relational) and NoSQL (document-based) databases, as well as more powerful for handling complex Excel files.
+
+Here is the complete, updated solution that incorporates both new features.
+
+---
+
+### 1. Prerequisites (MongoDB Setup - Optional)
+
+If you plan to use the `--embed` feature with MongoDB, you must install and configure a MongoDB driver package for Laravel. The most common one is `jenssegers/laravel-mongodb`.
+
+1.  **Install the package:**
+```bash
+composer require jenssegers/laravel-mongodb
+    ```
+2.  **Configure `config/database.php`:** Add a new connection for MongoDB.
+3.  **Update your Models:** The parent model (e.g., `JournalHeader`) should extend `Jenssegers\Mongodb\Eloquent\Model` instead of the default Eloquent model.
+
+**Example MongoDB Model (`app/Models/JournalHeader.php`):**
+```php
+<?php
+namespace App\Models;
+
+// Use the MongoDB Eloquent Model
+use Jenssegers\Mongodb\Eloquent\Model;
+
+class JournalHeader extends Model
+{
+    protected $connection = 'mongodb'; // Specify the connection
+    protected $collection = 'journal_headers'; // Specify the collection name
+
+    // You can still use fillable, but MongoDB is schema-less
+    protected $fillable = [
+        'journalId', 'journalDescription', 'journalDate', 'totalAmount', 'details' // Make the embedded array fillable
+    ];
+}
+```
+Child models (`JournalDetail`) are not strictly required for embedding, as they will just become arrays of objects within the parent document.
+
+---
+
+### 2. Complete Artisan Command Code
+
+Replace the entire content of `app/Console/Commands/ImportHeaderDetail.php` with the following code. It has been significantly refactored to handle the new logic.
+
+```php
+<?php
+
+namespace App\Console\Commands;
+
+use Illuminate\Console\Command;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\DB;
+use Maatwebsite\Excel\Facades\Excel;
+
+class ImportHeaderDetail extends Command
+{
+    /**
+     * The name and signature of the console command.
+     */
+    protected $signature = 'import:header-detail
+                            {file : The path to the Excel file to import.}
+                            {--entities= : Map types to Models (e.g., header:JournalHeader,detail:JournalDetail)}
+                            {--key= : The primary/foreign key column name (e.g., journalId). Required.}
+                            {--embed : For NoSQL, embed child entities as an array in the parent document.}
+                            {--sheet-title-as= : Use each sheet\'s title as a value for the specified field.}';
+
+    /**
+     * The console command description.
+     */
+    protected $description = 'Parse a structured header/detail Excel file and save data to the database.';
+
+    /**
+     * Execute the console command.
+     */
+    public function handle()
+    {
+        $options = $this->getValidatedOptions();
+        if (!$options) return 1;
+
+        $this->info("Starting import of {$options['filePath']}...");
+
+        DB::beginTransaction();
+        try {
+            if ($options['sheetTitleAs']) {
+                $this->processMultiSheetFile($options);
+            } else {
+                $this->processSingleSheetFile($options);
+            }
+
+            DB::commit();
+            $this->info('Import completed successfully!');
+            return 0;
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            $this->error("An error occurred: " . $e->getMessage());
+            $this->error("Import failed. All changes have been rolled back.");
+            return 1;
+        }
+    }
+
+    /**
+     * Processes a file with multiple sheets, where each sheet is a self-contained record.
+     */
+    private function processMultiSheetFile(array $options): void
+    {
+        $this->info("Multi-sheet mode enabled. Using sheet titles for '{$options['sheetTitleAs']}' field.");
+        $sheetNames = (new \Maatwebsite\Excel\Excel)->getSheetNames($options['filePath']);
+
+        foreach ($sheetNames as $sheetName) {
+            $this->line("--- Processing Sheet: {$sheetName} ---");
+            $rows = Excel::toArray(new \stdClass(), $options['filePath'], null, \Maatwebsite\Excel\Excel::XLSX, ['onlySheets' => [$sheetName]])[0];
+
+            // Inject the sheet title as a key-value pair for every row in this sheet
+            $injectedData = [$options['sheetTitleAs'] => $sheetName];
+
+            $this->processRows($rows, $options, $injectedData);
+        }
+    }
+
+    /**
+     * Processes a standard single-sheet file.
+     */
+    private function processSingleSheetFile(array $options): void
+    {
+        $this->info("Single-sheet mode enabled.");
+        $rows = Excel::toArray(new \stdClass(), $options['filePath'])[0];
+        $this->processRows($rows, $options);
+    }
+
+    /**
+     * The core logic for processing a set of rows (from a single sheet).
+     */
+    private function processRows(array $rows, array $options, array $injectedData = []): void
+    {
+        $currentEntityType = null;
+        $currentHeaders = [];
+        $lastParentKeyValue = null;
+
+        // Variables for embed mode
+        $currentParentInstance = null;
+        $collectedDetails = [];
+
+        foreach ($rows as $rowIndex => $row) {
+            if (empty(array_filter($row))) continue;
+
+            $entityType = strtolower(trim($row[0] ?? ''));
+
+            if (array_key_exists($entityType, $options['entityMappings'])) {
+                // When we hit a new block type, process the previous parent if in embed mode
+                if ($options['embed'] && $currentParentInstance && $entityType === 'header') {
+                    $this->saveParentWithEmbeds($currentParentInstance, $collectedDetails, $options['keyField']);
+                    $currentParentInstance = null; // Reset for the new parent
+                }
+
+                $currentEntityType = $entityType;
+                $currentHeaders = $rows[$rowIndex + 1];
+                $this->line("Processing new block: '{$currentEntityType}'");
+                continue;
+            }
+
+            if ($currentEntityType && $row === $currentHeaders) continue;
+
+            if ($currentEntityType) {
+                $filteredHeaders = array_filter($currentHeaders, fn($h) => $h !== null);
+                $dataRow = array_slice($row, 0, count($filteredHeaders));
+                $data = array_combine($filteredHeaders, $dataRow) + $injectedData;
+
+                $modelClass = $options['entityMappings'][$currentEntityType];
+
+                if ($entityType === 'header' || $entityType === 'main') {
+                    $lastParentKeyValue = $data[$options['keyField']];
+                    if ($options['embed']) {
+                        $currentParentInstance = new $modelClass($data);
+                        $collectedDetails = []; // Reset detail collector
+                    } else {
+                        $modelClass::create($data);
+                    }
+                    $this->info("  Saved Header with key: {$lastParentKeyValue}");
+                } else { // This is a detail entity
+                    if ($options['embed']) {
+                        // In embed mode, just collect the data
+                        if (!$currentParentInstance) throw new \Exception("Found detail '{$entityType}' without a parent on row " . ($rowIndex+1));
+                        $collectedDetails[$currentEntityType][] = $data;
+                        $this->line("    - Collected '{$entityType}' detail for embedding.");
+                    } else {
+                        // In relational mode, save it directly
+                        if (!isset($data[$options['keyField']]) || empty($data[$options['keyField']])) {
+                            $data[$options['keyField']] = $lastParentKeyValue;
+                            if (!$lastParentKeyValue) throw new \Exception("Found detail '{$entityType}' without an implicit or explicit key on row " . ($rowIndex+1));
+                        }
+                        $modelClass::create($data);
+                        $this->line("    - Saved '{$entityType}' detail for key {$data[$options['keyField']]}");
+                    }
+                }
+            }
+        }
+
+        // After the loop, save the very last parent record if in embed mode
+        if ($options['embed'] && $currentParentInstance) {
+            $this->saveParentWithEmbeds($currentParentInstance, $collectedDetails, $options['keyField']);
+        }
+    }
+
+    /**
+     * Helper for embed mode: attaches collected details to the parent and saves it.
+     */
+    private function saveParentWithEmbeds(Model $parent, array $details, string $keyField): void
+    {
+        foreach ($details as $entityName => $dataArray) {
+            $parent->{$entityName} = $dataArray;
+        }
+        $parent->save();
+        $this->info("  Saved embedded document with key: {$parent->{$keyField}}");
+    }
+
+    /**
+     * Validates and prepares command options for use.
+     */
+    private function getValidatedOptions(): ?array
+    {
+        $options = [
+            'filePath' => $this->argument('file'),
+            'keyField' => $this->option('key'),
+            'embed' => $this->option('embed'),
+            'sheetTitleAs' => $this->option('sheet-title-as'),
+            'entityMappings' => $this->parseEntityMappings($this->option('entities')),
+        ];
+
+        if (!$options['keyField']) { $this->error('The --key option is required.'); return null; }
+        if (empty($options['entityMappings'])) { $this->error('The --entities option is required.'); return null; }
+        if (!file_exists($options['filePath'])) { $this->error("File not found at path: {$options['filePath']}"); return null; }
+        if ($options['sheetTitleAs'] && pathinfo($options['filePath'], PATHINFO_EXTENSION) === 'csv') {
+            $this->error('The --sheet-title-as option is not applicable to CSV files.'); return null;
+        }
+
+        return $options;
+    }
+
+    /**
+     * Parses the --entities option string into a usable array.
+     */
+    private function parseEntityMappings(?string $entities): array
+    {
+        // Unchanged from previous version
+        if (!$entities) return [];
+        $mappings = [];
+        $pairs = explode(',', $entities);
+        foreach ($pairs as $pair) {
+            list($key, $modelName) = explode(':', $pair);
+            $mappings[strtolower(trim($key))] = 'App\\Models\\' . trim($modelName);
+        }
+        if (isset($mappings['header'])) {
+            $mappings['main'] = $mappings['header'];
+        }
+        return $mappings;
+    }
+}
+```
+---
+
+### 3. Usage Documentation (English)
+
+#### Command Synopsis
+
+```bash
+php artisan import:header-detail <file> --entities=<map> --key=<key> [--embed] [--sheet-title-as=<field>]
+```
+
+#### Arguments & Options
+
+| Parameter | Description | Required | Example |
+| :--- | :--- | :--- | :--- |
+| `file` | The relative path to the Excel file to be imported. | Yes | `storage/app/data.xlsx` |
+| `--entities` | A comma-separated list that maps the entity type from Column A to your Eloquent Model names. | Yes | `--entities=header:PersonnelInfo,dependent:Dependent` |
+| `--key` | The name of the column serving as the Primary Key for the header and Foreign Key for details. | Yes | `--key=employeeId` |
+| `--embed` | **(For NoSQL/MongoDB)** Embeds child entities as an array within the parent document instead of saving them to separate tables. The array key will be the entity name (e.g., 'dependent'). | No | `--embed` |
+| `--sheet-title-as` | **(For Excel files)** Treats each sheet as a separate record. The title of each sheet will be used as the value for the specified field. | No | `--sheet-title-as=journalId` |
+
+#### Use Case 1: Standard Relational Import (SQL)
+This is the default behavior, same as before. Child entities are saved to their own tables with a foreign key.
+
+#### Use Case 2: Embedded Document Import (MongoDB)
+
+This mode is activated with the `--embed` flag. It's ideal for document databases.
+
+**Example Excel File:**
+*Same as the HR example file from the previous response.*
+
+**Command:**
+```bash
+php artisan import:header-detail storage/app/hr_data.xlsx \
+--entities=header:PersonnelInfo,dependent:Dependent,education:EducationHistory \
+--key=employeeId \
+--embed
+```
+**Resulting MongoDB Document in `personnel_infos` collection:**
+```json
+{
+  "_id": "...",
+  "employeeId": "E001",
+  "name": "John Doe",
+  "dateOfBirth": "1990-05-15",
+  "dependent": [
+    { "name": "Jane Doe", "relationship": "Spouse" },
+    { "name": "Jimmy Doe", "relationship": "Child" }
+  ],
+  "education": [
+    { "institution": "State University", "degree": "B.Sc. CompSci", "yearCompleted": 2012 }
+  ]
+}
+```
+
+#### Use Case 3: Multi-Sheet Excel Import
+
+This powerful mode is for Excel files where each sheet represents a complete header-detail record. The sheet title itself becomes a key piece of data.
+
+**Example Excel File Structure:**
+Imagine a file named `journals_by_id.xlsx` with two sheets named `J001` and `J002`.
+
+**Sheet "J001":**
+| A | B | C |
+|---|---|---|
+| **header** | journalDescription | totalAmount |
+| | Pembelian ATK | 220000 |
+| **detail** | trxDescription | trxAmount |
+| | Bolpoint | 100000 |
+| | Pensil | 120000 |
+
+**Sheet "J002":**
+| A | B | C |
+|---|---|---|
+| **header** | journalDescription | totalAmount |
+| | Pembelian Safety | 650000 |
+| **detail** | trxDescription | trxAmount |
+| | Sepatu Safety | 275000 |
+| | Raincoat | 375000 |
+
+**Command:**
+```bash
+php artisan import:header-detail storage/app/journals_by_id.xlsx \
+--entities=header:JournalHeader,detail:JournalDetail \
+--key=journalId \
+--sheet-title-as=journalId
+```
+**How it works:**
+*   It processes sheet "J001" first. For every row, it automatically adds `journalId => 'J001'`.
+*   Then it processes sheet "J002". For every row on this sheet, it adds `journalId => 'J002'`.
+*   This creates two distinct `JournalHeader` records with their respective `JournalDetail` records, all correctly linked. This can also be combined with `--embed`.
+
+---
+
+### 4. Dokumentasi Penggunaan (Bahasa Indonesia)
+
+#### Sintaks Perintah
+
+```bash
+php artisan import:header-detail <file> --entities=<map> --key=<key> [--embed] [--sheet-title-as=<field>]
+```
+
+#### Argumen & Opsi
+
+| Parameter | Deskripsi | Wajib | Contoh |
+| :--- | :--- | :--- | :--- |
+| `file` | Path relatif menuju file Excel yang akan diimpor. | Ya | `storage/app/data.xlsx` |
+| `--entities` | Daftar yang dipisahkan koma untuk memetakan tipe entitas dari Kolom A ke nama Model Eloquent Anda. | Ya | `--entities=header:PersonnelInfo,dependent:Dependent` |
+| `--key` | Nama kolom yang berfungsi sebagai Kunci Primer (Primary Key) untuk header dan Kunci Asing (Foreign Key) untuk detail. | Ya | `--key=employeeId` |
+| `--embed` | **(Untuk NoSQL/MongoDB)** Menyematkan data turunan (child) sebagai array di dalam dokumen induk, alih-alih menyimpannya di tabel terpisah. Kunci array akan menggunakan nama entitas (cth: 'dependent'). | Tidak | `--embed` |
+| `--sheet-title-as` | **(Untuk file Excel)** Memperlakukan setiap sheet sebagai satu record terpisah. Judul dari setiap sheet akan digunakan sebagai nilai untuk kolom yang ditentukan. | Tidak | `--sheet-title-as=journalId` |
+
+#### Kasus Penggunaan 1: Impor Relasional Standar (SQL)
+Ini adalah mode default, sama seperti sebelumnya. Entitas turunan disimpan ke tabelnya masing-masing dengan sebuah foreign key.
+
+#### Kasus Penggunaan 2: Impor Dokumen Tersemat (MongoDB)
+
+Mode ini diaktifkan dengan flag `--embed`. Sangat ideal untuk database berbasis dokumen.
+
+**Contoh Perintah:**
+```bash
+php artisan import:header-detail storage/app/hr_data.xlsx \
+--entities=header:PersonnelInfo,dependent:Dependent,education:EducationHistory \
+--key=employeeId \
+--embed
+```
+**Hasil Dokumen MongoDB di collection `personnel_infos`:**
+```json
+{
+  "employeeId": "E001",
+  "name": "John Doe",
+  "dependent": [
+    { "name": "Jane Doe", "relationship": "Spouse" }
+  ],
+  "education": [
+    { "institution": "State University", "degree": "B.Sc. CompSci" }
+  ]
+}
+```
+
+#### Kasus Penggunaan 3: Impor Excel Multi-Sheet
+
+Mode ini digunakan untuk file Excel di mana setiap sheet mewakili satu set record header-detail yang lengkap. Judul sheet itu sendiri menjadi bagian penting dari data.
+
+**Struktur File Excel `jurnal_per_id.xlsx` dengan dua sheet bernama `J001` dan `J002`.**
+
+**Sheet "J001":**
+| A | B | C |
+|---|---|---|
+| **header** | journalDescription | totalAmount |
+| | Pembelian ATK | 220000 |
+| **detail** | trxDescription | trxAmount |
+| | Bolpoint | 100000 |
+
+**Sheet "J002":**
+| A | B | C |
+|---|---|---|
+| **header** | journalDescription | totalAmount |
+| | Pembelian Safety | 650000 |
+
+**Perintah:**
+```bash
+php artisan import:header-detail storage/app/jurnal_per_id.xlsx \
+--entities=header:JournalHeader,detail:JournalDetail \
+--key=journalId \
+--sheet-title-as=journalId
+```
+**Cara Kerja:**
+*   Perintah akan memproses sheet "J001" terlebih dahulu. Untuk setiap baris, ia otomatis menambahkan data `journalId => 'J001'`.
+*   Kemudian, ia memproses sheet "J002" dan menambahkan `journalId => 'J002'` untuk setiap baris di sheet tersebut.
+*   Hasilnya adalah dua record `JournalHeader` yang berbeda dengan `JournalDetail` yang terhubung dengan benar. Mode ini juga bisa dikombinasikan dengan `--embed`.
+

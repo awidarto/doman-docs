@@ -1,0 +1,565 @@
+---
+title: Tree Data Table Inertia
+---
+
+### Dokumentasi Implementasi Tree DataTable
+
+Dokumentasi ini menjelaskan perubahan dari implementasi *DataTable* standar (flat) menjadi *Tree DataTable* (hierarkis) yang mampu menampilkan data dengan struktur induk-anak (*parent-child*).
+
+#### Perbedaan Utama: Flat DataTable vs. Tree DataTable
+
+Perbedaan mendasar terletak pada cara data disiapkan di backend (Laravel) dan cara data dirender di frontend (Vue & TanStack Table).
+
+**1. Struktur Data (Backend)**
+
+*   **Flat DataTable:**
+*   **Struktur:** Backend mengirimkan data dalam bentuk *array* datar (flat array) dari hasil paginasi Laravel. Contoh: `[{ id: 1, name: 'A' }, { id: 2, name: 'B' }]`.
+*   **Query:** Menggunakan `->paginate()` untuk membatasi jumlah data per halaman. Logika query sangat sederhana.
+*   **Tree DataTable:**
+*   **Struktur:** Backend mengirimkan data dalam bentuk *array* yang sudah tersusun secara hierarkis (nested). Setiap objek data memiliki properti `_children` yang berisi *array* dari anak-anaknya. Contoh: `[{ id: 1, name: 'Parent', _children: [{ id: 2, name: 'Child' }] }]`.
+*   **Query:** Tidak lagi menggunakan paginasi. Controller akan mengambil **semua data yang relevan** lalu membangun struktur pohon di memori server sebelum dikirim ke frontend.
+*   **Logika Pencarian:**
+*   Pada *flat data*, pencarian hanya menampilkan baris yang cocok.
+*   Pada *tree data*, pencarian akan menemukan baris yang cocok, lalu **menelusuri ke atas (ancestors)** untuk menyertakan semua induknya hingga ke akar (root). Semua induk dari hasil pencarian akan ditandai `_expanded: true` agar otomatis terbuka dan menampilkan hasil yang relevan.
+
+**2. Logika Komponen (Frontend)**
+
+*   **Flat DataTable:**
+*   **Komponen:** Menggunakan satu komponen `DataTable.vue` yang generik.
+*   **TanStack Table:** Konfigurasi dasar hanya menggunakan `getCoreRowModel()`.
+*   **Rendering:** Setiap baris dirender secara sekuensial tanpa ada indentasi atau tombol expand/collapse.
+*   **Tree DataTable:**
+*   **Komponen:** Menggunakan komponen baru `TreeDataTable.vue` yang dirancang khusus untuk data hierarkis.
+*   **TanStack Table:** Menggunakan fitur tambahan:
+*   `getSubRows: (row) => row._children`: Memberi tahu tabel di mana properti anak berada.
+*   `getExpandedRowModel()`: Mengaktifkan fungsionalitas untuk membuka/menutup baris.
+*   Mengelola *state* baru yaitu `expanded`.
+*   **Rendering:**
+*   **Indentasi:** Setiap baris anak akan memiliki `padding-left` untuk menunjukkan kedalamannya (`row.depth`).
+*   **Tombol Expand/Collapse:** Kolom utama (misalnya `name`) kini memiliki tombol `Chevron` yang hanya muncul jika baris tersebut memiliki anak (`row.getCanExpand()`).
+*   **Paginasi:** Dihilangkan, karena seluruh struktur pohon ditampilkan sekaligus. Footer tabel disederhanakan untuk hanya menampilkan total data dan jumlah baris yang dipilih.
+
+**3. Interaksi Pengguna**
+
+*   **Flat DataTable:** Interaksi utama adalah sorting, filtering, dan paginasi.
+*   **Tree DataTable:** Interaksi utama adalah **membuka dan menutup cabang pohon** untuk menjelajahi data. Ditambah, ada aksi baru seperti `[+ Add Child]` yang spesifik untuk konteks hierarki.
+
+---
+
+### Implementasi Kode Lengkap
+
+Berikut adalah kumpulan semua file kode yang telah dimodifikasi dan dibuat untuk implementasi *Tree DataTable*.
+
+#### 1. Backend: `MemberController.php`
+
+Controller ini diubah untuk membangun struktur data pohon dari data flat di database berdasarkan relasi `parentId`.
+
+```php
+<?php
+
+namespace App\Http\Controllers\Directory;
+
+use App\Http\Controllers\Core\AdminController;
+use App\Models\Directory\Member;
+use Illuminate\Http\Request;
+use Inertia\Inertia;
+use MongoDB\Laravel\Eloquent\Builder as QueryBuilder;
+use Illuminate\Support\Collection;
+
+class MemberController extends AdminController
+{
+    public function __construct()
+    {
+        // --- REQUIRED BY AdminController ---
+        $this->modelClass = Member::class;
+        $this->entity = 'Member';
+        $this->namespace = 'App\Http\Controllers\Directory';
+
+        // --- Controller Specific Settings ---
+        parent::__construct();
+
+        $this->inertia_page_index = 'Directory/Member/Index';
+        $this->inertia_page_create = 'Directory/Member/Create';
+        $this->inertia_page_edit = 'Directory/Member/Edit';
+        $this->inertia_page_view = 'Directory/Member/View';
+        $this->controller_base_route = 'directory.member';
+        $this->controller_index_route = 'directory.member.index';
+        $this->auth_entity = 'all-members';
+        $this->searchable_fields = ['roleName', 'name', 'initial', 'email', 'phone', 'mobile', 'address', 'areaName', 'cluster', 'vendorCode', 'idNumber', 'username', 'jobTitleCode'];
+        $this->sortable_fields = ['createdAt', 'created_at', 'updated_at'];
+        $this->validator_create = [];
+        $this->validator_update = [];
+    }
+
+    /**
+     * Overriding the parent index method to handle tree data structure.
+     */
+    public function index(Request $request) // : \Inertia\Response
+    {
+        $this->breadcrumbs = array_merge(parent::$breadcrumbs ?? [], [
+            ['title' => 'Directory', 'href' => route('directory.dashboard.index')],
+            ['title' => 'Member List', 'href' => route($this->controller_index_route)],
+        ]);
+
+        // Get the base query with filters, search, etc. applied from the parent
+        $query = $this->applyIndexQueryFilters($request);
+
+        // Check if a search term is present
+        $isSearching = $request->filled('search');
+
+        $data = [];
+        $total = 0;
+
+        if ($isSearching) {
+            // If searching, we build a partial tree containing only the search results and their ancestors.
+            $matchingItems = $query->get();
+            $total = $matchingItems->count();
+            if ($total > 0) {
+                $data = $this->buildTreeFromSearchResults($matchingItems);
+            }
+        } else {
+            // If not searching, we build the full tree from top-level nodes.
+            // We ignore pagination for the tree view, so we get all items.
+            $allItems = $this->modelClass::query()->get();
+            $total = $allItems->count();
+            if ($total > 0) {
+                // Building tree from top-level items (parentId is null or not exists)
+                $data = $this->buildTree($allItems, null);
+            }
+        }
+
+        // The data object passed to Inertia is now a simple array, not a paginator.
+        $this->data_object = [
+            'data' => $data,
+            'meta' => [
+                'total' => $total, // Provide total for display
+            ],
+        ];
+
+        // This is a simplified way to render the Inertia page, bypassing parent::index() pagination logic.
+        return Inertia::render($this->inertia_page_index, [
+            'breadcrumbs' => $this->breadcrumbs,
+            'filters' => $request->all('search', 'trashed'),
+            'data_object' => $this->data_object,
+            'data_object_extra' => $this->data_object_extra,
+            'extra_props' => $this->extra_props,
+            'page_title' => 'Manage ' . $this->entity,
+            'entity' => $this->entity,
+            'controller_index_route' => $this->controller_index_route,
+        ]);
+    }
+
+    /**
+     * Recursively builds a tree structure from a flat collection of items.
+     *
+     * @param Collection $elements A collection of all items.
+     * @param string|null $parentId The ID of the parent element to find children for.
+     * @return array The tree structure.
+     */
+    protected function buildTree(Collection &$elements, $parentId = null): array
+    {
+        $branch = [];
+        // Make sure to handle both null and non-existent parentId
+        $children = $elements->filter(function ($item) use ($parentId) {
+            return $item->parentId == $parentId;
+        });
+
+        foreach ($children as $element) {
+            $element->_children = $this->buildTree($elements, $element->id);
+            // Set initial expanded state to false if it has children
+            $element->_expanded = false;
+            $branch[] = $element;
+        }
+
+        return $branch;
+    }
+
+    /**
+     * Builds a filtered tree containing only search results and their ancestors.
+     * All ancestors are marked as expanded to ensure visibility.
+     *
+     * @param Collection $matchingItems The items that matched the search query.
+     * @return array The filtered tree structure.
+     */
+    protected function buildTreeFromSearchResults(Collection $matchingItems): array
+    {
+        // Get all members from DB to easily find parents.
+        $allMembers = $this->modelClass::query()->get()->keyBy('id');
+
+        $requiredItems = new Collection();
+        $processedIds = [];
+
+        foreach ($matchingItems as $item) {
+            $currentItem = $item;
+            // Traverse up to the root
+            while ($currentItem && !isset($processedIds[$currentItem->id])) {
+                $processedIds[$currentItem->id] = true;
+                // Mark all parents as expanded
+                $currentItem->_expanded = true;
+                $requiredItems->put($currentItem->id, $currentItem);
+
+                if ($currentItem->parentId && $allMembers->has($currentItem->parentId)) {
+                    $currentItem = $allMembers->get($currentItem->parentId);
+                } else {
+                    $currentItem = null; // Reached the top
+                }
+            }
+        }
+
+        // Remove the _expanded flag from the actual search results (leaf nodes in this context)
+        foreach($matchingItems as $item) {
+             if ($requiredItems->has($item->id)) {
+                 $requiredItems->get($item->id)->_expanded = false;
+             }
+        }
+
+        return $this->buildTree($requiredItems, null);
+    }
+
+    // ... all other methods like create, store, edit, view, additionalQuery etc. remain unchanged.
+}
+```
+
+---
+
+#### 2. Frontend: `columns.ts`
+
+Definisi kolom dimodifikasi untuk menambahkan tombol expand/collapse pada kolom `name` dan menambahkan event handler untuk tombol `+ Add Child`.
+
+```typescript
+import type { ColumnDef } from '@tanstack/vue-table';
+import type { Member } from './schema';
+import DataTableColumnHeader from '@/components/custom/table/components/DataTableColumnHeader.vue';
+import DataTableRowActions from '../components/DataTableRowActions.vue';
+import { Checkbox } from '@/components/ui/checkbox';
+import { formatBoolean, formatDate, renderImage } from '@/utils/formatters';
+import { h } from 'vue';
+import { Button } from '@/components/ui/button';
+import { ChevronRight, ChevronDown } from 'lucide-vue-next';
+
+export const columns: ColumnDef<Member>[] = [
+    {
+        id: 'select',
+        header: ({ table }) => h(Checkbox, {
+            'modelValue': table.getIsAllPageRowsSelected() || (table.getIsSomePageRowsSelected() && 'indeterminate'),
+            'onUpdate:modelValue': (value: boolean) => table.toggleAllPageRowsSelected(!!value),
+            'aria-label': 'Select all',
+            'class': 'translate-y-0.5'
+        }),
+        cell: ({ row }) => h(Checkbox, {
+            'modelValue': row.getIsSelected(),
+            'onUpdate:modelValue': (value: boolean) => row.toggleSelected(!!value),
+            'aria-label': 'Select row',
+            'class': 'translate-y-0.5'
+        }),
+        size: 50,
+        maxSize: 70,
+        headerStyle: 'width: 50px;max-width: 50px;',
+        enableSorting: false,
+        enableHiding: false
+    },
+    {
+        id: 'actions',
+        header: () => h('div', { class: 'text-center pr-2' }, 'Actions'),
+        cell: ({ row, table }) => h(DataTableRowActions, {
+            row,
+            onAddChild: () => table.options.meta?.onAddChild(row.original)
+        }),
+        enableSorting: false,
+        enableHiding: false,
+        size: 150,
+        maxSize: 150,
+        headerStyle: 'width: 125px;max-width: 125px;',
+    },
+    {
+        accessorKey: 'avatar',
+        header: () => '',
+        cell: ({ row }) => renderImage(row.getValue('avatar'), {}),
+        enableSorting: false,
+        enableColumnFilter: false,
+    },
+    {
+        accessorKey: 'name',
+        header: () => 'Name',
+        cell: ({ row }) => {
+            const canExpand = row.getCanExpand();
+            const isExpanded = row.getIsExpanded();
+
+            return h('div', {
+                class: 'flex items-center',
+                style: { paddingLeft: `${row.depth * 1.5}rem` } // Indentation
+            }, [
+                canExpand
+                    ? h(Button, {
+                        variant: 'ghost',
+                        size: 'sm',
+                        class: 'p-1 h-7 w-7 mr-2',
+                        onClick: row.getToggleExpandedHandler()
+                    }, () => h(isExpanded ? ChevronDown : ChevronRight, { class: 'h-4 w-4' }))
+                    : h('span', { class: 'w-7 mr-2' }), // Placeholder for alignment
+                h('span', { class: 'text-200 text-left' }, String(row.getValue('name') ?? '-')),
+            ]);
+        },
+        enableSorting: false,
+        enableColumnFilter: false,
+    },
+    {
+        accessorKey: 'email',
+        header: () => 'Email',
+        cell: ({ row }) => h('span', { class: 'text-250 text-left' }, String(row.getValue('email') ?? '-')),
+        enableSorting: false,
+        enableColumnFilter: false,
+    },
+    // ... all other columns are the same
+    {
+        accessorKey: 'mobile',
+        header: () => 'Mobile',
+        cell: ({ row }) => h('span', { class: 'text-200 text-left' }, String(row.getValue('mobile') ?? '-')),
+        enableSorting: false,
+        enableColumnFilter: false,
+    },
+    {
+        accessorKey: 'updated_at',
+        header: ({ column }) => h(DataTableColumnHeader, { column, title: 'Updated' }),
+        cell: ({ row }) => formatDate(row.getValue('updated_at'), {}),
+        enableColumnFilter: false,
+    }
+];
+```
+
+---
+
+#### 3. Frontend: `components/DataTableRowActions.vue` (Modifikasi)
+
+Komponen aksi baris ditambahkan prop `onAddChild` untuk menangani event klik pada menu `+ Add Child`.
+
+```vue
+<script setup lang="ts">
+import { MoreHorizontal } from 'lucide-vue-next';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { Button } from '@/components/ui/button';
+
+const props = defineProps({
+  row: {
+    type: Object,
+    required: true,
+  },
+  onAddChild: {
+    type: Function,
+    required: true
+  }
+});
+</script>
+
+<template>
+  <DropdownMenu>
+    <DropdownMenuTrigger as-child>
+      <Button variant="ghost" class="flex h-8 w-8 p-0 data-[state=open]:bg-muted">
+        <MoreHorizontal class="h-4 w-4" />
+        <span class="sr-only">Open menu</span>
+      </Button>
+    </DropdownMenuTrigger>
+    <DropdownMenuContent align="end" class="w-[160px]">
+      <DropdownMenuItem @click="onAddChild">
+        + Add Child
+      </DropdownMenuItem>
+      <!-- Other actions like Edit, Delete, etc. -->
+      <DropdownMenuItem>Edit</DropdownMenuItem>
+      <DropdownMenuItem>Delete</DropdownMenuItem>
+    </DropdownMenuContent>
+  </DropdownMenu>
+</template>
+```
+
+---
+
+#### 4. Frontend: `TreeDataTable.vue` (Komponen Baru)
+
+Ini adalah komponen utama yang baru, yang meng-handle rendering tabel hierarkis.
+
+```vue
+<script setup lang="ts" generic="TData, TValue">
+import type { ColumnDef, ExpandedState } from '@tanstack/vue-table';
+import {
+    FlexRender,
+    getCoreRowModel,
+    getExpandedRowModel,
+    useVueTable,
+} from '@tanstack/vue-table';
+import { ref, watch, computed } from 'vue';
+import { valueUpdater } from '@/lib/utils';
+import {
+    Table,
+    TableBody,
+    TableCell,
+    TableHead,
+    TableHeader,
+    TableRow,
+} from '@/components/ui/table';
+import { Button } from '@/components/ui/button';
+
+const props = defineProps<{
+    columns: ColumnDef<TData, TValue>[];
+    data: TData[];
+    meta: {
+        total?: number;
+    };
+}>();
+
+const emit = defineEmits(['addChild']);
+
+const onAddChild = (row: TData) => {
+    emit('addChild', row);
+};
+
+// Fungsi untuk membangun state expanded awal dari data
+const getInitialExpandedState = (data: any[]): ExpandedState => {
+    const expanded: ExpandedState = {};
+    const traverse = (nodes: any[]) => {
+        nodes.forEach(node => {
+            if (node._expanded && node._children && node._children.length > 0) {
+                expanded[node.id] = true; // Asumsi setiap baris memiliki properti 'id' yang unik
+            }
+            if (node._children) {
+                traverse(node._children);
+            }
+        });
+    };
+    traverse(data);
+    return expanded;
+};
+
+
+const rowSelection = ref({});
+const expanded = ref<ExpandedState>(getInitialExpandedState(props.data));
+
+watch(() => props.data, (newData) => {
+  // Reset state expanded ketika data berubah (misalnya setelah pencarian)
+  expanded.value = getInitialExpandedState(newData);
+}, { deep: true });
+
+
+const table = useVueTable({
+    get data() { return props.data; },
+    get columns() { return props.columns; },
+    getCoreRowModel: getCoreRowModel(),
+    // --- Konfigurasi Tree Data ---
+    getSubRows: (row: any) => row._children,
+    getExpandedRowModel: getExpandedRowModel(),
+    // --- Manajemen State ---
+    state: {
+        get rowSelection() { return rowSelection.value; },
+        get expanded() { return expanded.value; },
+    },
+    onRowSelectionChange: updaterOrValue => valueUpdater(updaterOrValue, rowSelection),
+    onExpandedChange: updaterOrValue => valueUpdater(updaterOrValue, expanded),
+    // --- Meta untuk event handling ---
+    meta: {
+        onAddChild,
+    },
+    enableRowSelection: true,
+});
+
+const totalRecords = computed(() => props.meta?.total ?? 0);
+const selectedRowCount = computed(() => Object.keys(rowSelection.value).length);
+</script>
+
+<template>
+    <div class="space-y-4">
+        <div class="rounded-md border">
+            <Table>
+                <TableHeader>
+                    <TableRow v-for="headerGroup in table.getHeaderGroups()" :key="headerGroup.id">
+                        <TableHead v-for="header in headerGroup.headers" :key="header.id" :style="header.column.columnDef.headerStyle">
+                            <FlexRender v-if="!header.isPlaceholder" :render="header.column.columnDef.header" :props="header.getContext()" />
+                        </TableHead>
+                    </TableRow>
+                </TableHeader>
+                <TableBody>
+                    <template v-if="table.getRowModel().rows?.length">
+                        <TableRow v-for="row in table.getRowModel().rows" :key="row.id" :data-state="row.getIsSelected() && 'selected'">
+                            <TableCell v-for="cell in row.getVisibleCells()" :key="cell.id">
+                                <FlexRender :render="cell.column.columnDef.cell" :props="cell.getContext()" />
+                            </TableCell>
+                        </TableRow>
+                    </template>
+                    <TableRow v-else>
+                        <TableCell :colspan="columns.length" class="h-24 text-center">
+                            No results.
+                        </TableCell>
+                    </TableRow>
+                </TableBody>
+            </Table>
+        </div>
+        <!-- Footer Sederhana untuk Tree View -->
+        <div class="flex items-center justify-between px-2">
+            <div class="flex-1 text-sm text-muted-foreground">
+                {{ selectedRowCount }} of {{ totalRecords }} row(s) selected.
+            </div>
+            <div class="flex items-center space-x-2">
+                <p class="text-sm font-medium">
+                    Total Records: {{ totalRecords }}
+                </p>
+            </div>
+        </div>
+    </div>
+</template>
+```
+
+---
+
+#### 5. Frontend: `Index.vue` (Halaman Pengguna)
+
+Halaman ini sekarang menggunakan komponen `TreeDataTable.vue` dan menangani event `@addChild`.
+
+```vue
+<script setup>
+import { Head, Link, router } from '@inertiajs/vue3';
+import AdminLayout from '@/layouts/AdminLayout.vue';
+import { Button } from '@/components/ui/button';
+import TreeDataTable from './TreeDataTable.vue'; // <-- Menggunakan TreeDataTable
+import { columns } from './columns';
+
+defineOptions({ layout: AdminLayout });
+
+const props = defineProps({
+    data_object: Object,
+    // ... props lainnya
+});
+
+// Objek data dari controller tidak lagi dipaginasi
+const members = props.data_object.data;
+const meta = props.data_object.meta;
+
+// Handler untuk event addChild
+const handleAddChild = (parentMember) => {
+    console.log('Add child for member:', parentMember.name, parentMember.id);
+    // Di sini Anda bisa menavigasi ke halaman 'create' dengan membawa ID parent
+    // Contoh menggunakan router Inertia:
+    router.get(route('directory.member.create', { parentId: parentMember.id }));
+};
+</script>
+
+<template>
+    <Head title="Member" />
+    <div class="p-4 md:p-8">
+        <div class="flex items-center justify-between mb-6">
+            <h1 class="text-3xl font-bold">Member</h1>
+            <Link :href="route('directory.member.create')">
+                <Button>New Member</Button>
+            </Link>
+        </div>
+
+        <div class="space-y-4">
+            <TreeDataTable
+                :data="members"
+                :columns="columns"
+                :meta="meta"
+                @add-child="handleAddChild"
+            />
+        </div>
+    </div>
+</template>
+```
+
+Dengan implementasi ini, aplikasi Anda kini memiliki tabel yang kuat untuk menampilkan dan berinteraksi dengan data hierarkis secara efisien.

@@ -1,0 +1,278 @@
+---
+title: "MongoDb UTC Date & Timezone Handling"
+description: "Handling date, time and timezone with MongoDb UTC"
+---
+
+
+### **English Version**
+
+## Developer Guide: Handling Dates and Timezones
+
+This document outlines the standard conventions for handling `date` and `datetime` attributes in our Laravel application with a MongoDB database. Adhering to these conventions is crucial for data integrity, consistency, and scalability.
+
+### Core Philosophy: Store as UTC, Work with Local Time
+
+Our system is built on a single, industry-standard principle:
+
+1.  **Storage Layer:** All date and time information is stored in the database as a native BSON `Date` object, which is always in **UTC**. This provides an unambiguous, universal source of truth.
+2.  **Application Layer:** All interaction with date objects within the application (in controllers, views, etc.) is done using `Carbon` objects that are automatically converted to our application's default timezone (defined in `config/app.timezone`, e.g., `Asia/Jakarta`).
+
+This is achieved through a set of custom reusable tools.
+
+### The Core Components
+
+1.  **`MongoUtcDateCast` & `MongoUtcDateTimeCast`:** These are "smart" custom casts.
+*   **On `set` (Saving):** They take a local time string, convert it to a UTC timestamp, and ensure it's saved as a native BSON `Date`. `MongoUtcDateCast` also applies `startOfDay()`.
+*   **On `get` (Retrieving):** They take the UTC BSON `Date` from the database and automatically convert it into a `Carbon` object in the application's local timezone. **This makes the entire UTC conversion process invisible to the rest of the application.**
+
+2.  **`FannableAttributes` Trait:** This is a powerful helper for creating derivative, read-only helper fields. Its primary roles are:
+*   To automatically create a companion `<fieldname>Tz` field (e.g., `ExpDateTz`) containing the timezone string (`Asia/Jakarta` by default).
+*   To generate additional formatted string versions of a date for easy display or API responses (e.g., `ExpDateStr`).
+
+### How to Use It (The Conventions)
+
+#### Step 1: Model Setup
+
+To make any model's date fields "smart", follow these steps:
+
+1.  **Use the Trait:** Add `use FannableAttributes;` to your model.
+2.  **Configure Casts:** In the `$casts` array, map your `date` and `datetime` fields to the appropriate custom cast.
+3.  **(Optional) Configure Fan-Out:** In the `$fanOutAttributes` array, define any additional string formats you need. The `Tz` field will be created automatically for any field in this array.
+4.  **(Optional) API Timezone Override:** Add `'tz'` to your model's `$fillable` array to allow API calls to specify a timezone.
+
+**Example: `Document.php`**
+```php
+<?php
+namespace App\Models;
+
+use App\Casts\MongoUtcDateCast;
+use App\Casts\MongoUtcDateTimeCast;
+use App\Models\Concerns\FannableAttributes;
+use MongoDB\Laravel\Eloquent\Model;
+
+class Document extends Model
+{
+    use FannableAttributes;
+
+    protected $fillable = ['name', 'ExpDate', 'published_at', 'tz'];
+
+    protected $casts = [
+        'ExpDate'      => MongoUtcDateCast::class,
+        'updated_at'   => MongoUtcDateTimeCast::class,
+    ];
+
+    protected $fanOutAttributes = [
+        'ExpDate' => [
+            ['target' => 'ExpDateStr', 'format' => 'Y-m-d'],
+        ],
+        'updated_at' => [
+            ['target' => 'updatedAtIso', 'format' => 'c'],
+        ],
+    ];
+}
+```
+
+#### Step 2: Saving Data
+
+*   **From Web Forms (Default Timezone):** Your controller code is simple. The system handles the rest.
+```php
+$doc = new Document();
+$doc->ExpDate = '2025-10-31';
+$doc->save();
+    ```
+
+*   **From an API (Timezone Override):** If an incoming request includes a `tz` field, the system will use it to interpret the date string.
+```php
+// JSON Payload: { "ExpDate": "2025-10-31", "tz": "Europe/London" }
+Document::create($request->validated());
+    ```
+
+#### Step 3: Displaying Data
+
+Because our "smart" casts automatically convert the date to the local timezone on retrieval, your view/Blade code is incredibly simple. **You do not need to call `->setTimezone()` in your views.**
+
+```blade
+{{-- This works perfectly and shows the correct local date --}}
+<input type="date" name="ExpDate" value="{{ $document->ExpDate?->format('Y-m-d') }}">
+
+{{-- Displaying a datetime --}}
+<span>Last Updated: {{ $document->updated_at?->format('F j, Y, g:i a') }}</span>
+```
+
+### Querying Data (Considerations)
+
+This is the most critical part to remember to avoid bugs.
+
+**The Golden Rule:** Always build your query boundaries using **local time `Carbon` objects**. The database driver will automatically convert them to UTC for the query.
+
+*   **Querying a `datetime` Range:** Find documents updated between 3 PM and 4 PM local time.
+```php
+use Carbon\Carbon;
+$start = Carbon::parse('2025-10-27 15:00:00'); // Interpreted in Asia/Jakarta
+$end   = Carbon::parse('2025-10-27 16:00:00'); // Interpreted in Asia/Jakarta
+$results = Document::whereBetween('updated_at', [$start, $end])->get();
+    ```
+
+*   **Querying a `date`-only Field:** Find documents where `ExpDate` is October 31st, 2025 (local time).
+```php
+use Carbon\Carbon;
+$day = Carbon::parse('2025-10-31');
+$startOfDay = $day->copy()->startOfDay(); // 00:00:00 in Asia/Jakarta
+$endOfDay   = $day->copy()->endOfDay();   // 23:59:59 in Asia/Jakarta
+$results = Document::whereBetween('ExpDate', [$startOfDay, $endOfDay])->get();
+    ```
+
+### Caveats and Best Practices
+
+*   **Database Viewer:** Be aware that tools like Studio 3T, in their default JSON view, may display BSON Dates as strings. This can be misleading. Use the "Tree View" or "Table View" to see the correct `ISODate` type.
+*   **The `Tz` Field:** The automatically generated `<fieldname>Tz` field is for context and display logic. **Do not** attempt to query against it for date ranges. Always query against the primary, indexed BSON `Date` field (e.g., `ExpDate`).
+*   **Consistency:** Use these casts and traits for **all** date and datetime fields across the application to ensure predictable, bug-free behavior.
+
+### Summary of Resulting Data
+
+A correctly saved document in MongoDB will look like this, providing the best of all worlds:
+```json
+{
+  "ExpDate": ISODate("2025-10-30T17:00:00.000Z"), // Primary, queryable BSON Date in UTC
+  "ExpDateTz": "Asia/Jakarta",                   // Context: The original timezone
+  "ExpDateStr": "2025-10-31"                     // Helper: A simple string for display
+}
+```
+
+---
+
+### **Versi Bahasa Indonesia**
+
+## Panduan Developer: Menangani Tanggal dan Zona Waktu
+
+Dokumen ini menjelaskan konvensi standar untuk menangani atribut `date` (tanggal) dan `datetime` (tanggal-waktu) pada aplikasi Laravel kita dengan database MongoDB. Mengikuti konvensi ini sangat penting untuk integritas, konsistensi, dan skalabilitas data.
+
+### Filosofi Inti: Simpan sebagai UTC, Gunakan Waktu Lokal
+
+Sistem kita dibangun di atas satu prinsip standar industri:
+
+1.  **Layer Penyimpanan (Database):** Semua informasi tanggal dan waktu disimpan di database sebagai objek BSON `Date` bawaan MongoDB, yang **selalu dalam format UTC**. Ini memberikan sumber kebenaran tunggal yang universal dan tidak ambigu.
+2.  **Layer Aplikasi:** Semua interaksi dengan objek tanggal di dalam aplikasi (di controller, view, dll.) dilakukan menggunakan objek `Carbon` yang secara otomatis dikonversi ke zona waktu default aplikasi kita (didefinisikan di `config/app.timezone`, contoh: `Asia/Jakarta`).
+
+Hal ini dicapai melalui serangkaian *tools* kustom yang dapat digunakan kembali.
+
+### Komponen Inti
+
+1.  **`MongoUtcDateCast` & `MongoUtcDateTimeCast`:** Ini adalah *custom cast* "pintar".
+*   **Saat `set` (Menyimpan):** Mengambil string waktu lokal, mengubahnya menjadi *timestamp* UTC, dan memastikan data disimpan sebagai objek BSON `Date`. `MongoUtcDateCast` juga menerapkan `startOfDay()`.
+*   **Saat `get` (Mengambil):** Mengambil objek BSON `Date` UTC dari database dan secara otomatis mengubahnya menjadi objek `Carbon` dalam zona waktu lokal aplikasi. **Ini membuat seluruh proses konversi UTC tidak terlihat oleh bagian aplikasi lainnya.**
+
+2.  **`FannableAttributes` Trait:** Ini adalah *helper* yang kuat untuk membuat *field* turunan (hanya-baca) secara otomatis. Peran utamanya adalah:
+*   Secara otomatis membuat *field* pendamping `<fieldname>Tz` (contoh: `ExpDateTz`) yang berisi string zona waktu (`Asia/Jakarta` secara default).
+*   Membuat versi string tambahan dari tanggal untuk kemudahan tampilan atau respons API (contoh: `ExpDateStr`).
+
+### Cara Penggunaan (Konvensi)
+
+#### Langkah 1: Pengaturan Model
+
+Untuk membuat *field* tanggal pada model menjadi "pintar", ikuti langkah-langkah ini:
+
+1.  **Gunakan Trait:** Tambahkan `use FannableAttributes;` ke model Anda.
+2.  **Konfigurasi Casts:** Di dalam array `$casts`, petakan *field* `date` dan `datetime` Anda ke *cast* kustom yang sesuai.
+3.  **(Opsional) Konfigurasi Fan-Out:** Di dalam array `$fanOutAttributes`, definisikan format string tambahan yang Anda butuhkan. *Field* `Tz` akan dibuat secara otomatis untuk setiap *field* yang ada di dalam array ini.
+4.  **(Opsional) Override Zona Waktu API:** Tambahkan `'tz'` ke array `$fillable` pada model Anda untuk mengizinkan panggilan API menentukan zona waktu.
+
+**Contoh: `Document.php`**
+```php
+<?php
+namespace App\Models;
+
+use App\Casts\MongoUtcDateCast;
+use App\Casts\MongoUtcDateTimeCast;
+use App\Models\Concerns\FannableAttributes;
+use MongoDB\Laravel\Eloquent\Model;
+
+class Document extends Model
+{
+    use FannableAttributes;
+
+    protected $fillable = ['name', 'ExpDate', 'published_at', 'tz'];
+
+    protected $casts = [
+        'ExpDate'      => MongoUtcDateCast::class,
+        'updated_at'   => MongoUtcDateTimeCast::class,
+    ];
+
+    protected $fanOutAttributes = [
+        'ExpDate' => [
+            ['target' => 'ExpDateStr', 'format' => 'Y-m-d'],
+        ],
+        'updated_at' => [
+            ['target' => 'updatedAtIso', 'format' => 'c'],
+        ],
+    ];
+}
+```
+
+#### Langkah 2: Menyimpan Data
+
+*   **Dari Form Web (Zona Waktu Default):** Kode controller Anda tetap sederhana. Sistem akan menangani sisanya.
+```php
+$doc = new Document();
+$doc->ExpDate = '2025-10-31';
+$doc->save();
+    ```
+
+*   **Dari API (Override Zona Waktu):** Jika permintaan yang masuk menyertakan *field* `tz`, sistem akan menggunakannya untuk menginterpretasikan string tanggal.
+```php
+// JSON Payload: { "ExpDate": "2025-10-31", "tz": "Europe/London" }
+Document::create($request->validated());
+    ```
+
+#### Langkah 3: Menampilkan Data
+
+Karena *cast* "pintar" kita secara otomatis mengonversi tanggal ke zona waktu lokal saat pengambilan data, kode view/Blade Anda menjadi sangat sederhana. **Anda tidak perlu memanggil `->setTimezone()` di dalam view.**
+
+```blade
+{{-- Ini berfungsi sempurna dan menampilkan tanggal lokal yang benar --}}
+<input type="date" name="ExpDate" value="{{ $document->ExpDate?->format('Y-m-d') }}">
+
+{{-- Menampilkan datetime --}}
+<span>Terakhir Diperbarui: {{ $document->updated_at?->format('d F Y, H:i') }}</span>
+```
+
+### Melakukan Query (Pertimbangan)
+
+Ini adalah bagian paling penting untuk diingat agar terhindar dari *bug*.
+
+**Aturan Emas:** Selalu bangun batasan *query* Anda menggunakan **objek `Carbon` waktu lokal**. *Driver* database akan secara otomatis mengubahnya ke UTC untuk *query*.
+
+*   **Query Rentang `datetime`:** Cari dokumen yang diperbarui antara jam 3 sore dan 4 sore waktu lokal.
+```php
+use Carbon\Carbon;
+$start = Carbon::parse('2025-10-27 15:00:00'); // Diinterpretasikan sebagai waktu Asia/Jakarta
+$end   = Carbon::parse('2025-10-27 16:00:00'); // Diinterpretasikan sebagai waktu Asia/Jakarta
+$results = Document::whereBetween('updated_at', [$start, $end])->get();
+    ```
+
+*   **Query `date`-only (hanya tanggal):** Cari dokumen di mana `ExpDate` adalah 31 Oktober 2025 (waktu lokal).
+```php
+use Carbon\Carbon;
+$day = Carbon::parse('2025-10-31');
+$startOfDay = $day->copy()->startOfDay(); // 00:00:00 di Asia/Jakarta
+$endOfDay   = $day->copy()->endOfDay();   // 23:59:59 di Asia/Jakarta
+$results = Document::whereBetween('ExpDate', [$startOfDay, $endOfDay])->get();
+    ```
+
+### Peringatan dan Praktik Terbaik (Caveats)
+
+*   **Tampilan Database (Viewer):** Hati-hati, *tools* seperti Studio 3T pada tampilan JSON defaultnya mungkin menampilkan BSON `Date` sebagai string. Ini bisa menyesatkan. Gunakan "Tree View" atau "Table View" untuk melihat tipe `ISODate` yang benar.
+*   **Field `Tz`:** *Field* `<fieldname>Tz` yang dibuat otomatis adalah untuk konteks dan logika tampilan. **Jangan** mencoba melakukan *query* rentang tanggal pada *field* ini. Selalu lakukan *query* pada *field* BSON `Date` utama yang terindeks (contoh: `ExpDate`).
+*   **Konsistensi:** Gunakan *cast* dan *trait* ini untuk **semua** *field* tanggal dan datetime di seluruh aplikasi untuk memastikan perilaku yang dapat diprediksi dan bebas *bug*.
+
+### Ringkasan Hasil Data di Database
+
+Dokumen yang disimpan dengan benar di MongoDB akan terlihat seperti ini, memberikan yang terbaik dari semua aspek:
+```json
+{
+  "ExpDate": ISODate("2025-10-30T17:00:00.000Z"), // BSON Date utama dalam UTC, dapat di-query
+  "ExpDateTz": "Asia/Jakarta",                   // Konteks: Zona waktu asli
+  "ExpDateStr": "2025-10-31"                     // Helper: String sederhana untuk tampilan
+}
+```
+

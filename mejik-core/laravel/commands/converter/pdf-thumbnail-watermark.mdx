@@ -1,0 +1,349 @@
+---
+title: "PDF Thumbnail & Watermark Commands"
+description: "Extracting a page of pdf file to image for thumbnail & Watermarking pdf document"
+---
+
+## PDF Processing Artisan Commands Documentation
+
+This document outlines the usage of custom Artisan commands for generating PDF thumbnails and applying stamps or
+watermarks to PDF documents.
+
+### System Prerequisites
+
+Before using any of these commands, ensure the following command-line utilities are installed on your server or local
+development machine.
+
+| Utility         | Purpose                                      | macOS Installation         | Ubuntu/Debian Installation           |
+|:----------------|:---------------------------------------------|:---------------------------|:-------------------------------------|
+| **Ghostscript** | Core PDF rendering engine                    | `brew install ghostscript` | `sudo apt-get install ghostscript`   |
+| **Poppler**     | Provides `pdfinfo` for fast metadata reading | `brew install poppler`     | `sudo apt-get install poppler-utils` |
+| **pdftk**       | The PDF Toolkit for robust stamping          | `brew install pdftk-java`  | `sudo apt-get install pdftk`         |
+
+---
+
+## 1. PDF Thumbnail Generation
+
+This feature is used to create an image preview from a specific page of a PDF file.
+
+### Core Command: `pdf:thumbnail`
+
+This is the low-level worker command that performs the conversion of a single PDF to a thumbnail.
+
+**Usage:**
+
+```bash
+php artisan pdf:thumbnail [options]
+```
+
+**Options:**
+| Option | Description |
+| :--- | :--- |
+| `--in=` | The path or URL to the input `.pdf` file. **(Required)** |
+| `--out=` | The path for the output thumbnail image (e.g., `public/thumbnails/my-doc.jpg`). **(Required)** |
+| `--page=` | The page number to create a thumbnail from. (Default: `1`) |
+| `--width=` | The width of the final thumbnail in pixels. Height is scaled automatically. (Default: `400`) |
+
+**Example:**
+
+```bash
+# Create a 600px wide thumbnail from the 2nd page of a local PDF
+php artisan pdf:thumbnail \
+  --in="storage/app/documents/report.pdf" \
+  --out="public/thumbnails/report_preview.jpg" \
+  --page=2 \
+  --width=600
+```
+
+### Batch Command: `documents:generate-thumbnails`
+
+This is the high-level orchestrator command that finds documents in the database that are missing a thumbnail and
+generates one for each.
+
+**Usage:**
+
+```bash
+php artisan documents:generate-thumbnails [options]
+```
+
+**Options:**
+| Option | Description |
+| :--- | :--- |
+| `--id=` | Process only a single document by its specific ID (or `_id` for MongoDB). |
+| `--force` | Force regeneration of thumbnails even for documents that already have one. |
+| `--unprocessed-only` | Process only documents where the `ThumbnailUrl` field is `null` or empty. (This is the default
+behavior if not using `--force`). |
+| `--width=` | The width of the generated thumbnails in pixels. (Default: `400`) |
+
+**Examples:**
+
+```bash
+# Process all documents that need a thumbnail
+php artisan documents:generate-thumbnails --unprocessed-only
+
+# Generate a thumbnail only for the document with a specific ID
+php artisan documents:generate-thumbnails --id=5f11895c7dfdb46efb0d3022
+
+# Forcefully regenerate all thumbnails in the system as 300px wide images
+php artisan documents:generate-thumbnails --force --width=300
+```
+
+---
+
+## 2. PDF Stamping & Watermarking
+
+This feature is used to apply QR code stamps and/or text watermarks to PDF documents. The final result is saved as a new
+file, and its URL is stored in the `StampedFileUrl` field of the document model, leaving the original file untouched.
+
+### Core Command: `pdf:stamp`
+
+This is the low-level worker command that performs the stamping/watermarking operation on a single PDF.
+
+**Usage:**
+
+```bash
+php artisan pdf:stamp [options]
+```
+
+**Options:**
+
+| Group         | Option                   | Description                                                                                   |
+|:--------------|:-------------------------|:----------------------------------------------------------------------------------------------|
+| **I/O**       | `--in=`                  | Path or URL to the input `.pdf` file. **(Required)**                                          |
+|               | `--out=`                 | Path for the output stamped `.pdf` file. **(Required)**                                       |
+|               | `--disk=`                | (Optional) The Laravel filesystem disk to save the output to (e.g., `minio`, `s3`).           |
+| **QR Stamp**  | `--stamp-qr-string=`     | The text or data to encode in the QR code.                                                    |
+|               | `--stamp-pages=`         | Pages to apply the stamp to (e.g., `first`, `last`, `all`, `1,3,5`). (Default: `all`)         |
+|               | `--stamp-position=`      | Position: `top-left`, `top-right`, `bottom-left`, `bottom-right`. (Default: `top-right`)      |
+|               | `--stamp-size=`          | The width and height of the QR code in millimeters. (Default: `20`)                           |
+|               | `--stamp-offset-x=`      | Horizontal margin from the page edge in mm. (Default: `10`)                                   |
+|               | `--stamp-offset-y=`      | Vertical margin from the page edge in mm. (Default: `10`)                                     |
+| **Watermark** | `--watermark-text=`      | The text to use for the watermark.                                                            |
+|               | `--watermark-pages=`     | Pages to apply the watermark to. Same format as `--stamp-pages`. (Default: `all`)             |
+|               | `--watermark-position=`  | Position of the watermark. (Default: `center`)                                                |
+|               | `--watermark-rotation=`  | Rotation angle in degrees. (Default: `45`)                                                    |
+|               | `--watermark-color=`     | RGB color as a comma-separated string (e.g., `"255,0,0"` for red). (Default: `"128,128,128"`) |
+|               | `--watermark-font-size=` | Font size in points. (Default: `48`)                                                          |
+|               | `--watermark-opacity=`   | Opacity from `0.0` (transparent) to `1.0` (opaque). (Default: `0.3`)                          |
+
+**Important Note:** This command requires a font file located at `public/fonts/Calibri/Calibri.ttf` for rendering
+watermarks.
+
+### Batch Command: `documents:generate-stamp`
+
+This is the high-level orchestrator command that processes documents from the database, applies the specified
+stamps/watermarks, and logs the operation.
+
+**Usage:**
+
+```bash
+php artisan documents:generate-stamp [options]
+```
+
+**Key Features:**
+
+* **Pass-Through Options:** To use the detailed options from `pdf:stamp` (like `--stamp-position`
+or `--watermark-color`), you **must** use the `-O` flag.
+* **Placeholders:** The `--stamp-qr-string` and `--watermark-text` options support dynamic placeholders that are
+replaced with data from the document being processed. Supported placeholders: `{id}` (or `_id`) and `{FCallCode}`.
+* **Logging:** Every stamping operation (success or failure) is recorded in the `stamp_logs` collection in MongoDB.
+* **Debugging:** Run the command with the `-v` flag to see the real-time, detailed output from the `pdf:stamp` worker
+command.
+
+**Options:**
+| Option | Description |
+| :--- | :--- |
+| `--id=` | Process only a single document by its specific ID. |
+| `--force` | Process documents even if they have already been stamped (i.e., `stamped_at` is not null). |
+| `--unprocessed-only` | Process only documents where `stamped_at` is `null`. (Default behavior) |
+| `--stamp-qr-string=` | The string for the QR code, supporting placeholders. |
+| `--watermark-text=` | The string for the watermark, supporting placeholders. |
+| `-O=` | Pass a detailed option to the `pdf:stamp` command. (e.g., `-O="stamp-pages=first"`) |
+
+**Examples:**
+
+```bash
+# Apply a QR code with the document's FCallCode to the first page of all unprocessed documents
+php artisan documents:generate-stamp --unprocessed-only \
+  --stamp-qr-string="{FCallCode}" \
+  -O="stamp-pages=first"
+
+# Apply a red, centered "CONFIDENTIAL" watermark to all pages of a single document
+php artisan documents:generate-stamp --id=5f11895c7dfdb46efb0d3022 \
+  --watermark-text="CONFIDENTIAL" \
+  -O="watermark-color=255,0,0" \
+  -O="watermark-position=center" \
+  -O="watermark-pages=all"
+
+# Combine a stamp and a watermark in a single run with verbose output for debugging
+php artisan documents:generate-stamp -v --id=5f11895c7dfdb46efb0d3022 \
+  --stamp-qr-string="ID: {id}" \
+  --watermark-text="DRAFT" \
+  -O="stamp-position=bottom-left" \
+  -O="watermark-rotation=30" \
+  -O="watermark-opacity=0.1"
+```
+
+***
+
+
+## Dokumentasi Perintah Artisan untuk Pemrosesan PDF
+
+Dokumen ini menjelaskan penggunaan perintah Artisan kustom untuk menghasilkan thumbnail PDF dan menerapkan stempel atau tanda air (watermark) pada dokumen PDF.
+
+### Prasyarat Sistem
+
+Sebelum menggunakan perintah-perintah ini, pastikan utilitas baris perintah berikut telah terinstal di server atau mesin pengembangan lokal Anda.
+
+| Utilitas | Kegunaan | Instalasi macOS | Instalasi Ubuntu/Debian |
+| :--- | :--- | :--- | :--- |
+| **Ghostscript** | Mesin inti untuk rendering PDF | `brew install ghostscript` | `sudo apt-get install ghostscript` |
+| **Poppler** | Menyediakan `pdfinfo` untuk membaca metadata | `brew install poppler` | `sudo apt-get install poppler-utils` |
+| **pdftk** | PDF Toolkit untuk proses stempel yang andal | `brew install pdftk-java` | `sudo apt-get install pdftk` |
+
+---
+
+## 1. Pembuatan Thumbnail PDF
+
+Fitur ini digunakan untuk membuat pratinjau gambar dari halaman tertentu sebuah file PDF.
+
+### Perintah Inti: `pdf:thumbnail`
+
+Ini adalah perintah level rendah yang melakukan konversi satu PDF menjadi sebuah thumbnail.
+
+**Penggunaan:**
+```bash
+php artisan pdf:thumbnail [opsi]
+```
+
+**Opsi:**
+| Opsi | Deskripsi |
+| :--- | :--- |
+| `--in=` | Path atau URL ke file `.pdf` input. **(Wajib)** |
+| `--out=` | Path untuk menyimpan gambar thumbnail (misalnya, `public/thumbnails/my-doc.jpg`). **(Wajib)** |
+| `--page=` | Nomor halaman yang akan dijadikan thumbnail. (Default: `1`) |
+| `--width=` | Lebar thumbnail dalam piksel. Tinggi akan disesuaikan secara otomatis. (Default: `400`) |
+
+**Contoh:**
+```bash
+# Membuat thumbnail selebar 600px dari halaman ke-2 sebuah PDF lokal
+php artisan pdf:thumbnail \
+--in="storage/app/documents/laporan.pdf" \
+--out="public/thumbnails/pratinjau_laporan.jpg" \
+--page=2 \
+--width=600
+```
+
+### Perintah Massal: `documents:generate-thumbnails`
+
+Ini adalah perintah level tinggi yang mencari dokumen di database yang belum memiliki thumbnail dan membuatnya untuk setiap dokumen.
+
+**Penggunaan:**
+```bash
+php artisan documents:generate-thumbnails [opsi]
+```
+
+**Opsi:**
+| Opsi | Deskripsi |
+| :--- | :--- |
+| `--id=` | Hanya memproses satu dokumen berdasarkan ID spesifiknya (`_id` untuk MongoDB). |
+| `--force` | Memaksa pembuatan ulang thumbnail bahkan untuk dokumen yang sudah memilikinya. |
+| `--unprocessed-only` | Hanya memproses dokumen di mana field `ThumbnailUrl` bernilai `null` atau kosong. (Ini adalah perilaku default jika tidak menggunakan `--force`). |
+| `--width=` | Lebar thumbnail yang dihasilkan dalam piksel. (Default: `400`) |
+
+**Contoh:**
+```bash
+# Memproses semua dokumen yang membutuhkan thumbnail
+php artisan documents:generate-thumbnails --unprocessed-only
+
+# Membuat thumbnail hanya untuk dokumen dengan ID tertentu
+php artisan documents:generate-thumbnails --id=5f11895c7dfdb46efb0d3022
+
+# Memaksa pembuatan ulang semua thumbnail dengan lebar 300px
+php artisan documents:generate-thumbnails --force --width=300
+```
+
+---
+
+## 2. Stempel & Tanda Air (Watermark) PDF
+
+Fitur ini digunakan untuk menerapkan stempel kode QR dan/atau tanda air teks pada dokumen PDF. Hasil akhirnya disimpan sebagai file baru, dan URL-nya disimpan di field `StampedFileUrl` pada model dokumen, tanpa mengubah file asli.
+
+### Perintah Inti: `pdf:stamp`
+
+Ini adalah perintah level rendah yang melakukan operasi stempel/watermark pada satu PDF.
+
+**Penggunaan:**
+```bash
+php artisan pdf:stamp [opsi]
+```
+
+**Opsi:**
+
+| Grup | Opsi | Deskripsi |
+| :--- | :--- | :--- |
+| **I/O** | `--in=` | Path atau URL ke file `.pdf` input. **(Wajib)** |
+| | `--out=` | Path untuk file `.pdf` hasil stempel. **(Wajib)** |
+| | `--disk=` | (Opsional) Laravel filesystem disk untuk menyimpan output (misalnya, `minio`, `s3`). |
+| **Stempel QR** | `--stamp-qr-string=` | Teks atau data untuk di-encode dalam kode QR. |
+| | `--stamp-pages=` | Halaman untuk diberi stempel (misalnya, `first`, `last`, `all`, `1,3,5`). (Default: `all`) |
+| | `--stamp-position=`| Posisi: `top-left`, `top-right`, `bottom-left`, `bottom-right`. (Default: `top-right`) |
+| | `--stamp-size=` | Lebar dan tinggi kode QR dalam milimeter. (Default: `20`) |
+| | `--stamp-offset-x=`| Jarak horizontal dari tepi halaman dalam mm. (Default: `10`) |
+| | `--stamp-offset-y=`| Jarak vertikal dari tepi halaman dalam mm. (Default: `10`) |
+| **Watermark** | `--watermark-text=` | Teks yang akan digunakan sebagai tanda air. |
+| | `--watermark-pages=`| Halaman untuk diberi tanda air. Formatnya sama seperti `--stamp-pages`. (Default: `all`) |
+| | `--watermark-position=`| Posisi tanda air. (Default: `center`) |
+| | `--watermark-rotation=`| Sudut rotasi dalam derajat. (Default: `45`) |
+| | `--watermark-color=`| Warna RGB dalam format string terpisah koma (misalnya, `"255,0,0"` untuk merah). (Default: `"128,128,128"`) |
+| | `--watermark-font-size=`| Ukuran font dalam satuan point. (Default: `48`) |
+| | `--watermark-opacity=`| Opasitas dari `0.0` (transparan) hingga `1.0` (solid). (Default: `0.3`) |
+
+**Catatan Penting:** Perintah ini memerlukan file font di `public/fonts/Calibri/Calibri.ttf` untuk me-render watermark.
+
+### Perintah Massal: `documents:generate-stamp`
+
+Ini adalah perintah level tinggi yang memproses dokumen dari database, menerapkan stempel/watermark yang ditentukan, dan mencatat setiap operasi.
+
+**Penggunaan:**
+```bash
+php artisan documents:generate-stamp [opsi]
+```
+
+**Fitur Utama:**
+*   **Opsi Terusan:** Untuk menggunakan opsi-opsi detail dari `pdf:stamp` (seperti `--stamp-position` atau `--watermark-color`), Anda **harus** menggunakan flag `-O`.
+*   **Placeholder:** Opsi `--stamp-qr-string` dan `--watermark-text` mendukung placeholder dinamis yang akan diganti dengan data dari dokumen yang sedang diproses. Placeholder yang didukung: `{id}` (atau `_id`) dan `{FCallCode}`.
+*   **Pencatatan (Logging):** Setiap operasi (baik sukses maupun gagal) dicatat dalam koleksi `stamp_logs` di MongoDB.
+*   **Debugging:** Jalankan perintah dengan flag `-v` untuk melihat output detail secara real-time dari perintah `pdf:stamp`.
+
+**Opsi:**
+| Opsi | Deskripsi |
+| :--- | :--- |
+| `--id=` | Hanya memproses satu dokumen berdasarkan ID spesifiknya. |
+| `--force` | Memproses dokumen meskipun sudah pernah diberi stempel (`stamped_at` tidak null). |
+| `--unprocessed-only` | Hanya memproses dokumen di mana `stamped_at` bernilai `null`. (Perilaku default) |
+| `--stamp-qr-string=` | String untuk kode QR, mendukung placeholder. |
+| `--watermark-text=` | String untuk watermark, mendukung placeholder. |
+| `-O=` | Meneruskan opsi detail ke perintah `pdf:stamp`. (misalnya, `-O="stamp-pages=first"`) |
+
+**Contoh:**
+```bash
+# Memberi stempel QR dengan FCallCode dokumen di halaman pertama untuk semua dokumen yang belum diproses
+php artisan documents:generate-stamp --unprocessed-only \
+--stamp-qr-string="{FCallCode}" \
+-O="stamp-pages=first"
+
+# Memberi watermark "CONFIDENTIAL" berwarna merah di tengah setiap halaman untuk satu dokumen
+php artisan documents:generate-stamp --id=5f11895c7dfdb46efb0d3022 \
+--watermark-text="CONFIDENTIAL" \
+-O="watermark-color=255,0,0" \
+-O="watermark-position=center" \
+-O="watermark-pages=all"
+
+# Menggabungkan stempel dan watermark dalam satu eksekusi dengan output verbose untuk debugging
+php artisan documents:generate-stamp -v --id=5f11895c7dfdb46efb0d3022 \
+--stamp-qr-string="ID: {id}" \
+--watermark-text="DRAFT" \
+-O="stamp-position=bottom-left" \
+-O="watermark-rotation=30" \
+-O="watermark-opacity=0.1"
+```

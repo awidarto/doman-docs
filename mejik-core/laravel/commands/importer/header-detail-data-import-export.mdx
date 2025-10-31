@@ -1,0 +1,583 @@
+---
+title: "XLSX Import Export for Header Detail Data"
+description: "From & To XLSX data template with header detail structure into relational database"
+---
+
+### 1. Prerequisites
+
+Before using the commands, ensure your Laravel project is set up correctly.
+
+#### **1.1. Required Packages**
+Install the necessary packages via Composer:
+```bash
+# For handling Excel and CSV files
+composer require maatwebsite/excel
+
+# (Optional) For MongoDB functionality (--embed)
+composer require jenssegers/laravel-mongodb
+```
+
+#### **1.2. Example SQL Setup (for Relational Data)**
+
+**Migrations:**
+*   `..._create_journal_headers_table.php`
+```php
+Schema::create('journal_headers', function (Blueprint $table) {
+    $table->id();
+    $table->string('journalId')->unique();
+    $table->string('journalDescription');
+    $table->date('journalDate');
+    $table->decimal('totalAmount', 15, 2);
+    // Add any other fields...
+    $table->timestamps();
+});
+    ```
+*   `..._create_journal_details_table.php`
+```php
+Schema::create('journal_details', function (Blueprint $table) {
+    $table->id();
+    $table->string('journalId');
+    $table->string('trxDescription');
+    // Add any other fields...
+    $table->timestamps();
+    $table->foreign('journalId')->references('journalId')->on('journal_headers')->onDelete('cascade');
+});
+    ```
+
+**Models:**
+*   `app/Models/JournalHeader.php`
+```php
+<?php
+namespace App\Models;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+
+class JournalHeader extends Model {
+    protected $guarded = [];
+    public function details(): HasMany {
+        return $this->hasMany(JournalDetail::class, 'journalId', 'journalId');
+    }
+}
+    ```
+*   `app/Models/JournalDetail.php`
+```php
+<?php
+namespace App\Models;
+use Illuminate\Database\Eloquent\Model;
+
+class JournalDetail extends Model {
+    protected $guarded = [];
+}
+    ```
+
+#### **1.3. Example NoSQL Setup (for Embedded Data)**
+
+**Model:**
+*   `app/Models/PersonnelInfo.php`
+```php
+<?php
+namespace App\Models;
+use Jenssegers\Mongodb\Eloquent\Model;
+
+class PersonnelInfo extends Model {
+    protected $connection = 'mongodb';
+    protected $collection = 'personnel_infos';
+    protected $guarded = [];
+}
+    ```
+
+---
+
+### 2. Full Code: `import:header-detail` Command
+
+**File:** `app/Console/Commands/ImportHeaderDetail.php`
+```php
+<?php
+
+namespace App\Console\Commands;
+
+use Illuminate\Console\Command;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Facades\DB;
+use Maatwebsite\Excel\Facades\Excel;
+
+class ImportHeaderDetail extends Command
+{
+    protected $signature = 'import:header-detail
+                            {file : The path to the Excel file to import.}
+                            {--entities= : Map types to Models (e.g., header:JournalHeader,detail:JournalDetail)}
+                            {--key= : The primary/foreign key column name (e.g., journalId). Required.}
+                            {--embed : For NoSQL, embed child entities as an array in the parent document.}
+                            {--sheet-title-as= : Use each sheet\'s title as a value for the specified field.}';
+
+    protected $description = 'Parse a structured header/detail Excel file and save data to the database.';
+
+    public function handle()
+    {
+        $options = $this->getValidatedOptions();
+        if (!$options) return 1;
+
+        $this->info("Starting import of {$options['filePath']}...");
+
+        DB::beginTransaction();
+        try {
+            if ($options['sheetTitleAs']) {
+                $this->processMultiSheetFile($options);
+            } else {
+                $this->processSingleSheetFile($options);
+            }
+
+            DB::commit();
+            $this->info('Import completed successfully!');
+            return 0;
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            $this->error("An error occurred: " . $e->getMessage());
+            $this->error("Import failed. All changes have been rolled back.");
+            return 1;
+        }
+    }
+
+    private function processMultiSheetFile(array $options): void
+    {
+        $this->info("Multi-sheet mode enabled. Using sheet titles for '{$options['sheetTitleAs']}' field.");
+        $sheetNames = (new \Maatwebsite\Excel\Excel)->getSheetNames($options['filePath']);
+
+        foreach ($sheetNames as $sheetName) {
+            $this->line("--- Processing Sheet: {$sheetName} ---");
+            $rows = Excel::toArray(new \stdClass(), $options['filePath'], null, \Maatwebsite\Excel\Excel::XLSX, ['onlySheets' => [$sheetName]])[0];
+            $injectedData = [$options['sheetTitleAs'] => $sheetName];
+            $this->processRows($rows, $options, $injectedData);
+        }
+    }
+
+    private function processSingleSheetFile(array $options): void
+    {
+        $this->info("Single-sheet mode enabled.");
+        $rows = Excel::toArray(new \stdClass(), $options['filePath'])[0];
+        $this->processRows($rows, $options);
+    }
+
+    private function processRows(array $rows, array $options, array $injectedData = []): void
+    {
+        $currentEntityType = null;
+        $currentHeaders = [];
+        $lastParentKeyValue = null;
+        $currentParentInstance = null;
+        $collectedDetails = [];
+
+        foreach ($rows as $rowIndex => $row) {
+            if (empty(array_filter($row))) continue;
+
+            $entityType = strtolower(trim($row[0] ?? ''));
+
+            if (array_key_exists($entityType, $options['entityMappings'])) {
+                if ($options['embed'] && $currentParentInstance && $entityType === 'header') {
+                    $this->saveParentWithEmbeds($currentParentInstance, $collectedDetails, $options['keyField']);
+                    $currentParentInstance = null;
+                }
+                $currentEntityType = $entityType;
+                $currentHeaders = $rows[$rowIndex + 1];
+                $this->line("Processing new block: '{$currentEntityType}'");
+                continue;
+            }
+
+            if ($currentEntityType && $row === $currentHeaders) continue;
+
+            if ($currentEntityType) {
+                $filteredHeaders = array_filter($currentHeaders, fn($h) => $h !== null);
+                $dataRow = array_slice($row, 0, count($filteredHeaders));
+                $data = array_combine($filteredHeaders, $dataRow) + $injectedData;
+                $modelClass = $options['entityMappings'][$currentEntityType];
+
+                if ($currentEntityType === 'header' || $currentEntityType === 'main') {
+                    $lastParentKeyValue = $data[$options['keyField']];
+                    if ($options['embed']) {
+                        $currentParentInstance = new $modelClass($data);
+                        $collectedDetails = [];
+                    } else {
+                        $modelClass::create($data);
+                    }
+                    $this->info("  Saved Header with key: {$lastParentKeyValue}");
+                } else {
+                    if ($options['embed']) {
+                        if (!$currentParentInstance) throw new \Exception("Found detail '{$entityType}' without a parent on row " . ($rowIndex+1));
+                        $collectedDetails[$currentEntityType][] = $data;
+                        $this->line("    - Collected '{$entityType}' detail for embedding.");
+                    } else {
+                        if (!isset($data[$options['keyField']]) || empty($data[$options['keyField']])) {
+                            $data[$options['keyField']] = $lastParentKeyValue;
+                            if (!$lastParentKeyValue) throw new \Exception("Found detail '{$entityType}' without an implicit or explicit key on row " . ($rowIndex+1));
+                        }
+                        $modelClass::create($data);
+                        $this->line("    - Saved '{$entityType}' detail for key {$data[$options['keyField']]}");
+                    }
+                }
+            }
+        }
+        if ($options['embed'] && $currentParentInstance) {
+            $this->saveParentWithEmbeds($currentParentInstance, $collectedDetails, $options['keyField']);
+        }
+    }
+
+    private function saveParentWithEmbeds(Model $parent, array $details, string $keyField): void
+    {
+        foreach ($details as $entityName => $dataArray) {
+            $parent->{$entityName} = $dataArray;
+        }
+        $parent->save();
+        $this->info("  Saved embedded document with key: {$parent->{$keyField}}");
+    }
+
+    private function getValidatedOptions(): ?array
+    {
+        $options = [
+            'filePath' => $this->argument('file'),
+            'keyField' => $this->option('key'),
+            'embed' => $this->option('embed'),
+            'sheetTitleAs' => $this->option('sheet-title-as'),
+            'entityMappings' => $this->parseEntityMappings($this->option('entities')),
+        ];
+        if (!$options['keyField']) { $this->error('The --key option is required.'); return null; }
+        if (empty($options['entityMappings'])) { $this->error('The --entities option is required.'); return null; }
+        if (!file_exists($options['filePath'])) { $this->error("File not found at path: {$options['filePath']}"); return null; }
+        if ($options['sheetTitleAs'] && pathinfo($options['filePath'], PATHINFO_EXTENSION) === 'csv') {
+            $this->error('The --sheet-title-as option is not applicable to CSV files.'); return null;
+        }
+        return $options;
+    }
+
+    private function parseEntityMappings(?string $entities): array
+    {
+        if (!$entities) return [];
+        $mappings = [];
+        $pairs = explode(',', $entities);
+        foreach ($pairs as $pair) {
+            list($key, $modelName) = explode(':', $pair);
+            $mappings[strtolower(trim($key))] = 'App\\Models\\' . trim($modelName);
+        }
+        if (isset($mappings['header'])) $mappings['main'] = $mappings['header'];
+        return $mappings;
+    }
+}
+```
+
+---
+
+### 3. Full Code: `export:header-detail` Command
+
+#### **3.1. Helper Export Classes**
+Create a new directory `app/Exports`.
+
+**File:** `app/Exports/SingleSheetExport.php`
+```php
+<?php
+namespace App\Exports;
+
+use Maatwebsite\Excel\Concerns\FromArray;
+use Maatwebsite\Excel\Concerns\WithTitle;
+use Maatwebsite\Excel\Concerns\ShouldAutoSize;
+
+class SingleSheetExport implements FromArray, WithTitle, ShouldAutoSize
+{
+    protected $data;
+    protected $title;
+
+    public function __construct(array $data, string $title = 'Sheet1')
+    {
+        $this->data = $data;
+        $this->title = $title;
+    }
+
+    public function array(): array
+    {
+        return $this->data;
+    }
+
+    public function title(): string
+    {
+        return $this->title;
+    }
+}
+```
+
+**File:** `app/Exports/MultiSheetHeaderDetailExport.php`
+```php
+<?php
+namespace App\Exports;
+
+use Illuminate\Database\Eloquent\Collection;
+use Maatwebsite\Excel\Concerns\WithMultipleSheets;
+
+class MultiSheetHeaderDetailExport implements WithMultipleSheets
+{
+    protected $parents;
+    protected $options;
+
+    public function __construct(Collection $parents, array $options)
+    {
+        $this->parents = $parents;
+        $this->options = $options;
+    }
+
+    public function sheets(): array
+    {
+        $sheets = [];
+        foreach ($this->parents as $parent) {
+            $sheetTitle = (string) $parent->{$this->options['sheetTitleAs']};
+            $sheetData = $this->buildDataForParent($parent, $this->options);
+            $sheets[] = new SingleSheetExport($sheetData, $sheetTitle);
+        }
+        return $sheets;
+    }
+
+    private function buildDataForParent($parent, array $options): array
+    {
+        $parentData = $parent->toArray();
+        $exportData = [];
+        $headerEntityType = array_search($options['entityMappings']['header'], $options['entityMappings']);
+
+        $exportData[] = [$headerEntityType];
+        $exportData[] = array_keys($parentData);
+        $exportData[] = array_values($parentData);
+        $exportData[] = [];
+
+        foreach ($options['entityMappings'] as $type => $modelOrKey) {
+            if ($type === 'header' || $type === 'main') continue;
+
+            $children = $options['embed'] ? ($parent->{$type} ?? []) : $parent->{$type};
+
+            if (!empty($children) && count($children) > 0) {
+                $firstChild = is_array($children) ? $children[0] : $children->first()->toArray();
+                $exportData[] = [$type];
+                $exportData[] = array_keys($firstChild);
+                foreach ($children as $child) {
+                    $exportData[] = is_array($child) ? array_values($child) : array_values($child->toArray());
+                }
+                $exportData[] = [];
+            }
+        }
+        return $exportData;
+    }
+}
+```
+
+#### **3.2. Main Command File**
+
+**File:** `app/Console/Commands/ExportHeaderDetail.php`
+```php
+<?php
+
+namespace App\Console\Commands;
+
+use App\Exports\MultiSheetHeaderDetailExport;
+use App\Exports\SingleSheetExport;
+use Illuminate\Console\Command;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Facades\File;
+use Maatwebsite\Excel\Facades\Excel;
+
+class ExportHeaderDetail extends Command
+{
+    protected $signature = 'export:header-detail
+                            {file : The output file path (e.g., storage/app/export.xlsx).}
+                            {--entities= : Map types to Models/relations (e.g., header:JournalHeader,detail:details).}
+                            {--key= : The primary key field of the parent model.}
+                            {--ids= : Optional comma-separated list of parent record keys to export.}
+                            {--query= : Eloquent query conditions to filter parent records (e.g., "status:active;totalAmount:>:10000").}
+                            {--embed : Export from a NoSQL model with embedded arrays.}
+                            {--sheet-title-as= : Group each parent record onto its own sheet, named by this field.}';
+
+    protected $description = 'Exports database records into a structured header/detail Excel file.';
+
+    public function handle()
+    {
+        $options = $this->getValidatedOptions();
+        if (!$options) return 1;
+
+        $parentModelClass = $options['entityMappings']['header'];
+        $query = $parentModelClass::query();
+
+        if ($options['ids']) {
+            $query->whereIn($options['keyField'], explode(',', $options['ids']));
+        }
+
+        if ($options['query']) {
+            try {
+                $this->applyQueryFilters($query, $options['query']);
+            } catch (\Exception $e) {
+                $this->error("Invalid query format: " . $e->getMessage());
+                return 1;
+            }
+        }
+
+        $parents = $query->get();
+
+        if ($parents->isEmpty()) {
+            $this->warn('No records found matching the criteria. No file was created.');
+            return 0;
+        }
+
+        $this->info("Found {$parents->count()} parent records to export. Generating file...");
+
+        if ($options['sheetTitleAs']) {
+            $export = new MultiSheetHeaderDetailExport($parents, $options);
+        } else {
+            $exportData = $this->buildSingleSheetData($parents, $options);
+            $export = new SingleSheetExport($exportData, 'Export');
+        }
+
+        File::ensureDirectoryExists(dirname($options['filePath']));
+        Excel::store($export, $options['filePath']);
+
+        $this->info("Export completed successfully! File saved to: {$options['filePath']}");
+        return 0;
+    }
+
+    private function applyQueryFilters(Builder $query, string $queryString): void
+    {
+        $conditions = explode(';', $queryString);
+        foreach ($conditions as $condition) {
+            if (empty(trim($condition))) continue;
+            $parts = explode(':', $condition, 3);
+            if (count($parts) === 2) {
+                list($field, $value) = $parts;
+                $operator = '=';
+            } elseif (count($parts) === 3) {
+                list($field, $operator, $value) = $parts;
+            } else {
+                throw new \Exception("Malformed condition '{$condition}'. Use 'field:value' or 'field:operator:value'.");
+            }
+            $field = trim($field);
+            $operator = trim($operator);
+            if (strtolower($operator) === 'in') {
+                $query->whereIn($field, explode(',', $value));
+            } elseif (strtolower($operator) === 'notin') {
+                $query->whereNotIn($field, explode(',', $value));
+            } else {
+                $query->where($field, $operator, $value);
+            }
+        }
+    }
+
+    private function buildSingleSheetData($parents, array $options): array
+    {
+        $exportData = [];
+        $headerEntityType = array_search($options['entityMappings']['header'], $options['entityMappings']);
+        foreach ($parents as $parent) {
+            $parentData = $parent->toArray();
+            $exportData[] = [$headerEntityType];
+            $exportData[] = array_keys($parentData);
+            $exportData[] = array_values($parentData);
+            $exportData[] = [];
+            foreach ($options['entityMappings'] as $type => $modelOrKey) {
+                if ($type === 'header' || $type === 'main') continue;
+                $children = $options['embed'] ? ($parent->{$type} ?? []) : $parent->{$type};
+                if (!empty($children) && count($children) > 0) {
+                    $firstChild = is_array($children) ? $children[0] : $children->first()->toArray();
+                    $exportData[] = [$type];
+                    $exportData[] = array_keys($firstChild);
+                    foreach ($children as $child) {
+                        $exportData[] = is_array($child) ? array_values($child) : array_values($child->toArray());
+                    }
+                    $exportData[] = [];
+                }
+            }
+        }
+        return $exportData;
+    }
+
+    private function getValidatedOptions(): ?array
+    {
+        $filePath = $this->argument('file');
+        $keyField = $this->option('key');
+        $entities = $this->option('entities');
+        if (!$keyField || !$entities) {
+            $this->error('The --key and --entities options are required.');
+            return null;
+        }
+        return [
+            'filePath' => $filePath, 'keyField' => $keyField, 'ids' => $this->option('ids'),
+            'query' => $this->option('query'), 'embed' => $this->option('embed'),
+            'sheetTitleAs' => $this->option('sheet-title-as'),
+            'entityMappings' => $this->parseEntityMappings($entities),
+        ];
+    }
+
+    private function parseEntityMappings(string $entities): array
+    {
+        $mappings = [];
+        $pairs = explode(',', $entities);
+        foreach ($pairs as $pair) {
+            list($key, $modelOrRelation) = explode(':', $pair);
+            $key = strtolower(trim($key));
+            $modelOrRelation = trim($modelOrRelation);
+            if ($key === 'header' || $key === 'main') {
+                $mappings[$key] = 'App\\Models\\' . $modelOrRelation;
+            } else {
+                $mappings[$key] = $modelOrRelation;
+            }
+        }
+        if (isset($mappings['header'])) $mappings['main'] = $mappings['header'];
+        return $mappings;
+    }
+}
+```
+
+---
+
+### 4. Comprehensive Usage Documentation
+
+#### English Documentation
+
+##### **`import:header-detail`**
+*   **Synopsis:** `php artisan import:header-detail <file> [options]`
+*   **Arguments & Options:**
+| Parameter | Description |
+|---|---|
+| `file` | Path to the Excel/CSV file to import. |
+| `--entities` | **Required.** Map types to Model names (e.g., `header:JournalHeader,detail:JournalDetail`). |
+| `--key` | **Required.** The name of the primary/foreign key column (e.g., `journalId`). |
+| `--embed` | For NoSQL, embed child entities as an array in the parent document. |
+| `--sheet-title-as`| For Excel, use each sheet's title as a value for the specified field. |
+
+##### **`export:header-detail`**
+*   **Synopsis:** `php artisan export:header-detail <file> [options]`
+*   **Arguments & Options:**
+| Parameter | Description |
+|---|---|
+| `file` | The output file path (e.g., `storage/app/export.xlsx`). |
+| `--entities` | **Required.** Map types to **Models** (for `header`) and **relationship/array names** (for details). Ex: `header:JournalHeader,detail:details`. |
+| `--key` | **Required.** The primary key field of the parent model. |
+| `--query` | Filter records with a query string (e.g., `"status:active;amount:>:5000"`). |
+| `--ids` | A comma-separated list of parent primary keys to export (e.g., `J001,J002`). |
+| `--embed` | Export from a NoSQL model with embedded arrays. |
+| `--sheet-title-as`| Export each parent record to its own sheet, named by this field's value. |
+
+#### Dokumentasi Bahasa Indonesia
+
+##### **`import:header-detail`**
+*   **Sintaks:** `php artisan import:header-detail <file> [options]`
+*   **Argumen & Opsi:**
+| Parameter | Deskripsi |
+|---|---|
+| `file` | Path menuju file Excel/CSV yang akan diimpor. |
+| `--entities` | **Wajib.** Memetakan tipe ke nama Model (cth: `header:JournalHeader,detail:JournalDetail`). |
+| `--key` | **Wajib.** Nama kolom kunci primer/asing (primary/foreign key) (cth: `journalId`). |
+| `--embed` | Untuk NoSQL, sematkan data turunan (child) sebagai array di dalam dokumen induk. |
+| `--sheet-title-as`| Untuk Excel, gunakan judul setiap sheet sebagai nilai untuk kolom yang ditentukan. |
+
+##### **`export:header-detail`**
+*   **Sintaks:** `php artisan export:header-detail <file> [options]`
+*   **Argumen & Opsi:**
+| Parameter | Deskripsi |
+|---|---|
+| `file` | Path file output untuk menyimpan hasil ekspor (cth: `storage/app/ekspor.xlsx`). |
+| `--entities` | **Wajib.** Memetakan tipe ke **Model** (untuk `header`) dan **nama relasi/array** (untuk detail). Cth: `header:JournalHeader,detail:details`. |
+| `--key` | **Wajib.** Nama kolom kunci primer dari model induk. |
+| `--query` | Filter data menggunakan string kueri (cth: `"status:active;amount:>:5000"`). |
+| `--ids` | Daftar kunci primer data induk yang akan diekspor, dipisahkan koma (cth: `J001,J002`). |
+| `--embed` | Ekspor dari model NoSQL dengan data detail yang tersemat (embedded). |
+| `--sheet-title-as`| Ekspor setiap data induk ke sheet-nya sendiri, dinamai berdasarkan nilai dari kolom ini. |
+

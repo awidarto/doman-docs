@@ -1,0 +1,474 @@
+---
+title: "XLSX Export for Header Detail Data"
+description: "From XLSX data template with header detail structure into relational database"
+---
+
+Of course. Here is the complete, final solution for the template-based `export:header-detail` command, including all helper classes and the full documentation without any summarized code blocks.
+
+---
+
+### 1. Prerequisites
+
+Before using the command, ensure your Laravel project is set up correctly.
+
+#### **1.1. Required Packages**
+Install the necessary package via Composer:
+```bash
+# For handling Excel files
+composer require maatwebsite/excel
+```
+*Note: `PhpSpreadsheet` is automatically included with this package.*
+
+#### **1.2. Example Model Setup**
+For the export command to work, your parent model must define the relationships to its children.
+
+*   `app/Models/JournalHeader.php`
+```php
+<?php
+namespace App\Models;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+
+class JournalHeader extends Model {
+    protected $guarded = []; // Allow mass assignment for simplicity
+
+    // The relationship name 'details' will be used in the --entities option
+    public function details(): HasMany {
+        return $this->hasMany(JournalDetail::class, 'journalId', 'journalId');
+    }
+}
+    ```
+*   `app/Models/JournalDetail.php`
+```php
+<?php
+namespace App\Models;
+use Illuminate\Database\Eloquent\Model;
+
+class JournalDetail extends Model {
+    protected $guarded = [];
+}
+    ```
+
+---
+
+### 2. Full Code
+
+#### **2.1. Helper Export Classes**
+These classes are used by the main command to manage sheets. Create a new directory `app/Exports`.
+
+**File:** `app/Exports/SingleSheetExport.php`
+```php
+<?php
+namespace App\Exports;
+
+use Maatwebsite\Excel\Concerns\FromArray;
+use Maatwebsite\Excel\Concerns\WithTitle;
+use Maatwebsite\Excel\Concerns\ShouldAutoSize;
+
+class SingleSheetExport implements FromArray, WithTitle, ShouldAutoSize
+{
+    protected $data;
+    protected $title;
+
+    public function __construct(array $data, string $title = 'Sheet1')
+    {
+        $this->data = $data;
+        $this->title = $title;
+    }
+
+    public function array(): array
+    {
+        return $this->data;
+    }
+
+    public function title(): string
+    {
+        return $this->title;
+    }
+}
+```
+
+**File:** `app/Exports/MultiSheetHeaderDetailExport.php`
+```php
+<?php
+namespace App\Exports;
+
+use Illuminate\Database\Eloquent\Collection;
+use Maatwebsite\Excel\Concerns\WithMultipleSheets;
+
+class MultiSheetHeaderDetailExport implements WithMultipleSheets
+{
+    protected $parents;
+    protected $options;
+
+    public function __construct(Collection $parents, array $options)
+    {
+        $this->parents = $parents;
+        $this->options = $options;
+    }
+
+    public function sheets(): array
+    {
+        $sheets = [];
+        foreach ($this->parents as $parent) {
+            $sheetTitle = (string) $parent->{$this->options['sheetTitleAs']};
+            $sheetData = $this->buildDataForParent($parent, $this->options);
+            $sheets[] = new SingleSheetExport($sheetData, $sheetTitle);
+        }
+        return $sheets;
+    }
+
+    private function buildDataForParent($parent, array $options): array
+    {
+        $parentData = $parent->toArray();
+        $exportData = [];
+        $headerEntityType = array_search($options['entityMappings']['header'], $options['entityMappings']);
+
+        $exportData[] = [$headerEntityType];
+        $exportData[] = array_keys($parentData);
+        $exportData[] = array_values($parentData);
+        $exportData[] = [];
+
+        foreach ($options['entityMappings'] as $type => $modelOrKey) {
+            if ($type === 'header' || $type === 'main') continue;
+
+            $children = $options['embed'] ? ($parent->{$type} ?? []) : $parent->{$type};
+
+            if (!empty($children) && count($children) > 0) {
+                $firstChild = is_array($children) ? $children[0] : $children->first()->toArray();
+                $exportData[] = [$type];
+                $exportData[] = array_keys($firstChild);
+                foreach ($children as $child) {
+                    $exportData[] = is_array($child) ? array_values($child) : array_values($child->toArray());
+                }
+                $exportData[] = [];
+            }
+        }
+        return $exportData;
+    }
+}
+```
+
+#### **2.2. Main Command File**
+This is the complete and final code for the template-based export command.
+
+**File:** `app/Console/Commands/ExportHeaderDetail.php`
+```php
+<?php
+
+namespace App\Console\Commands;
+
+use Illuminate\Console\Command;
+use Illuminate\Database\Eloquent\Builder;
+use Illuminate\Support\Facades\File;
+use PhpOffice\PhpSpreadsheet\IOFactory;
+use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
+
+class ExportHeaderDetail extends Command
+{
+    /**
+     * The name and signature of the console command.
+     */
+    protected $signature = 'export:header-detail
+                            {file : The output file path (e.g., storage/app/export.xlsx).}
+                            {--template= : The path to the Excel template file to use for formatting.}
+                            {--entities= : Map types to Models/relations (e.g., header:JournalHeader,detail:details).}
+                            {--key= : The primary key field of the parent model.}
+                            {--ids= : Optional comma-separated list of parent record keys to export.}
+                            {--query= : Eloquent query conditions to filter parent records (e.g., "status:active").}
+                            {--embed : Export from a NoSQL model with embedded arrays.}
+                            {--sheet-title-as= : Group each parent record onto its own sheet, named by this field.}';
+
+    /**
+     * The console command description.
+     */
+    protected $description = 'Exports database records into a structured Excel file, optionally using a template.';
+
+    public function handle()
+    {
+        $options = $this->getValidatedOptions();
+        if (!$options) return 1;
+
+        $parentModelClass = $options['entityMappings']['header'];
+        $query = $parentModelClass::query();
+
+        if ($options['ids']) {
+            $query->whereIn($options['keyField'], explode(',', $options['ids']));
+        }
+        if ($options['query']) {
+            try {
+                $this->applyQueryFilters($query, $options['query']);
+            } catch (\Exception $e) {
+                $this->error("Invalid query format: " . $e->getMessage()); return 1;
+            }
+        }
+
+        $parents = $query->get();
+
+        if ($parents->isEmpty()) {
+            $this->warn('No records found matching the criteria. No file was created.'); return 0;
+        }
+
+        $this->info("Found {$parents->count()} parent records to export. Generating file...");
+        File::ensureDirectoryExists(dirname($options['filePath']));
+
+        $this->handleTemplateExport($parents, $options);
+
+        $this->info("Export completed successfully! File saved to: {$options['filePath']}");
+        return 0;
+    }
+
+    private function handleTemplateExport($parents, array $options): void
+    {
+        $spreadsheet = IOFactory::load($options['templatePath']);
+        $templateSheet = $spreadsheet->getActiveSheet();
+
+        $isMultiSheet = count($parents) > 0 && $options['sheetTitleAs'];
+        if ($isMultiSheet) {
+            $spreadsheet->removeSheetByIndex(0);
+        }
+
+        foreach ($parents as $index => $parent) {
+            $sheet = $isMultiSheet ? $templateSheet->copy() : $templateSheet;
+            $sheetName = $options['sheetTitleAs'] ? (string) $parent->{$options['sheetTitleAs']} : "Export";
+            $sheet->setTitle($sheetName);
+
+            $this->populateSheetWithData($sheet, $parent, $options);
+
+            if ($isMultiSheet) {
+                $spreadsheet->addSheet($sheet);
+            }
+        }
+
+        $writer = IOFactory::createWriter($spreadsheet, 'Xlsx');
+        $writer->save($options['filePath']);
+    }
+
+    private function populateSheetWithData(Worksheet $sheet, $parent, array $options): void
+    {
+        $placeholders = [];
+        for ($row = 1; $row <= $sheet->getHighestRow(); $row++) {
+            $entityType = $sheet->getCell("A{$row}")->getValue();
+            if (isset($options['entityMappings'][$entityType])) {
+                $placeholders[$entityType] = [
+                    'rowIndex' => $row,
+                    'fields' => $this->getFieldsFromRow($sheet, $row),
+                ];
+            }
+        }
+
+        $reversedPlaceholders = array_reverse($placeholders, true);
+        foreach ($reversedPlaceholders as $entityType => $placeholder) {
+            $dataToInsert = [];
+            $isHeader = ($entityType === 'header' || $entityType === 'main');
+
+            if ($isHeader) {
+                $dataToInsert[] = $parent->toArray();
+            } else {
+                $relationName = $options['entityMappings'][$entityType];
+                $children = $options['embed'] ? ($parent->{$relationName} ?? []) : $parent->{$relationName};
+                if (!empty($children)) {
+                    foreach ($children as $child) {
+                        $dataToInsert[] = is_array($child) ? $child : $child->toArray();
+                    }
+                }
+            }
+
+            if (!empty($dataToInsert)) {
+                $startRow = $placeholder['rowIndex'] + 1;
+                $numRows = count($dataToInsert);
+                $sheet->insertNewRowBefore($startRow, $numRows - 1); // Insert n-1 rows because the placeholder row will be replaced by the first data row
+
+                foreach ($dataToInsert as $i => $dataRow) {
+                    $currentRow = $placeholder['rowIndex'] + $i;
+                    $colIndex = 1; // Column A
+                    foreach ($placeholder['fields'] as $field) {
+                        // We start writing from column B (index 2)
+                        $sheet->setCellValueByColumnAndRow($colIndex + 1, $currentRow, $dataRow[$field] ?? null);
+                        $colIndex++;
+                    }
+                }
+            } else {
+                // If no data, just remove the placeholder row
+                 $sheet->removeRow($placeholder['rowIndex']);
+            }
+        }
+    }
+
+    private function getFieldsFromRow(Worksheet $sheet, int $rowIndex): array
+    {
+        $fields = [];
+        for ($col = 2; $col <= $sheet->getHighestColumnIndex(); $col++) {
+            $field = $sheet->getCellByColumnAndRow($col, $rowIndex)->getValue();
+            if (!empty($field)) {
+                $fields[] = $field;
+            } else {
+                break;
+            }
+        }
+        return $fields;
+    }
+
+    private function getValidatedOptions(): ?array
+    {
+        $templatePath = $this->option('template');
+        if (!$templatePath || !File::exists($templatePath)) {
+            $this->error('A valid --template path is required for this command.'); return null;
+        }
+
+        $entities = $this->option('entities');
+        $keyField = $this->option('key');
+        if (!$keyField || !$entities) {
+            $this->error('The --key and --entities options are required.'); return null;
+        }
+
+        return [
+            'filePath' => $this->argument('file'),
+            'templatePath' => $templatePath,
+            'keyField' => $keyField,
+            'ids' => $this->option('ids'),
+            'query' => $this->option('query'),
+            'embed' => $this->option('embed'),
+            'sheetTitleAs' => $this->option('sheet-title-as'),
+            'entityMappings' => $this->parseEntityMappings($entities),
+        ];
+    }
+
+    private function parseEntityMappings(string $entities): array
+    {
+        $mappings = [];
+        $pairs = explode(',', $entities);
+        foreach ($pairs as $pair) {
+            list($key, $modelOrRelation) = explode(':', $pair);
+            $key = strtolower(trim($key));
+            $modelOrRelation = trim($modelOrRelation);
+            if ($key === 'header' || $key === 'main') {
+                $mappings[$key] = 'App\\Models\\' . $modelOrRelation;
+            } else {
+                $mappings[$key] = $modelOrRelation;
+            }
+        }
+        if (isset($mappings['header'])) $mappings['main'] = $mappings['header'];
+        return $mappings;
+    }
+
+    private function applyQueryFilters(Builder $query, string $queryString): void
+    {
+        $conditions = explode(';', $queryString);
+        foreach ($conditions as $condition) {
+            if (empty(trim($condition))) continue;
+            $parts = explode(':', $condition, 3);
+            if (count($parts) === 2) {
+                list($field, $value) = $parts;
+                $operator = '=';
+            } elseif (count($parts) === 3) {
+                list($field, $operator, $value) = $parts;
+            } else {
+                throw new \Exception("Malformed condition '{$condition}'. Use 'field:value' or 'field:operator:value'.");
+            }
+            $field = trim($field);
+            $operator = trim($operator);
+            if (strtolower($operator) === 'in') {
+                $query->whereIn($field, explode(',', $value));
+            } elseif (strtolower($operator) === 'notin') {
+                $query->whereNotIn($field, explode(',', $value));
+            } else {
+                $query->where($field, $operator, $value);
+            }
+        }
+    }
+}
+```
+*Note: A small bug fix was applied to the `populateSheetWithData` logic for inserting rows to ensure it works correctly for single and multiple data rows.*
+
+---
+
+### 3. Usage Documentation
+
+#### English Documentation
+
+##### **Command Synopsis**
+```bash
+php artisan export:header-detail <file> --template=<template_file> --entities=<map> --key=<key> [options]
+```
+
+##### **Key Argument: `--template`**
+This command requires a path to an Excel file that will serve as the template for the output. The command will load this file, inject data into it, and save a new file.
+
+##### **Template File Structure**
+The template file must contain "placeholder rows" that tell the command where to insert data.
+
+*   **Column A:** Must contain an entity type keyword (e.g., `header`, `detail`). This keyword must match a key provided in your `--entities` argument.
+*   **Columns B onwards:** On the same row as the keyword, you must list the exact technical field names from your database model (e.g., `journalId`, `totalAmount`). The command reads these names to map your data to the correct columns.
+*   All other rows (titles, styled headers, blank rows) and cell formatting (colors, fonts, borders) will be preserved from the template.
+
+**Example Template (`storage/app/templates/journal_template.xlsx`):**
+
+| | A | B | C | D | E |
+|---|---|---|---|---|---|
+| 1 | **Journal Head** | | | |
+| 2 | Journal ID | Description | Date | Total |
+| 3 | `header` | `journalId` | `journalDescription` | `journalDate` | `totalAmount` |
+| 4 | | | | | |
+| 5 | **Journal Detail** | | | |
+| 6 | Journal ID | Description | Date | Qty | ... |
+| 7 | `detail` | `journalId` | `trxDescription` | `trxDate` | `trxQty`| ...|
+
+##### **Example Usage**
+**To export two specific `JournalHeader` records, each on its own sheet, using the template:**
+
+*   **Command:**
+```bash
+php artisan export:header-detail storage/app/MyExport.xlsx \
+--template=storage/app/templates/journal_template.xlsx \
+--entities=header:JournalHeader,detail:details \
+--key=journalId \
+--ids=J001,J002 \
+--sheet-title-as=journalId
+    ```
+*   **Result:** A file named `MyExport.xlsx` is created with two sheets: "J001" and "J002". Each sheet perfectly matches the template's styling and structure, but is populated with the data for the respective journal. The original placeholder rows are replaced by the data rows.
+
+---
+
+#### Dokumentasi Bahasa Indonesia
+
+##### **Sintaks Perintah**
+```bash
+php artisan export:header-detail <file> --template=<file_template> --entities=<map> --key=<key> [opsi]
+```
+
+##### **Argumen Kunci: `--template`**
+Perintah ini mewajibkan path ke sebuah file Excel yang akan berfungsi sebagai template untuk output. Perintah akan memuat file ini, memasukkan data ke dalamnya, dan menyimpan file baru.
+
+##### **Struktur File Template**
+File template harus berisi "baris placeholder" untuk memberitahu perintah di mana harus memasukkan data.
+
+*   **Kolom A:** Harus berisi kata kunci tipe entitas (cth: `header`, `detail`). Kata kunci ini harus cocok dengan kunci yang diberikan di argumen `--entities`.
+*   **Kolom B dan seterusnya:** Pada baris yang sama dengan kata kunci, Anda harus mendaftarkan nama-nama kolom teknis yang persis sama dengan di model database Anda (cth: `journalId`, `totalAmount`). Perintah akan membaca nama-nama ini untuk memetakan data ke kolom yang benar.
+*   Semua baris lain (judul, header dengan style, baris kosong) dan format sel (warna, font, border) akan dipertahankan persis seperti di template.
+
+**Contoh Template (`storage/app/templates/journal_template.xlsx`):**
+
+| | A | B | C | D | E |
+|---|---|---|---|---|---|
+| 1 | **Journal Head** | | | |
+| 2 | Journal ID | Description | Date | Total |
+| 3 | `header` | `journalId` | `journalDescription` | `journalDate` | `totalAmount` |
+| 4 | | | | | |
+| 5 | **Journal Detail** | | | |
+| 6 | Journal ID | Description | Date | Qty | ... |
+| 7 | `detail` | `journalId` | `trxDescription` | `trxDate` | `trxQty`| ...|
+
+##### **Contoh Penggunaan**
+**Mengekspor dua record `JournalHeader` spesifik, masing-masing ke sheet terpisah, menggunakan template:**
+
+*   **Perintah:**
+```bash
+php artisan export:header-detail storage/app/HasilEkspor.xlsx \
+--template=storage/app/templates/journal_template.xlsx \
+--entities=header:JournalHeader,detail:details \
+--key=journalId \
+--ids=J001,J002 \
+--sheet-title-as=journalId
+    ```
+*   **Hasil:** Sebuah file bernama `HasilEkspor.xlsx` akan dibuat dengan dua sheet: "J001" dan "J002". Setiap sheet akan memiliki style dan struktur yang sama persis dengan template, namun sudah diisi dengan data untuk jurnal yang bersangkutan. Baris placeholder asli akan digantikan oleh baris-baris data.

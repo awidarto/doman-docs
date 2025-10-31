@@ -1,0 +1,1436 @@
+---
+title: Tree Datatable in Vue 2
+---
+
+### Part 1: Vue 2 Frontend (Complete Code)
+
+This section contains all the necessary frontend files, demonstrating the "External Loader" pattern where the parent component controls the data.
+
+#### 1.1. Project Setup
+
+**1. Install Dependencies:**
+In your Vue 2 project terminal, run:
+```bash
+npm install axios bootstrap bootstrap-icons axios-mock-adapter
+```
+
+**2. Configure `main.js`:**
+Ensure your `src/main.js` file imports the Bootstrap CSS.
+```javascript
+// src/main.js
+import Vue from 'vue'
+import App from './App.vue'
+
+// Import Bootstrap and Bootstrap Icons CSS
+import 'bootstrap/dist/css/bootstrap.css'
+import 'bootstrap-icons/font/bootstrap-icons.css'
+
+Vue.config.productionTip = false
+
+new Vue({
+  render: h => h(App),
+}).$mount('#app')
+```
+
+---
+
+#### 1.2. `src/components/TreeDatatable.vue` (Complete Component)
+
+```vue
+<template>
+  <div class="tree-datatable-container card">
+    <!-- Loading state is only shown when fetching data internally (url prop is used) -->
+    <div v-if="loading && rows === null" class="card-body text-center">
+      <div class="spinner-border" role="status">
+        <span class="visually-hidden">Loading...</span>
+      </div>
+      <p>Loading Data...</p>
+    </div>
+
+    <!-- Error state is only shown when fetching data internally (url prop is used) -->
+    <div v-else-if="error && rows === null" class="card-body text-center">
+      <div class="alert alert-danger">{{ error }}</div>
+    </div>
+
+    <div v-else class="table-responsive">
+      <table class="table table-bordered table-hover mb-0">
+        <thead class="table-light">
+          <tr>
+            <th class="checkbox-col">
+              <input type="checkbox" class="form-check-input" :checked="isAllSelected" @change="toggleSelectAll"/>
+            </th>
+            <th class="actions-col">Actions</th>
+            <th v-for="column in columns" :key="column.key">{{ column.label }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-if="visibleItems.length === 0">
+            <td :colspan="columns.length + 2" class="text-center">No data available.</td>
+          </tr>
+          <tr v-for="item in visibleItems" :key="item.id" :class="{'table-active': isSelected(item.id)}">
+            <td>
+              <input type="checkbox" class="form-check-input" :checked="isSelected(item.id)" @change="toggleSelectItem(item.id)"/>
+            </td>
+            <td>
+              <div class="d-flex flex-wrap">
+                <button class="btn btn-sm btn-outline-info me-1 mb-1" title="Add Child" @click="emitAction('add-child', item)">
+                  <i class="bi bi-plus-lg"></i>
+                </button>
+                <button class="btn btn-sm btn-outline-primary me-1 mb-1" title="View" @click="emitAction('view', item)">
+                  <i class="bi bi-eye"></i>
+                </button>
+                <button class="btn btn-sm btn-outline-success me-1 mb-1" title="Edit" @click="emitAction('edit', item)">
+                  <i class="bi bi-pencil"></i>
+                </button>
+                <button class="btn btn-sm btn-outline-danger me-1 mb-1" title="Delete" @click="emitAction('delete', item)">
+                  <i class="bi bi-trash"></i>
+                </button>
+                <div v-if="customActions.length > 0" class="dropdown mb-1">
+                  <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" title="More Actions">
+                    <i class="bi bi-three-dots-vertical"></i>
+                  </button>
+                  <ul class="dropdown-menu">
+                    <li v-for="action in customActions" :key="action.key">
+                      <a class="dropdown-item" href="#" @click.prevent="emitAction(action.key, item)">{{ action.label }}</a>
+                    </li>
+                  </ul>
+                </div>
+              </div>
+            </td>
+            <td>
+              <span :style="{ paddingLeft: item._level * 25 + 'px' }">
+                <button v-if="item._children && item._children.length > 0" class="btn btn-sm btn-link p-0 me-1 expand-btn" @click="toggleExpand(item)">
+                  <i :class="['bi', item._expanded ? 'bi-chevron-down' : 'bi-chevron-right']"></i>
+                </button>
+                <span v-else class="expand-placeholder"></span>
+                {{ item[columns[0].key] }}
+              </span>
+            </td>
+            <td v-for="column in columns.slice(1)" :key="column.key">{{ item[column.key] }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</template>
+
+<script>
+import axios from 'axios';
+
+// Helper function for recursive search
+function findNodeById(nodes, id) {
+  for (const node of nodes) {
+    if (node.id === id) return node;
+    if (node._children) {
+      const found = findNodeById(node._children, id);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+// Helper function for recursive search and removal
+function findAndRemoveNode(nodes, id) {
+  for (let i = 0; i < nodes.length; i++) {
+    if (nodes[i].id === id) {
+      nodes.splice(i, 1);
+      return true;
+    }
+    if (nodes[i]._children) {
+      if (findAndRemoveNode(nodes[i]._children, id)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+export default {
+  name: 'TreeDatatable',
+  props: {
+    url: { type: String, default: null },
+    columns: { type: Array, required: true },
+    customActions: { type: Array, default: () => [] },
+    rows: { type: Array, default: null },
+  },
+  data() {
+    return {
+      loading: false,
+      error: null,
+      items: [],
+      selectedItemIds: [],
+    };
+  },
+  watch: {
+    rows: {
+      handler(newRows) {
+        if (newRows !== null) {
+          this.loading = false;
+          this.error = null;
+          this.items = this.prepareData(newRows);
+        }
+      },
+      immediate: true,
+      deep: true,
+    },
+  },
+  computed: {
+    visibleItems() {
+      const visible = [];
+      const traverse = (nodes) => {
+        if (!nodes) return;
+        nodes.forEach(node => {
+          visible.push(node);
+          if (node._expanded && node._children) {
+            traverse(node._children);
+          }
+        });
+      };
+      traverse(this.items);
+      return visible;
+    },
+    isAllSelected() {
+      const visibleIds = this.visibleItems.map(item => item.id);
+      if (visibleIds.length === 0) return false;
+      return visibleIds.every(id => this.selectedItemIds.includes(id));
+    },
+  },
+  created() {
+    if (this.rows === null && this.url) {
+      this.fetchData();
+    } else if (this.rows === null && !this.url) {
+      console.warn("TreeDatatable: You must provide either a 'url' or a 'rows' prop.");
+    }
+  },
+  methods: {
+    async fetchData() {
+      if (!this.url) return;
+      this.loading = true;
+      this.error = null;
+      try {
+        const expandedIds = this.getExpandedIds();
+        const params = {};
+        if (expandedIds.length > 0) {
+          params.expanded = expandedIds;
+        }
+        const response = await axios.get(this.url, { params });
+        this.items = this.prepareData(response.data);
+      } catch (e) {
+        console.error("Failed to fetch tree data:", e);
+        this.error = "Could not load data. Please try again later.";
+      } finally {
+        this.loading = false;
+      }
+    },
+    refreshData() {
+      if (this.rows !== null) {
+        this.$emit('refresh', {
+          expandedIds: this.getExpandedIds()
+        });
+      } else {
+        this.fetchData();
+      }
+    },
+    getExpandedIds() {
+      const ids = [];
+      const traverse = (nodes) => {
+        if (!nodes) return;
+        nodes.forEach(node => {
+          if (node._expanded) {
+            ids.push(node.id);
+          }
+          if (node._children) {
+            traverse(node._children);
+          }
+        });
+      };
+      traverse(this.items);
+      return ids;
+    },
+    prepareData(nodes, level = 0) {
+      if (!nodes) return [];
+      return nodes.map(node => {
+        this.$set(node, '_level', level);
+        if (typeof node._expanded === 'undefined') {
+          this.$set(node, '_expanded', false);
+        }
+        if (node._children && node._children.length > 0) {
+          node._children = this.prepareData(node._children, level + 1);
+        }
+        return node;
+      });
+    },
+    toggleExpand(item) {
+      item._expanded = !item._expanded;
+    },
+    emitAction(action, item) {
+      this.$emit('action', { action, item });
+    },
+    isSelected(itemId) {
+      return this.selectedItemIds.includes(itemId);
+    },
+    toggleSelectItem(itemId) {
+      const index = this.selectedItemIds.indexOf(itemId);
+      if (index > -1) {
+        this.selectedItemIds.splice(index, 1);
+      } else {
+        this.selectedItemIds.push(itemId);
+      }
+    },
+    toggleSelectAll() {
+      if (this.isAllSelected) {
+        const visibleIds = this.visibleItems.map(item => item.id);
+        this.selectedItemIds = this.selectedItemIds.filter(id => !visibleIds.includes(id));
+      } else {
+        this.visibleItems.forEach(item => {
+          if (!this.selectedItemIds.includes(item.id)) {
+            this.selectedItemIds.push(item.id);
+          }
+        });
+      }
+    },
+    addChildItem(parentId, newItem) {
+      if (parentId === null || parentId === undefined) {
+        const preparedItem = this.prepareData([newItem], 0)[0];
+        this.items.push(preparedItem);
+      } else {
+        const parentNode = findNodeById(this.items, parentId);
+        if (parentNode) {
+          if (!parentNode._children) {
+            this.$set(parentNode, '_children', []);
+          }
+          const childLevel = parentNode._level + 1;
+          const preparedItem = this.prepareData([newItem], childLevel)[0];
+          parentNode._children.push(preparedItem);
+          parentNode._expanded = true;
+        } else {
+          console.error(`Parent with ID ${parentId} not found.`);
+        }
+      }
+    },
+    updateItem(updatedItem) {
+      const nodeToUpdate = findNodeById(this.items, updatedItem.id);
+      if (nodeToUpdate) {
+        Object.assign(nodeToUpdate, updatedItem);
+      } else {
+        console.error(`Item with ID ${updatedItem.id} not found for update.`);
+      }
+    },
+    deleteItem(itemId) {
+      if (findAndRemoveNode(this.items, itemId)) {
+        const index = this.selectedItemIds.indexOf(itemId);
+        if (index > -1) {
+          this.selectedItemIds.splice(index, 1);
+        }
+      } else {
+        console.error(`Item with ID ${itemId} not found for deletion.`);
+      }
+    },
+  },
+};
+</script>
+
+<style scoped>
+.tree-datatable-container {
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+.checkbox-col { width: 1%; text-align: center; }
+.actions-col { width: auto; min-width: 220px; }
+.table td, .table th { vertical-align: middle; }
+.expand-btn { color: #6c757d; text-decoration: none; }
+.expand-btn:hover { color: #212529; }
+.expand-placeholder { display: inline-block; width: 1.5rem; }
+.table-responsive { overflow-x: visible; }
+.dropdown-menu { z-index: 1000; }
+</style>
+```
+
+---
+
+#### 1.3. `src/App.vue` (Complete Usage Example)
+
+```vue
+<template>
+  <div id="app" class="container mt-4 mb-5">
+    <header class="mb-4">
+      <h1>Vue 2 Tree Datatable - External Loader Demo</h1>
+      <p>The parent component now controls data fetching, loading, and error states.</p>
+    </header>
+
+    <div class="mb-3 d-flex">
+      <button class="btn btn-primary me-2" @click="addRootItem">
+        <i class="bi bi-plus-circle"></i> Add Root Item
+      </button>
+      <button class="btn btn-secondary" @click="refreshTable">
+        <i class="bi bi-arrow-clockwise"></i> Refresh & Preserve State
+      </button>
+    </div>
+
+    <!-- Parent component's loading/error indicators -->
+    <div v-if="isLoading" class="text-center my-4">
+      <div class="spinner-border text-primary" role="status">
+        <span class="visually-hidden">Loading...</span>
+      </div>
+      <p>Loading data from parent...</p>
+    </div>
+    <div v-if="errorMessage" class="alert alert-danger">
+      {{ errorMessage }}
+    </div>
+
+    <!-- The TreeDatatable component, now controlled by the 'rows' prop -->
+    <TreeDatatable
+      v-if="!isLoading && !errorMessage"
+      ref="treeDatatable"
+      :rows="tableData"
+      :columns="tableColumns"
+      :custom-actions="customActions"
+      @action="handleTableAction"
+      @refresh="handleRefresh"
+    />
+
+    <div v-if="lastAction" class="card mt-4">
+      <div class="card-header">Last Action Triggered</div>
+      <div class="card-body">
+        <pre>{{ lastAction }}</pre>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script>
+import TreeDatatable from './components/TreeDatatable.vue';
+import axios from 'axios';
+import MockAdapter from 'axios-mock-adapter';
+
+// Mocking Axios for Demonstration
+const mock = new MockAdapter(axios, { delayResponse: 750 });
+const mockData = [
+  { id: 1, name: 'Documents', type: 'Folder', size: '1.2 GB', lastModified: '2023-10-26', _children: [
+      { id: 2, name: 'Projects', type: 'Folder', size: '750 MB', lastModified: '2023-10-25', _children: [
+          { id: 3, name: 'project-alpha.docx', type: 'File', size: '1.5 MB', lastModified: '2023-09-10' },
+          { id: 4, name: 'project-beta.pdf', type: 'File', size: '2.3 MB', lastModified: '2023-10-01' },
+        ]
+      },
+      { id: 5, name: 'Invoices', type: 'Folder', size: '450 MB', lastModified: '2023-10-20' },
+      { id: 6, name: 'resume.pdf', type: 'File', size: '300 KB', lastModified: '2023-08-15' },
+    ]
+  },
+  { id: 7, name: 'Downloads', type: 'Folder', size: '3.5 GB', lastModified: '2023-10-27', _children: [
+       { id: 8, name: 'vue-setup.exe', type: 'File', size: '1.1 GB', lastModified: '2023-10-27' },
+    ]
+  },
+  { id: 9, name: 'README.md', type: 'File', size: '1 KB', lastModified: '2023-01-01' },
+];
+
+mock.onGet("/api/file-system").reply(config => {
+    console.log("Mock API received request with params:", config.params);
+    return [200, mockData];
+});
+let nextId = 100;
+
+export default {
+  name: 'App',
+  components: {
+    TreeDatatable
+  },
+  data() {
+    return {
+      tableData: [],
+      isLoading: false,
+      errorMessage: null,
+      tableColumns: [
+        { key: 'name', label: 'Name' },
+        { key: 'type', label: 'Type' },
+        { key: 'size', label: 'Size' },
+        { key: 'lastModified', label: 'Last Modified' },
+      ],
+      customActions: [
+        { key: 'share', label: 'Share' },
+        { key: 'archive', label: 'Archive' },
+      ],
+      lastAction: null,
+    };
+  },
+  created() {
+    this.loadTableData();
+  },
+  methods: {
+    async loadTableData(params = {}) {
+      this.isLoading = true;
+      this.errorMessage = null;
+      try {
+        const response = await axios.get('/api/file-system', { params });
+        this.tableData = response.data;
+      } catch (error) {
+        this.errorMessage = "An error occurred while loading data.";
+        console.error(error);
+      } finally {
+        this.isLoading = false;
+      }
+    },
+    handleRefresh(payload) {
+      console.log('Refresh event received from child with payload:', payload);
+      alert("Parent is refreshing data now...");
+      this.loadTableData({ expanded: payload.expandedIds });
+    },
+    refreshTable() {
+      this.$refs.treeDatatable.refreshData();
+    },
+    handleTableAction(payload) {
+      this.lastAction = payload;
+      const { action, item } = payload;
+
+      switch (action) {
+        case 'add-child': this.addChild(item); break;
+        case 'edit': this.editItem(item); break;
+        case 'delete': this.deleteItem(item); break;
+        default: alert(`Action: '${action}' on item: '${item.name}'`);
+      }
+    },
+    addRootItem() {
+      const name = prompt("Enter the name for the new root item:");
+      if (!name) return;
+      const newItem = { id: nextId++, name, type: 'Folder', size: '0 KB', lastModified: new Date().toISOString().split('T')[0], _children: [] };
+      this.$refs.treeDatatable.addChildItem(null, newItem);
+    },
+    addChild(parentItem) {
+      const name = prompt(`Enter the name for the new child of "${parentItem.name}":`);
+      if (!name) return;
+      const newChild = { id: nextId++, name, type: 'File', size: '1 KB', lastModified: new Date().toISOString().split('T')[0] };
+      this.$refs.treeDatatable.addChildItem(parentItem.id, newChild);
+    },
+    editItem(item) {
+      const newName = prompt(`Enter a new name for "${item.name}":`, item.name);
+      if (!newName || newName === item.name) return;
+      const updatedItem = { ...item, name: newName, lastModified: new Date().toISOString().split('T')[0] };
+      this.$refs.treeDatatable.updateItem(updatedItem);
+    },
+    deleteItem(item) {
+      if (confirm(`Are you sure you want to delete "${item.name}"?`)) {
+        this.$refs.treeDatatable.deleteItem(item.id);
+      }
+    }
+  }
+}
+</script>
+
+<style>
+body { background-color: #f8f9fa; }
+</style>
+```
+
+---
+
+### Part 2: Laravel + MongoDB Backend (Complete Code)
+
+The backend code remains the same as it correctly handles the `expanded` parameter.
+
+#### 2.1. Model: `app/Models/FileSystemItem.php`
+
+```php
+<?php
+
+namespace App\Models;
+
+use Jenssegers\Mongodb\Eloquent\Model;
+
+class FileSystemItem extends Model
+{
+    protected $collection = 'file_system_items';
+    protected $connection = 'mongodb';
+    protected $fillable = ['name', 'type', 'size', 'lastModified', '_parentId'];
+    protected $appends = ['id'];
+
+    public function getIdAttribute()
+    {
+        return $this->attributes['_id'];
+    }
+}
+```
+
+#### 2.2. Controller: `app/Http/Controllers/FileSystemController.php`
+
+```php
+<?php
+
+namespace App\Http\Controllers;
+
+use Illuminate\Http\Request;
+use App\Models\FileSystemItem;
+use Illuminate\Support\Collection;
+
+class FileSystemController extends Controller
+{
+    public function getData(Request $request)
+    {
+        $page = $request->input('page', 1);
+        $perPage = $request->input('perPage', 10);
+        $expandedIds = $request->input('expanded');
+        if ($expandedIds !== null && !is_array($expandedIds)) {
+            $expandedIds = [];
+        }
+
+        $rootItemsQuery = FileSystemItem::whereNull('_parentId');
+        $paginatedRootItems = (clone $rootItemsQuery)->skip(($page - 1) * $perPage)->take($perPage)->get();
+
+        if ($paginatedRootItems->isEmpty()) {
+            return response()->json([]);
+        }
+
+        $allChildren = FileSystemItem::whereNotNull('_parentId')->get();
+        $allItems = $paginatedRootItems->concat($allChildren);
+
+        $tree = $this->buildTree($allItems, $paginatedRootItems->pluck('id')->toArray(), $expandedIds);
+
+        return response()->json($tree);
+    }
+
+    private function buildTree(Collection $items, array $rootIds, ?array $expandedIds): array
+    {
+        $map = [];
+        $tree = [];
+
+        foreach ($items as $item) {
+            $itemId = (string) $item->id;
+            $map[$itemId] = $item;
+            $map[$itemId]->_children = [];
+
+            if ($expandedIds !== null) {
+                $map[$itemId]->_expanded = in_array($itemId, $expandedIds);
+            } else {
+                $map[$itemId]->_expanded = in_array($itemId, $rootIds);
+            }
+        }
+
+        foreach ($map as $itemId => &$item) {
+            $parentId = $item->_parentId;
+            if ($parentId && isset($map[$parentId])) {
+                $map[$parentId]->_children[] = $item;
+            }
+        }
+        unset($item);
+
+        foreach ($rootIds as $rootId) {
+            if (isset($map[$rootId])) {
+                $tree[] = $map[$rootId];
+            }
+        }
+
+        return $tree;
+    }
+}
+```
+
+#### 2.3. Route: `routes/api.php`
+
+```php
+<?php
+
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\FileSystemController;
+
+Route::get('/file-system', [FileSystemController::class, 'getData']);
+```
+
+---
+
+### Part 3: Complete Component Documentation
+
+### 3.1. Documentation (English)
+
+## `TreeDatatable` Component
+
+A reusable Vue 2 component for displaying hierarchical data. It can fetch data internally via a URL or accept data directly via a prop.
+
+### Props
+
+| Prop            | Type    | Required | Default     | Description                                                                                                                              |
+| --------------- | ------- | -------- | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `url`           | String  | No       | `null`      | The API endpoint to fetch data from. Used only if the `rows` prop is not provided.                                                       |
+| **`rows`**      | Array   | No       | `null`      | An array of data objects to populate the table. If provided, this will override the `url` prop and give the parent component full control over the data. |
+| `columns`       | Array   | Yes      | `undefined` | An array of objects defining the table columns. The first object represents the main tree column. Ex: `[{key: 'name', label: 'Name'}]`    |
+| `customActions` | Array   | No       | `[]`        | An array of objects for the "More Actions" dropdown. Ex: `[{key: 'archive', label: 'Archive'}]`                                            |
+
+### Events
+
+-   **`@action`**
+-   **Description:** Emitted when any action button (CRUD, custom, etc.) is clicked.
+-   **Payload:** `{ action: String, item: Object }`.
+
+-   **`@refresh`**
+-   **Description:** Emitted by the `refreshData()` method **only when in external mode** (i.e., when the `rows` prop is used). It signals to the parent component that it should fetch new data.
+-   **Payload:** `{ expandedIds: Array }`. Contains the list of currently expanded node IDs to allow for state preservation.
+
+### Public Methods
+
+-   **`refreshData()`**
+-   **Description:** Behavior depends on the mode:
+-   **Internal Mode (`url` prop):** Re-fetches data from the API endpoint.
+-   **External Mode (`rows` prop):** Emits the `@refresh` event.
+
+-   **`addChildItem(parentId, newItem)`**
+-   **`updateItem(updatedItem)`**
+-   **`deleteItem(itemId)`**
+-   *Note: These methods directly manipulate the component's internal state. When using external mode, it is recommended that the parent component updates the `rows` prop after a successful API call for these actions to ensure data consistency.*
+
+### Expected Data Structure
+
+The component expects the data (from the `rows` prop or API) to be an array of objects in a hierarchical format.
+
+-   Child rows must be contained within a `_children` array property.
+-   The server/parent can set the initial state by including a `_expanded: true/false` property.
+
+---
+
+### 3.2. Dokumentasi (Bahasa Indonesia)
+
+## Komponen `TreeDatatable`
+
+Komponen Vue 2 yang dapat digunakan kembali untuk menampilkan data hierarkis. Komponen ini dapat mengambil data secara internal melalui URL atau menerima data secara langsung melalui prop.
+
+### Properti (Props)
+
+| Properti        | Tipe    | Wajib | Default     | Deskripsi                                                                                                                                     |
+| --------------- | ------- | ----- | ----------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `url`           | String  | Tidak | `null`      | Endpoint API untuk mengambil data. Hanya digunakan jika properti `rows` tidak disediakan.                                                     |
+| **`rows`**      | Array   | Tidak | `null`      | Sebuah array objek data untuk mengisi tabel. Jika disediakan, properti ini akan mengesampingkan properti `url` dan memberikan kontrol penuh kepada komponen induk. |
+| `columns`       | Array   | Ya    | `undefined` | Array objek yang mendefinisikan kolom tabel. Objek pertama mewakili kolom pohon utama. Cth: `[{key: 'name', label: 'Nama'}]`                    |
+| `customActions` | Array   | Tidak | `[]`        | Array objek untuk dropdown "Aksi Lainnya". Cth: `[{key: 'archive', label: 'Arsipkan'}]`                                                        |
+
+### Event
+
+-   **`@action`**
+-   **Deskripsi:** Dikeluarkan saat tombol aksi (CRUD, kustom, dll.) diklik.
+-   **Payload:** `{ action: String, item: Object }`.
+
+-   **`@refresh`**
+-   **Deskripsi:** Dikeluarkan oleh metode `refreshData()` **hanya saat dalam mode eksternal** (yaitu, ketika prop `rows` digunakan). Ini memberi sinyal kepada komponen induk bahwa ia harus mengambil data baru.
+-   **Payload:** `{ expandedIds: Array }`. Berisi daftar ID node yang sedang dibuka untuk memungkinkan penyimpanan state.
+
+### Metode Publik (Public Methods)
+
+-   **`refreshData()`**
+-   **Deskripsi:** Perilakunya tergantung pada mode:
+-   **Mode Internal (prop `url`):** Mengambil ulang data dari endpoint API.
+-   **Mode Eksternal (prop `rows`):** Mengeluarkan event `@refresh`.
+
+-   **`addChildItem(parentId, newItem)`**
+-   **`updateItem(updatedItem)`**
+-   **`deleteItem(itemId)`**
+-   *Catatan: Metode-metode ini secara langsung memanipulasi state internal komponen. Saat menggunakan mode eksternal, disarankan agar komponen induk memperbarui prop `rows` setelah panggilan API yang sukses untuk aksi-aksi ini demi menjaga konsistensi data.*
+
+### Struktur Data yang Diharapkan
+
+Komponen ini mengharapkan data (dari prop `rows` atau API) berupa array objek dalam format hierarkis.
+
+-   Baris anak harus berada di dalam properti array `_children`.
+-   Server/induk dapat mengatur state awal dengan menyertakan properti `_expanded: true/false`.
+
+## Update : Search with expanded parents
+
+Of course. This is a crucial feature for usability. The logic will be primarily handled by the backend, which will receive a search query, find all matching items, trace their parents to the root, and then construct a new tree containing only the necessary items with all parent nodes pre-expanded.
+
+The frontend will be updated to include a search input that triggers this API call.
+
+Here is the complete, final code for all files, with the new search logic integrated.
+
+---
+
+### Part 1: Vue 2 Frontend (Complete Code)
+
+The `TreeDatatable.vue` component itself requires **no changes**, as it is a "controlled" component. It simply renders the `rows` it is given. All the new logic will be in the parent component, `App.vue`.
+
+#### 1.1. `src/components/TreeDatatable.vue` (Unchanged)
+
+This file remains the same as the previous "External Loader" version. I am including it here for completeness.
+
+```vue
+<template>
+  <div class="tree-datatable-container card">
+    <!-- Loading state is only shown when fetching data internally (url prop is used) -->
+    <div v-if="loading && rows === null" class="card-body text-center">
+      <div class="spinner-border" role="status">
+        <span class="visually-hidden">Loading...</span>
+      </div>
+      <p>Loading Data...</p>
+    </div>
+
+    <!-- Error state is only shown when fetching data internally (url prop is used) -->
+    <div v-else-if="error && rows === null" class="card-body text-center">
+      <div class="alert alert-danger">{{ error }}</div>
+    </div>
+
+    <div v-else class="table-responsive">
+      <table class="table table-bordered table-hover mb-0">
+        <thead class="table-light">
+          <tr>
+            <th class="checkbox-col">
+              <input type="checkbox" class="form-check-input" :checked="isAllSelected" @change="toggleSelectAll"/>
+            </th>
+            <th class="actions-col">Actions</th>
+            <th v-for="column in columns" :key="column.key">{{ column.label }}</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-if="visibleItems.length === 0">
+            <td :colspan="columns.length + 2" class="text-center">No data available.</td>
+          </tr>
+          <tr v-for="item in visibleItems" :key="item.id" :class="{'table-active': isSelected(item.id)}">
+            <td>
+              <input type="checkbox" class="form-check-input" :checked="isSelected(item.id)" @change="toggleSelectItem(item.id)"/>
+            </td>
+            <td>
+              <div class="d-flex flex-wrap">
+                <button class="btn btn-sm btn-outline-info me-1 mb-1" title="Add Child" @click="emitAction('add-child', item)">
+                  <i class="bi bi-plus-lg"></i>
+                </button>
+                <button class="btn btn-sm btn-outline-primary me-1 mb-1" title="View" @click="emitAction('view', item)">
+                  <i class="bi bi-eye"></i>
+                </button>
+                <button class="btn btn-sm btn-outline-success me-1 mb-1" title="Edit" @click="emitAction('edit', item)">
+                  <i class="bi bi-pencil"></i>
+                </button>
+                <button class="btn btn-sm btn-outline-danger me-1 mb-1" title="Delete" @click="emitAction('delete', item)">
+                  <i class="bi bi-trash"></i>
+                </button>
+                <div v-if="customActions.length > 0" class="dropdown mb-1">
+                  <button class="btn btn-sm btn-outline-secondary dropdown-toggle" type="button" data-bs-toggle="dropdown" title="More Actions">
+                    <i class="bi bi-three-dots-vertical"></i>
+                  </button>
+                  <ul class="dropdown-menu">
+                    <li v-for="action in customActions" :key="action.key">
+                      <a class="dropdown-item" href="#" @click.prevent="emitAction(action.key, item)">{{ action.label }}</a>
+                    </li>
+                  </ul>
+                </div>
+              </div>
+            </td>
+            <td>
+              <span :style="{ paddingLeft: item._level * 25 + 'px' }">
+                <button v-if="item._children && item._children.length > 0" class="btn btn-sm btn-link p-0 me-1 expand-btn" @click="toggleExpand(item)">
+                  <i :class="['bi', item._expanded ? 'bi-chevron-down' : 'bi-chevron-right']"></i>
+                </button>
+                <span v-else class="expand-placeholder"></span>
+                {{ item[columns[0].key] }}
+              </span>
+            </td>
+            <td v-for="column in columns.slice(1)" :key="column.key">{{ item[column.key] }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</template>
+<script>
+import axios from 'axios';
+
+function findNodeById(nodes, id) {
+  for (const node of nodes) {
+    if (node.id === id) return node;
+    if (node._children) {
+      const found = findNodeById(node._children, id);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+function findAndRemoveNode(nodes, id) {
+  for (let i = 0; i < nodes.length; i++) {
+    if (nodes[i].id === id) {
+      nodes.splice(i, 1);
+      return true;
+    }
+    if (nodes[i]._children) {
+      if (findAndRemoveNode(nodes[i]._children, id)) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
+export default {
+  name: 'TreeDatatable',
+  props: {
+    url: { type: String, default: null },
+    columns: { type: Array, required: true },
+    customActions: { type: Array, default: () => [] },
+    rows: { type: Array, default: null },
+  },
+  data() {
+    return {
+      loading: false,
+      error: null,
+      items: [],
+      selectedItemIds: [],
+    };
+  },
+  watch: {
+    rows: {
+      handler(newRows) {
+        if (newRows !== null) {
+          this.loading = false;
+          this.error = null;
+          this.items = this.prepareData(newRows);
+        }
+      },
+      immediate: true,
+      deep: true,
+    },
+  },
+  computed: {
+    visibleItems() {
+      const visible = [];
+      const traverse = (nodes) => {
+        if (!nodes) return;
+        nodes.forEach(node => {
+          visible.push(node);
+          if (node._expanded && node._children) {
+            traverse(node._children);
+          }
+        });
+      };
+      traverse(this.items);
+      return visible;
+    },
+    isAllSelected() {
+      const visibleIds = this.visibleItems.map(item => item.id);
+      if (visibleIds.length === 0) return false;
+      return visibleIds.every(id => this.selectedItemIds.includes(id));
+    },
+  },
+  created() {
+    if (this.rows === null && this.url) {
+      this.fetchData();
+    } else if (this.rows === null && !this.url) {
+      console.warn("TreeDatatable: You must provide either a 'url' or a 'rows' prop.");
+    }
+  },
+  methods: {
+    async fetchData() {
+      if (!this.url) return;
+      this.loading = true;
+      this.error = null;
+      try {
+        const expandedIds = this.getExpandedIds();
+        const params = {};
+        if (expandedIds.length > 0) {
+          params.expanded = expandedIds;
+        }
+        const response = await axios.get(this.url, { params });
+        this.items = this.prepareData(response.data);
+      } catch (e) {
+        console.error("Failed to fetch tree data:", e);
+        this.error = "Could not load data. Please try again later.";
+      } finally {
+        this.loading = false;
+      }
+    },
+    refreshData() {
+      if (this.rows !== null) {
+        this.$emit('refresh', {
+          expandedIds: this.getExpandedIds()
+        });
+      } else {
+        this.fetchData();
+      }
+    },
+    getExpandedIds() {
+      const ids = [];
+      const traverse = (nodes) => {
+        if (!nodes) return;
+        nodes.forEach(node => {
+          if (node._expanded) {
+            ids.push(node.id);
+          }
+          if (node._children) {
+            traverse(node._children);
+          }
+        });
+      };
+      traverse(this.items);
+      return ids;
+    },
+    prepareData(nodes, level = 0) {
+      if (!nodes) return [];
+      return nodes.map(node => {
+        this.$set(node, '_level', level);
+        if (typeof node._expanded === 'undefined') {
+          this.$set(node, '_expanded', false);
+        }
+        if (node._children && node._children.length > 0) {
+          node._children = this.prepareData(node._children, level + 1);
+        }
+        return node;
+      });
+    },
+    toggleExpand(item) {
+      item._expanded = !item._expanded;
+    },
+    emitAction(action, item) {
+      this.$emit('action', { action, item });
+    },
+    isSelected(itemId) {
+      return this.selectedItemIds.includes(itemId);
+    },
+    toggleSelectItem(itemId) {
+      const index = this.selectedItemIds.indexOf(itemId);
+      if (index > -1) {
+        this.selectedItemIds.splice(index, 1);
+      } else {
+        this.selectedItemIds.push(itemId);
+      }
+    },
+    toggleSelectAll() {
+      if (this.isAllSelected) {
+        const visibleIds = this.visibleItems.map(item => item.id);
+        this.selectedItemIds = this.selectedItemIds.filter(id => !visibleIds.includes(id));
+      } else {
+        this.visibleItems.forEach(item => {
+          if (!this.selectedItemIds.includes(item.id)) {
+            this.selectedItemIds.push(item.id);
+          }
+        });
+      }
+    },
+    addChildItem(parentId, newItem) {
+      if (parentId === null || parentId === undefined) {
+        const preparedItem = this.prepareData([newItem], 0)[0];
+        this.items.push(preparedItem);
+      } else {
+        const parentNode = findNodeById(this.items, parentId);
+        if (parentNode) {
+          if (!parentNode._children) {
+            this.$set(parentNode, '_children', []);
+          }
+          const childLevel = parentNode._level + 1;
+          const preparedItem = this.prepareData([newItem], childLevel)[0];
+          parentNode._children.push(preparedItem);
+          parentNode._expanded = true;
+        } else {
+          console.error(`Parent with ID ${parentId} not found.`);
+        }
+      }
+    },
+    updateItem(updatedItem) {
+      const nodeToUpdate = findNodeById(this.items, updatedItem.id);
+      if (nodeToUpdate) {
+        Object.assign(nodeToUpdate, updatedItem);
+      } else {
+        console.error(`Item with ID ${updatedItem.id} not found for update.`);
+      }
+    },
+    deleteItem(itemId) {
+      if (findAndRemoveNode(this.items, itemId)) {
+        const index = this.selectedItemIds.indexOf(itemId);
+        if (index > -1) {
+          this.selectedItemIds.splice(index, 1);
+        }
+      } else {
+        console.error(`Item with ID ${itemId} not found for deletion.`);
+      }
+    },
+  },
+};
+</script>
+<style scoped>
+.tree-datatable-container {
+  font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+.checkbox-col { width: 1%; text-align: center; }
+.actions-col { width: auto; min-width: 220px; }
+.table td, .table th { vertical-align: middle; }
+.expand-btn { color: #6c757d; text-decoration: none; }
+.expand-btn:hover { color: #212529; }
+.expand-placeholder { display: inline-block; width: 1.5rem; }
+.table-responsive { overflow-x: visible; }
+.dropdown-menu { z-index: 1000; }
+</style>
+```
+
+---
+
+#### 1.2. `src/App.vue` (Complete & Modified Example)
+
+This component now includes the search input and debounced search logic.
+
+```vue
+<template>
+  <div id="app" class="container mt-4 mb-5">
+    <header class="mb-4">
+      <h1>Vue 2 Tree Datatable - Search Demo</h1>
+      <p>The parent component now controls data fetching, loading, error states, and search functionality.</p>
+    </header>
+
+    <div class="row mb-3">
+        <!-- Action Buttons -->
+        <div class="col-md-6 mb-2 mb-md-0">
+            <button class="btn btn-primary me-2" @click="addRootItem">
+                <i class="bi bi-plus-circle"></i> Add Root Item
+            </button>
+            <button class="btn btn-secondary" @click="refreshTable">
+                <i class="bi bi-arrow-clockwise"></i> Refresh
+            </button>
+        </div>
+        <!-- Search Input -->
+        <div class="col-md-6">
+            <div class="input-group">
+                <span class="input-group-text"><i class="bi bi-search"></i></span>
+                <input
+                    type="search"
+                    class="form-control"
+                    placeholder="Search by name..."
+                    v-model="searchQuery"
+                >
+            </div>
+        </div>
+    </div>
+
+    <!-- Parent component's loading/error indicators -->
+    <div v-if="isLoading" class="text-center my-4">
+      <div class="spinner-border text-primary" role="status">
+        <span class="visually-hidden">Loading...</span>
+      </div>
+      <p>Loading data from parent...</p>
+    </div>
+    <div v-if="errorMessage" class="alert alert-danger">
+      {{ errorMessage }}
+    </div>
+
+    <!-- The TreeDatatable component -->
+    <TreeDatatable
+      v-if="!isLoading && !errorMessage"
+      ref="treeDatatable"
+      :rows="tableData"
+      :columns="tableColumns"
+      :custom-actions="customActions"
+      @action="handleTableAction"
+      @refresh="handleRefresh"
+    />
+
+    <div v-if="lastAction" class="card mt-4">
+      <div class="card-header">Last Action Triggered</div>
+      <div class="card-body">
+        <pre>{{ lastAction }}</pre>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script>
+import TreeDatatable from './components/TreeDatatable.vue';
+import axios from 'axios';
+import MockAdapter from 'axios-mock-adapter';
+
+// Mocking Axios is the same
+const mock = new MockAdapter(axios, { delayResponse: 500 });
+const mockData = [ /* ... same data as before ... */ ];
+mock.onGet("/api/file-system").reply(config => {
+    console.log("Mock API received request with params:", config.params);
+    // This mock doesn't simulate search, we rely on the real backend for that logic.
+    return [200, mockData];
+});
+let nextId = 100;
+
+export default {
+  name: 'App',
+  components: { TreeDatatable },
+  data() {
+    return {
+      tableData: [],
+      isLoading: false,
+      errorMessage: null,
+      searchQuery: '',
+      searchTimeout: null,
+      tableColumns: [
+        { key: 'name', label: 'Name' },
+        { key: 'type', label: 'Type' },
+        { key: 'size', label: 'Size' },
+        { key: 'lastModified', label: 'Last Modified' },
+      ],
+      customActions: [
+        { key: 'share', label: 'Share' },
+        { key: 'archive', label: 'Archive' },
+      ],
+      lastAction: null,
+    };
+  },
+  watch: {
+    // Watch for changes to the search query and debounce the API call
+    searchQuery() {
+        clearTimeout(this.searchTimeout);
+        this.searchTimeout = setTimeout(() => {
+            this.loadTableData();
+        }, 300); // 300ms debounce delay
+    }
+  },
+  created() {
+    this.loadTableData();
+  },
+  methods: {
+    async loadTableData(options = {}) {
+      this.isLoading = true;
+      this.errorMessage = null;
+
+      // Build parameters dynamically
+      const params = { ...options };
+      if (this.searchQuery) {
+        params.search = this.searchQuery;
+      }
+
+      try {
+        const response = await axios.get('/api/file-system', { params });
+        this.tableData = response.data;
+      } catch (error) {
+        this.errorMessage = "An error occurred while loading data.";
+        console.error(error);
+      } finally {
+        this.isLoading = false;
+      }
+    },
+    handleRefresh(payload) {
+      console.log('Refresh event received from child:', payload);
+      // When refreshing, include both the current search query and the expanded state
+      this.loadTableData({ expanded: payload.expandedIds });
+    },
+    refreshTable() {
+      this.$refs.treeDatatable.refreshData();
+    },
+    handleTableAction(payload) {
+      this.lastAction = payload;
+      const { action, item } = payload;
+
+      switch (action) {
+        case 'add-child': this.addChild(item); break;
+        case 'edit': this.editItem(item); break;
+        case 'delete': this.deleteItem(item); break;
+        default: alert(`Action: '${action}' on item: '${item.name}'`);
+      }
+    },
+    addRootItem() {
+      const name = prompt("Enter the name for the new root item:");
+      if (!name) return;
+      const newItem = { id: nextId++, name, type: 'Folder', size: '0 KB', lastModified: new Date().toISOString().split('T')[0], _children: [] };
+      this.$refs.treeDatatable.addChildItem(null, newItem);
+    },
+    addChild(parentItem) {
+      const name = prompt(`Enter the name for the new child of "${parentItem.name}":`);
+      if (!name) return;
+      const newChild = { id: nextId++, name, type: 'File', size: '1 KB', lastModified: new Date().toISOString().split('T')[0] };
+      this.$refs.treeDatatable.addChildItem(parentItem.id, newChild);
+    },
+    editItem(item) {
+      const newName = prompt(`Enter a new name for "${item.name}":`, item.name);
+      if (!newName || newName === item.name) return;
+      const updatedItem = { ...item, name: newName, lastModified: new Date().toISOString().split('T')[0] };
+      this.$refs.treeDatatable.updateItem(updatedItem);
+    },
+    deleteItem(item) {
+      if (confirm(`Are you sure you want to delete "${item.name}"?`)) {
+        this.$refs.treeDatatable.deleteItem(item.id);
+      }
+    }
+  }
+}
+</script>
+<style>
+body { background-color: #f8f9fa; }
+</style>
+```
+
+---
+
+### Part 2: Laravel + MongoDB Backend (Complete Code)
+
+The controller now has two distinct logic paths: one for standard paginated requests and one for search requests.
+
+#### 2.1. Controller: `app/Http/Controllers/FileSystemController.php` (Modified)
+
+```php
+<?php
+
+namespace App\Http\Controllers;
+
+use Illuminate\Http\Request;
+use App\Models\FileSystemItem;
+use Illuminate\Support\Collection;
+
+class FileSystemController extends Controller
+{
+    /**
+     * Main data entry point. Delegates to search or paginated logic.
+     */
+    public function getData(Request $request)
+    {
+        $searchQuery = $request->input('search');
+
+        if ($searchQuery) {
+            // If a search query is present, use the search logic
+            $tree = $this->getSearchResults($searchQuery);
+        } else {
+            // Otherwise, use the standard paginated logic
+            $page = $request->input('page', 1);
+            $perPage = $request->input('perPage', 10);
+            $expandedIds = $request->input('expanded');
+
+            $tree = $this->getPaginatedData($page, $perPage, $expandedIds);
+        }
+
+        return response()->json($tree);
+    }
+
+    /**
+     * Handles standard paginated requests.
+     */
+    private function getPaginatedData(int $page, int $perPage, ?array $expandedIds): array
+    {
+        $rootItemsQuery = FileSystemItem::whereNull('_parentId');
+        $paginatedRootItems = (clone $rootItemsQuery)->skip(($page - 1) * $perPage)->take($perPage)->get();
+
+        if ($paginatedRootItems->isEmpty()) {
+            return [];
+        }
+
+        $allChildren = FileSystemItem::whereNotNull('_parentId')->get();
+        $allItems = $paginatedRootItems->concat($allChildren);
+
+        return $this->buildTree($allItems, $paginatedRootItems->pluck('id')->toArray(), $expandedIds);
+    }
+
+    /**
+     * Handles search requests. Finds matches, their ancestors, and builds a filtered tree.
+     */
+    private function getSearchResults(string $searchQuery): array
+    {
+        // 1. Find all items that match the search query (case-insensitive)
+        $matchedItems = FileSystemItem::where('name', 'like', "%{$searchQuery}%")->get();
+
+        if ($matchedItems->isEmpty()) {
+            return [];
+        }
+
+        // 2. To find ancestors efficiently, fetch all items and create a map
+        $allItems = FileSystemItem::all();
+        $itemsById = $allItems->keyBy('id');
+
+        $requiredIds = collect();
+        $ancestorIds = collect();
+
+        // 3. For each matched item, traverse up to find all its parents
+        foreach ($matchedItems as $item) {
+            $requiredIds->put($item->id, true); // Add the matched item itself
+            $current = $item;
+            while ($current && $current->_parentId) {
+                if ($requiredIds->has($current->_parentId)) {
+                    break; // Stop if we've already processed this parent branch
+                }
+                $requiredIds->put($current->_parentId, true);
+                $ancestorIds->put($current->_parentId, true); // Mark as an ancestor
+                $current = $itemsById->get($current->_parentId);
+            }
+        }
+
+        // 4. Filter the complete item list to include only required items
+        $finalItems = $allItems->whereIn('id', $requiredIds->keys());
+
+        // 5. Identify the root nodes of this new, filtered tree
+        $rootIds = $finalItems->filter(function ($item) {
+            return !$item->_parentId || !in_array($item->_parentId, $item->pluck('id')->toArray());
+        })->pluck('id')->toArray();
+
+        // 6. Build the tree, forcing all ancestors to be expanded
+        return $this->buildTree($finalItems, $rootIds, $ancestorIds->keys()->toArray());
+    }
+
+    /**
+     * Reusable tree builder function.
+     */
+    private function buildTree(Collection $items, array $rootIds, ?array $expandedIds): array
+    {
+        $map = [];
+        $tree = [];
+
+        foreach ($items as $item) {
+            $itemId = (string) $item->id;
+            $map[$itemId] = $item;
+            $map[$itemId]->_children = [];
+
+            if ($expandedIds !== null) {
+                $map[$itemId]->_expanded = in_array($itemId, $expandedIds);
+            } else {
+                $map[$itemId]->_expanded = in_array($itemId, $rootIds);
+            }
+        }
+
+        foreach ($map as $itemId => &$item) {
+            $parentId = $item->_parentId;
+            if ($parentId && isset($map[$parentId])) {
+                $map[$parentId]->_children[] = $item;
+            }
+        }
+        unset($item);
+
+        foreach ($rootIds as $rootId) {
+            if (isset($map[$rootId])) {
+                $tree[] = $map[$rootId];
+            }
+        }
+
+        return $tree;
+    }
+}
+```
+
+---
+
+### Part 3: Updated Documentation
+
+The API documentation is updated to reflect the new `search` parameter.
+
+### 3.1. Documentation (English)
+
+## `TreeDatatable` Component & API
+
+### Component (`TreeDatatable.vue`)
+
+A reusable Vue 2 component for displaying hierarchical data. It can fetch data internally via a URL or accept data directly via a prop.
+
+**Props:** `url`, `rows`, `columns`, `customActions`.
+**Events:** `@action`, `@refresh`.
+**Public Methods:** `refreshData()`, `addChildItem()`, `updateItem()`, `deleteItem()`.
+
+*(Full prop, event, and method descriptions are the same as the previous answer)*
+
+### Backend API (`/api/file-system`)
+
+**Method:** `GET`
+
+**Description:**
+Provides hierarchical data for the TreeDatatable. Operates in two modes: **Paginated Mode** and **Search Mode**.
+
+**Parameters:**
+
+| Parameter | Type | Optional | Description |
+| :--- | :--- | :--- | :--- |
+| `page` | Integer | Yes | The page number for root-level items. *Used only in Paginated Mode*. |
+| `perPage` | Integer | Yes | The number of root-level items per page. *Used only in Paginated Mode*. |
+| `expanded[]` | Array | Yes | An array of item IDs that should be marked as `_expanded: true`. |
+| `search` | String | Yes | A search term. **If provided, the API switches to Search Mode.** |
+
+**Modes of Operation:**
+
+1.  **Paginated Mode (Default)**
+-   **Trigger:** The `search` parameter is empty or not provided.
+-   **Behavior:** Returns a paginated list of root-level items and all their descendants. Pagination applies *only* to the root level.
+-   **Example:** `/api/file-system?page=2&perPage=5`
+
+2.  **Search Mode**
+-   **Trigger:** The `search` parameter is provided with a value.
+-   **Behavior:**
+-   Pagination (`page`, `perPage`) is **ignored**.
+-   The API searches all items (roots and children) for a match in the `name` field.
+-   It returns a filtered tree containing **only** the matched items and their direct parent-to-root ancestors.
+-   All ancestor items in the response are automatically marked as `_expanded: true` to ensure the search results are visible.
+-   **Example:** `/api/file-system?search=project-beta`

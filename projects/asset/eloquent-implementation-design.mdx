@@ -1,0 +1,340 @@
+---
+title: 'Asset Management: Eloquent MongoDb Implementation'
+---
+
+This is an excellent architectural choice that balances the flexibility of MongoDB with the structural benefits of normalization. Using `assetTag` as the relationship key is a common pattern for linking documents when a human-readable identifier is preferred over MongoDB's `ObjectId`.
+
+Here is a complete example of the Laravel Eloquent models for this system, using the `jenssegers/laravel-mongodb` package.
+
+### Prerequisites
+
+1.  **Install the MongoDB Eloquent Package:**
+```bash
+composer require jenssegers/mongodb
+    ```
+
+2.  **Configure `config/database.php`:**
+Add a new connection for MongoDB.
+
+```php
+// config/database.php
+
+'connections' => [
+    // ... other connections
+
+    'mongodb' => [
+        'driver'   => 'mongodb',
+        'host'     => env('DB_HOST', '127.0.0.1'),
+        'port'     => env('DB_PORT', 27017),
+        'database' => env('DB_DATABASE', 'homestead'),
+        'username' => env('DB_USERNAME', 'homestead'),
+        'password' => env('DB_PASSWORD', 'secret'),
+        'options'  => [
+            'database' => 'admin' // required with Mongo 3+
+        ]
+    ],
+],
+    ```
+
+### 1. Base and Lookup Models
+
+These are foundational models that other entities will reference.
+
+#### `App\Models\User`
+This is the standard User model, but it needs to extend the MongoDB model.
+
+```php
+// app/Models/User.php
+namespace App\Models;
+
+use Illuminate\Foundation\Auth\User as Authenticatable;
+use Jenssegers\Mongodb\Eloquent\Model; // Use this if not using authentication traits
+// Or for a full auth user:
+// use Jenssegers\Mongodb\Auth\User as Authenticatable;
+
+class User extends Model // or Authenticatable
+{
+    protected $connection = 'mongodb';
+    protected $collection = 'users';
+
+    protected $fillable = [
+        'name',
+        'email',
+        'password',
+    ];
+}
+```
+
+#### `App\Models\Status`
+A simple lookup collection for asset statuses.
+
+```php
+// app/Models/Status.php
+namespace App\Models;
+
+use Jenssegers\Mongodb\Eloquent\Model;
+
+class Status extends Model
+{
+    protected $connection = 'mongodb';
+    protected $collection = 'statuses';
+
+    protected $fillable = ['name']; // e.g., 'In Use', 'In Storage'
+}
+```
+
+### 2. Normalized Sub-Entity Models
+
+These models contain data related to an asset and are linked via `assetTag`.
+
+#### `App\Models\Asset\Location`
+
+```php
+// app/Models/Asset/Location.php
+namespace App\Models\Asset;
+
+use Jenssegers\Mongodb\Eloquent\Model;
+
+class Location extends Model
+{
+    protected $connection = 'mongodb';
+    protected $collection = 'asset_locations';
+
+    protected $fillable = [
+        'assetTag',
+        'building',
+        'floor',
+        'room',
+        'description',
+    ];
+
+    // Note: Defining the inverse relationship is complex because a location
+    // doesn't know if its assetTag belongs to 'assets' or 'itAssets' collection.
+    // It's often omitted, as queries typically start from the asset itself.
+}
+```
+
+#### `App\Models\Asset\PurchaseInfo`
+
+```php
+// app/Models/Asset/PurchaseInfo.php
+namespace App\Models\Asset;
+
+use Jenssegers\Mongodb\Eloquent\Model;
+
+class PurchaseInfo extends Model
+{
+    protected $connection = 'mongodb';
+    protected $collection = 'asset_purchase_info';
+
+    protected $fillable = [
+        'assetTag',
+        'purchaseDate',
+        'vendor',
+        'cost',
+        'warrantyExpiryDate',
+    ];
+
+    protected $casts = [
+        'purchaseDate' => 'datetime',
+        'warrantyExpiryDate' => 'datetime',
+        'cost' => 'float',
+    ];
+}
+```
+
+#### `App\Models\Asset\Assignment`
+
+```php
+// app/Models/Asset/Assignment.php
+namespace App\Models\Asset;
+
+use App\Models\User;
+use Jenssegers\Mongodb\Eloquent\Model;
+
+class Assignment extends Model
+{
+    protected $connection = 'mongodb';
+    protected $collection = 'asset_assignments';
+
+    protected $fillable = [
+        'assetTag',
+        'userId',
+        'assignmentDate',
+    ];
+
+    protected $casts = [
+        'assignmentDate' => 'datetime',
+    ];
+
+    /**
+     * Get the user this asset is assigned to.
+     */
+    public function user()
+    {
+        return $this->belongsTo(User::class, 'userId');
+    }
+}
+```
+
+### 3. Abstract Base Asset Model
+
+To avoid repeating the relationship definitions in every asset model, we create an abstract base class.
+
+```php
+// app/Models/Asset/BaseAsset.php
+namespace App\Models\Asset;
+
+use App\Models\Status;
+use Jenssegers\Mongodb\Eloquent\Model;
+
+abstract class BaseAsset extends Model
+{
+    protected $connection = 'mongodb';
+
+    /**
+     * Defines the relationship from an Asset to its Location.
+     * Foreign Key: 'assetTag' on the 'asset_locations' collection.
+     * Local Key: 'assetTag' on this model's collection.
+     */
+    public function location()
+    {
+        return $this->hasOne(Location::class, 'assetTag', 'assetTag');
+    }
+
+    /**
+     * Defines the relationship to its PurchaseInfo.
+     */
+    public function purchaseInfo()
+    {
+        return $this->hasOne(PurchaseInfo::class, 'assetTag', 'assetTag');
+    }
+
+    /**
+     * Defines the relationship to its Assignment.
+     */
+    public function assignment()
+    {
+        return $this->hasOne(Assignment::class, 'assetTag', 'assetTag');
+    }
+
+    /**
+     * Get the status of the asset.
+     * This uses a standard ObjectId relationship.
+     */
+    public function status()
+    {
+        return $this->belongsTo(Status::class, 'statusId');
+    }
+}
+```
+
+### 4. Concrete Asset Models
+
+These are the models you will interact with directly. They extend `BaseAsset` to inherit the common relationships.
+
+#### General Asset: `App\Models\Asset\GeneralAsset`
+
+```php
+// app/Models/Asset/GeneralAsset.php
+namespace App\Models\Asset;
+
+class GeneralAsset extends BaseAsset
+{
+    protected $collection = 'general_assets';
+
+    protected $fillable = [
+        'assetTag',
+        'name',
+        'manufacturer',
+        'statusId', // Foreign key to the 'statuses' collection
+        'category', // e.g., VEHICLE, MACHINERY
+        'specifications',
+    ];
+
+    protected $casts = [
+        // Cast the flexible specifications field to an array/object
+        'specifications' => 'array',
+    ];
+}
+```
+
+#### Specific IT Asset: `App\Models\Asset\ItAsset`
+
+```php
+// app/Models/Asset/ItAsset.php
+namespace App\Models\Asset;
+
+class ItAsset extends BaseAsset
+{
+    protected $collection = 'it_assets';
+
+    protected $fillable = [
+        // Base Fields
+        'assetTag',
+        'name',
+        'manufacturer',
+        'statusId',
+
+        // IT Specific Fields
+        'hostname',
+        'macAddress',
+        'ipAddress',
+        'os',
+        'cpu',
+        'ramGb',
+        'storageGb',
+    ];
+
+    protected $casts = [
+        'ramGb' => 'integer',
+        'storageGb' => 'integer',
+    ];
+}
+```
+
+### Usage Example
+
+Here’s how you would use these models in your controller or service.
+
+```php
+use App\Models\Asset\GeneralAsset;
+use App\Models\Asset\ItAsset;
+
+// --- Creating a new IT Asset and its related data ---
+$itAsset = ItAsset::create([
+    'assetTag' => 'IT-LPT-01124',
+    'name' => 'Dell Latitude 7420',
+    'manufacturer' => 'Dell',
+    'statusId' => '638d1d8f5d1e4e3f8b0e7b45', // ObjectId of the 'In Use' status
+    'hostname' => 'LPT-JSMITH-PROD',
+    'macAddress' => '9C:B6:D0:FF:1A:3E',
+    'ramGb' => 16,
+]);
+
+$itAsset->location()->create([
+    'building' => 'Building A',
+    'floor' => '4',
+    'description' => 'Desk 4-15'
+]);
+
+$itAsset->purchaseInfo()->create([
+    'purchaseDate' => now()->subYear(),
+    'vendor' => 'Dell Corporate Sales',
+    'cost' => 1850.50,
+]);
+
+// --- Retrieving an asset with its relations (Eager Loading) ---
+$assetTag = 'IT-LPT-01124';
+$retrievedAsset = ItAsset::with(['location', 'purchaseInfo', 'assignment.user', 'status'])
+                         ->where('assetTag', $assetTag)
+                         ->first();
+
+// You can now access related data as properties:
+echo $retrievedAsset->name; // "Dell Latitude 7420"
+echo $retrievedAsset->location->building; // "Building A"
+echo $retrievedAsset->status->name; // "In Use"
+if ($retrievedAsset->assignment) {
+    echo $retrievedAsset->assignment->user->name;
+}
+```

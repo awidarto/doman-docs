@@ -1,0 +1,266 @@
+---
+title: "Advanced MongoDb UTC Date & Timezone Handling"
+description: "Advanced features for date and time"
+---
+
+### **English Version**
+
+## Addendum: Advanced Data Handling
+
+This addendum covers advanced features built into our system for handling time durations and time-only values, extending the core principles of our date management.
+
+### Feature 1: Automatic Duration Calculation
+
+The `FannableAttributes` trait has been enhanced to automatically calculate the duration between two `datetime` fields. This is useful for tracking events, tasks, or any time-bound activity.
+
+#### How It Works
+
+When a model is saved, the trait checks for a special `duration...` format in the `$fanOutAttributes` configuration. If either the start or end date of the duration has changed, it automatically recalculates and saves the result in a target field.
+
+#### Configuration
+
+To use this feature, configure a `datetime` field in your `$fanOutAttributes` array with an `end` key and a specific `format`.
+
+*   `target`: The name of the field where the duration will be stored.
+*   `end`: The name of the model attribute containing the end date of the period.
+*   `format`: A special keyword specifying the desired output.
+
+**Available Duration Formats:**
+
+| Format Keyword | Output Type | Description |
+| :--- | :--- | :--- |
+| `durationSeconds` | `float` | Total seconds between the two dates. |
+| `durationMinutes` | `float` | Total minutes, including fractional parts. |
+| `durationHours` | `float` | Total hours, including fractional parts. |
+| `durationDays` | `float` | Total days, including fractional parts. |
+| `durationHuman` | `string` | A human-readable string (e.g., "1 day, 5 hours, 30 minutes"). |
+
+**Example: `Event.php` Model**
+```php
+<?php
+namespace App\Models;
+
+use App\Casts\MongoUtcDateTimeCast;
+use App\Models\Concerns\FannableAttributes;
+use MongoDB\Laravel\Eloquent\Model;
+
+class Event extends Model
+{
+    use FannableAttributes;
+
+    protected $fillable = ['name', 'eventStart', 'eventEnd', 'tz'];
+
+    protected $casts = [
+        'eventStart' => MongoUtcDateTimeCast::class,
+        'eventEnd'   => MongoUtcDateTimeCast::class,
+    ];
+
+    protected $fanOutAttributes = [
+        'eventStart' => [
+            // This is the new duration fan-out
+            [
+                'target' => 'durationInHours',
+                'end'    => 'eventEnd', // The name of the field containing the end date
+                'format' => 'durationHours',
+            ],
+            [
+                'target' => 'durationForDisplay',
+                'end'    => 'eventEnd',
+                'format' => 'durationHuman',
+            ]
+        ]
+    ];
+}
+```
+
+When an `Event` is saved or updated, the `durationInHours` and `durationForDisplay` fields will be automatically calculated and populated.
+
+### Feature 2: Time-Only Fields
+
+For attributes that only store a time of day (e.g., `opening_time`, `daily_reminder_time`), we use a specific convention to ensure data is queryable and performant.
+
+**Convention:** Time-only values are stored as an **Integer** representing the **total number of seconds from the start of the day (midnight)**.
+
+*   `00:00:00` is stored as `0`.
+*   `09:30:00` is stored as `34200`.
+*   `23:59:59` is stored as `86399`.
+
+This approach is fast, precise, language-agnostic, and allows for efficient numerical range queries.
+
+#### The `TimeAsSecondsCast`
+
+To make this convention easy to work with, we use the `App\Casts\TimeAsSecondsCast` custom cast.
+
+*   **On `set` (Saving):** It automatically converts a time string (e.g., `"14:30"`) into the correct integer of seconds.
+*   **On `get` (Retrieving):** It automatically converts the integer from the database back into a formatted time string (`"H:i:s"`).
+
+#### How to Use It
+
+Simply map the attribute to the `TimeAsSecondsCast` in your model's `$casts` array.
+
+**Example: `Store.php` Model**
+```php
+<?php
+namespace App\Models;
+
+use App\Casts\TimeAsSecondsCast;
+use MongoDB\Laravel\Eloquent\Model;
+
+class Store extends Model
+{
+    protected $fillable = ['name', 'opening_time', 'closing_time'];
+
+    protected $casts = [
+        'opening_time' => TimeAsSecondsCast::class,
+        'closing_time' => TimeAsSecondsCast::class,
+    ];
+}
+```
+
+**Working with the data:**
+
+*   **Saving:** Your application code is simple and intuitive.
+```php
+$store->opening_time = '09:00'; // Will be saved as 32400
+    ```
+*   **Displaying:** The cast handles the conversion automatically.
+```blade
+<span>Opens at: {{ $store->opening_time }}</span> {{-- Displays "09:00:00" --}}
+    ```
+*   **Querying:** You must query against the integer value. To find stores that open after 10 AM:
+```php
+$tenAmInSeconds = 10 * 3600; // 36000
+$lateStores = Store::where('opening_time', '>', $tenAmInSeconds)->get();
+    ```
+
+---
+
+### **Versi Bahasa Indonesia**
+
+## Adendum: Penanganan Data Tingkat Lanjut
+
+Adendum ini mencakup fitur-fitur canggih yang dibangun dalam sistem kita untuk menangani durasi waktu dan nilai waktu-saja (tanpa tanggal), sebagai perluasan dari prinsip inti manajemen tanggal kita.
+
+### Fitur 1: Perhitungan Durasi Otomatis
+
+`FannableAttributes` Trait telah disempurnakan untuk secara otomatis menghitung durasi antara dua *field* `datetime`. Ini berguna untuk melacak acara, tugas, atau aktivitas apa pun yang terikat waktu.
+
+#### Cara Kerja
+
+Saat sebuah model disimpan, *trait* akan memeriksa format khusus `duration...` dalam konfigurasi `$fanOutAttributes`. Jika tanggal mulai atau tanggal akhir durasi telah berubah, *trait* akan secara otomatis menghitung ulang dan menyimpan hasilnya di *field* target.
+
+#### Konfigurasi
+
+Untuk menggunakan fitur ini, konfigurasikan sebuah *field* `datetime` di dalam array `$fanOutAttributes` Anda dengan *key* `end` dan `format` yang spesifik.
+
+*   `target`: Nama *field* tempat durasi akan disimpan.
+*   `end`: Nama atribut model yang berisi tanggal akhir periode.
+*   `format`: Sebuah kata kunci khusus yang menentukan output yang diinginkan.
+
+**Format Durasi yang Tersedia:**
+
+| Kata Kunci Format | Tipe Output | Deskripsi |
+| :--- | :--- | :--- |
+| `durationSeconds` | `float` | Total detik antara dua tanggal. |
+| `durationMinutes` | `float` | Total menit, termasuk bagian pecahan. |
+| `durationHours` | `float` | Total jam, termasuk bagian pecahan. |
+| `durationDays` | `float` | Total hari, termasuk bagian pecahan. |
+| `durationHuman` | `string` | String yang mudah dibaca manusia (contoh: "1 hari, 5 jam, 30 menit"). |
+
+**Contoh: Model `Event.php`**
+```php
+<?php
+namespace App\Models;
+
+use App\Casts\MongoUtcDateTimeCast;
+use App\Models\Concerns\FannableAttributes;
+use MongoDB\Laravel\Eloquent\Model;
+
+class Event extends Model
+{
+    use FannableAttributes;
+
+    protected $fillable = ['name', 'eventStart', 'eventEnd', 'tz'];
+
+    protected $casts = [
+        'eventStart' => MongoUtcDateTimeCast::class,
+        'eventEnd'   => MongoUtcDateTimeCast::class,
+    ];
+
+    protected $fanOutAttributes = [
+        'eventStart' => [
+            // Ini adalah fan-out durasi yang baru
+            [
+                'target' => 'durationInHours',
+                'end'    => 'eventEnd', // Nama field yang berisi tanggal akhir
+                'format' => 'durationHours',
+            ],
+            [
+                'target' => 'durationForDisplay',
+                'end'    => 'eventEnd',
+                'format' => 'durationHuman',
+            ]
+        ]
+    ];
+}
+```
+
+Ketika sebuah `Event` disimpan atau diperbarui, *field* `durationInHours` dan `durationForDisplay` akan dihitung dan diisi secara otomatis.
+
+### Fitur 2: Field Waktu-Saja (Time-Only)
+
+Untuk atribut yang hanya menyimpan waktu dalam sehari (contoh: `opening_time`, `daily_reminder_time`), kita menggunakan konvensi khusus untuk memastikan data dapat di-*query* dan memiliki performa tinggi.
+
+**Konvensi:** Nilai waktu-saja disimpan sebagai **Integer** yang merepresentasikan **jumlah total detik sejak awal hari (tengah malam)**.
+
+*   `00:00:00` disimpan sebagai `0`.
+*   `09:30:00` disimpan sebagai `34200`.
+*   `23:59:59` disimpan sebagai `86399`.
+
+Pendekatan ini cepat, presisi, tidak bergantung pada bahasa pemrograman, dan memungkinkan *query* rentang numerik yang efisien.
+
+#### `TimeAsSecondsCast`
+
+Untuk membuat konvensi ini mudah digunakan, kita menggunakan *custom cast* `App\Casts\TimeAsSecondsCast`.
+
+*   **Saat `set` (Menyimpan):** Secara otomatis mengonversi string waktu (contoh: `"14:30"`) menjadi integer detik yang benar.
+*   **Saat `get` (Mengambil):** Secara otomatis mengonversi integer dari database kembali menjadi string waktu yang terformat (`"H:i:s"`).
+
+#### Cara Penggunaan
+
+Cukup petakan atribut ke `TimeAsSecondsCast` di dalam array `$casts` pada model Anda.
+
+**Contoh: Model `Store.php`**
+```php
+<?php
+namespace App\Models;
+
+use App\Casts\TimeAsSecondsCast;
+use MongoDB\Laravel\Eloquent\Model;
+
+class Store extends Model
+{
+    protected $fillable = ['name', 'opening_time', 'closing_time'];
+
+    protected $casts = [
+        'opening_time' => TimeAsSecondsCast::class,
+        'closing_time' => TimeAsSecondsCast::class,
+    ];
+}
+```
+
+**Bekerja dengan data:**
+
+*   **Menyimpan:** Kode aplikasi Anda tetap sederhana dan intuitif.
+```php
+$store->opening_time = '09:00'; // Akan disimpan sebagai 32400
+    ```
+*   **Menampilkan:** *Cast* menangani konversi secara otomatis.
+```blade
+<span>Buka pukul: {{ $store->opening_time }}</span> {{-- Menampilkan "09:00:00" --}}
+    ```
+*   **Query:** Anda harus melakukan *query* terhadap nilai integer. Untuk mencari toko yang buka setelah jam 10 pagi:
+```php
+$tenAmInSeconds = 10 * 3600; // 36000
+$lateStores = Store::where('opening_time', '>', $tenAmInSeconds)->get();
+    ```

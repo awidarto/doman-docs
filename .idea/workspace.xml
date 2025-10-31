@@ -6,6 +6,7 @@
   <component name="ChangeListManager">
     <list default="true" id="f5ee46ac-8460-424d-9b8a-dfe584e81db0" name="Changes" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/docs.json" beforeDir="false" afterPath="$PROJECT_DIR$/docs.json" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -33,44 +34,37 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent"><![CDATA[{
-  "keyToString": {
-    "RunOnceActivity.OpenProjectViewOnStart": "true",
-    "RunOnceActivity.ShowReadmeOnStart": "true",
-    "dart.analysis.tool.window.visible": "false",
-    "git-widget-placeholder": "main",
-    "kotlin-language-version-configured": "true",
-    "last_opened_file_path": "/Users/awidarto/WebProjects/MejikDocs/doman-docs/apps/dms-doc/user-manual/by-screen",
-    "node.js.detected.package.eslint": "true",
-    "node.js.detected.package.tslint": "true",
-    "node.js.selected.package.eslint": "(autodetect)",
-    "node.js.selected.package.tslint": "(autodetect)",
-    "nodejs_package_manager_path": "npm",
-    "settings.editor.selected.configurable": "fileTemplates",
-    "two.files.diff.last.used.file": "/Users/awidarto/WebProjects/MejikDocs/docs/docs.json",
-    "two.files.diff.last.used.folder": "/Users/awidarto/WebProjects/MejikDocs/docs",
-    "vue.rearranger.settings.migration": "true"
+  <component name="PropertiesComponent">{
+  &quot;keyToString&quot;: {
+    &quot;RunOnceActivity.OpenProjectViewOnStart&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
+    &quot;dart.analysis.tool.window.visible&quot;: &quot;false&quot;,
+    &quot;git-widget-placeholder&quot;: &quot;main&quot;,
+    &quot;kotlin-language-version-configured&quot;: &quot;true&quot;,
+    &quot;last_opened_file_path&quot;: &quot;/Users/awidarto/WebProjects/MejikDocs/doman-docs/apps/fas&quot;,
+    &quot;node.js.detected.package.eslint&quot;: &quot;true&quot;,
+    &quot;node.js.detected.package.tslint&quot;: &quot;true&quot;,
+    &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
+    &quot;node.js.selected.package.tslint&quot;: &quot;(autodetect)&quot;,
+    &quot;nodejs_package_manager_path&quot;: &quot;npm&quot;,
+    &quot;settings.editor.selected.configurable&quot;: &quot;fileTemplates&quot;,
+    &quot;two.files.diff.last.used.file&quot;: &quot;/Users/awidarto/WebProjects/MejikDocs/docs/docs.json&quot;,
+    &quot;two.files.diff.last.used.folder&quot;: &quot;/Users/awidarto/WebProjects/MejikDocs/docs&quot;,
+    &quot;vue.rearranger.settings.migration&quot;: &quot;true&quot;
   }
-}]]></component>
+}</component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
+      <recent name="$PROJECT_DIR$/apps/fas" />
+      <recent name="$PROJECT_DIR$/dev/dms" />
       <recent name="$PROJECT_DIR$/apps/dms-doc/user-manual/by-screen" />
       <recent name="$PROJECT_DIR$/ai-dev/graph-rag" />
       <recent name="$PROJECT_DIR$/mejik-core/laravel" />
-      <recent name="$PROJECT_DIR$/dev/dms" />
-      <recent name="$PROJECT_DIR$" />
     </key>
     <key name="MoveFile.RECENT_KEYS">
       <recent name="$PROJECT_DIR$/mejik-core/laravel/framework" />
       <recent name="$PROJECT_DIR$/ai-dev" />
     </key>
-  </component>
-  <component name="SharedIndexes">
-    <attachedChunks>
-      <set>
-        <option value="jdk-16.0.2-corretto-16.0.2-4caba194b151-c3ee3a3f" />
-      </set>
-    </attachedChunks>
   </component>
   <component name="SpellCheckerSettings" RuntimeDictionaries="0" Folders="0" CustomDictionaries="0" DefaultDictionary="application-level" UseSingleDictionary="true" transferred="true" />
   <component name="TaskManager">
@@ -113,6 +107,25 @@
       <workItem from="1758774824662" duration="597000" />
       <workItem from="1758804324888" duration="496000" />
       <workItem from="1758869614060" duration="4298000" />
+      <workItem from="1758879738086" duration="2654000" />
+      <workItem from="1758953830076" duration="1082000" />
+      <workItem from="1759031723290" duration="427000" />
+      <workItem from="1759065764727" duration="5971000" />
+      <workItem from="1759147098611" duration="416000" />
+      <workItem from="1759215103187" duration="1157000" />
+      <workItem from="1759236406448" duration="447000" />
+      <workItem from="1759304338492" duration="1884000" />
+      <workItem from="1759322334394" duration="550000" />
+      <workItem from="1759410553426" duration="508000" />
+      <workItem from="1759499247372" duration="1237000" />
+      <workItem from="1759645125620" duration="548000" />
+      <workItem from="1759678323657" duration="598000" />
+      <workItem from="1759725185986" duration="597000" />
+      <workItem from="1759770331377" duration="136000" />
+      <workItem from="1759771105904" duration="719000" />
+      <workItem from="1759828791655" duration="578000" />
+      <workItem from="1759837757456" duration="597000" />
+      <workItem from="1761915534086" duration="2336000" />
     </task>
     <servers />
   </component>

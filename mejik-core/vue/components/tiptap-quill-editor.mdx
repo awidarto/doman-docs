@@ -1,0 +1,463 @@
+---
+title: "Tiptap & Quill Editor Vue 2"
+description: "Tiptap & Quill Editor swappable Component"
+---
+
+## Rich Text Editor Component Documentation
+
+### 1. Introduction
+
+These swappable Vue components, `TiptapEditor` and `QuillEditor`, provide a rich text editing experience with a consistent API. This allows developers to easily switch between a highly customizable, lightweight editor (Tiptap) and a feature-rich, easy-to-use editor (Quill) without refactoring the parent component.
+
+The components are designed to be controlled via `v-model` for HTML content and an optional `.sync` modifier for the editor's native data format (JSON for Tiptap, Delta for Quill).
+
+---
+
+### 2. Installation & Prerequisites
+
+Before using the components, ensure you have installed the necessary dependencies in your Vue 2 project.
+
+```bash
+# For Tiptap v1 (Vue 2 compatible)
+npm install tiptap tiptap-extensions
+
+# For Quill (Vue 2 compatible wrapper)
+npm install vue-quill-editor@^3.0.6
+
+# For deep object comparison in watchers
+npm install lodash.isequal
+```
+
+**Crucial Step for Quill:** You must import Quill's CSS files globally in your application's entry point, typically `main.js`.
+
+```javascript
+// in src/main.js
+import Vue from 'vue'
+import App from './App.vue'
+
+// Import Quill styles
+import 'quill/dist/quill.core.css'
+import 'quill/dist/quill.snow.css' // or 'quill.bubble.css'
+
+Vue.config.productionTip = false
+
+new Vue({
+  render: h => h(App),
+}).$mount('#app')
+```
+
+---
+
+### 3. API Reference (Props & Events)
+
+Both `TiptapEditor` and `QuillEditor` share the exact same API for seamless integration.
+
+#### **Props**
+
+| Prop           | Type     | Required | Default         | Description                                                                                                                                     |
+| :------------- | :------- | :------- | :-------------- | :---------------------------------------------------------------------------------------------------------------------------------------------- |
+| `value`        | `String` | No       | `''`            | The HTML content of the editor. Use with `v-model`.                                                                                             |
+| `placeholder`  | `String` | No       | `''`            | Placeholder text displayed when the editor is empty.                                                                                            |
+| `editorConfig` | `Object` | No       | `{}`            | A configuration object passed directly to the underlying editor library (Tiptap constructor options or Quill options object).                     |
+| `editorData`   | `Object` | No       | `null`          | The editor's native data format. Use with the `.sync` modifier (`:editor-data.sync`). **Tiptap**: ProseMirror JSON. **Quill**: Delta object.     |
+
+#### **Events**
+
+| Event               | Payload  | Description                                                                                             |
+| :------------------ | :------- | :------------------------------------------------------------------------------------------------------ |
+| `input`             | `String` | Emits the updated HTML content on every change. Used by `v-model`.                                      |
+| `update:editor-data`| `Object` | Emits the updated native data object (JSON/Delta) on every change. Used by `:editor-data.sync`.          |
+
+---
+
+### 4. Usage Examples
+
+Here is a comprehensive example of a parent component that utilizes all features of the editor wrappers.
+
+#### Parent Component Setup (`MyDocument.vue`)
+
+```html
+<template>
+  <div>
+    <h2>My Document</h2>
+
+    <!-- Dynamically switch between editors -->
+    <component
+      :is="editorComponent"
+      v-model="documentContent"
+      :placeholder="placeholderText"
+      :editor-config="activeConfig"
+      :editor-data.sync="documentDataObject"
+      ref="editor"
+    />
+
+    <div class="actions">
+      <button @click="saveDocument">Save Document</button>
+      <button @click="clearEditor">Clear</button>
+      <div v-if="validationError" class="error">{{ validationError }}</div>
+    </div>
+  </div>
+</template>
+
+<script>
+import TiptapEditor from './components/TiptapEditor.vue';
+import QuillEditor from './components/QuillEditor.vue';
+
+// Example: Import an extra Tiptap extension for configuration
+import { Heading } from 'tiptap-extensions';
+
+export default {
+  components: {
+    TiptapEditor,
+    QuillEditor,
+  },
+  data() {
+    return {
+      // Set to 'TiptapEditor' or 'QuillEditor'
+      editorComponent: 'TiptapEditor',
+
+      // Data for v-model (HTML)
+      documentContent: '<h2>Welcome!</h2><p>Start editing...</p>',
+
+      // Data for :editor-data.sync (JSON/Delta)
+      documentDataObject: null,
+
+      placeholderText: 'Write something amazing...',
+      validationError: null,
+
+      // --- Configuration Objects ---
+      tiptapConfig: {
+        // Override default extensions to add Headings
+        extensions: [
+            // Note: You might need to import the default extensions from
+            // your wrapper component if you want to keep them.
+            // For simplicity, we define a new set here.
+            new Heading({ levels: [1, 2, 3] }),
+            // ... add other extensions like Bold, Italic etc. if needed
+        ],
+      },
+      quillConfig: {
+        // Change theme and customize the toolbar
+        theme: 'bubble',
+        modules: {
+          toolbar: [
+            ['bold', 'italic'],
+            [{ 'header': 1 }, { 'header': 2 }],
+            ['link', 'image']
+          ],
+        },
+      },
+    };
+  },
+  computed: {
+    // Provides the correct config object based on the selected editor
+    activeConfig() {
+      return this.editorComponent === 'TiptapEditor'
+        ? this.tiptapConfig
+        : this.quillConfig;
+    },
+  },
+  watch: {
+    // Watch for changes to validate content in real-time
+    documentContent(newValue) {
+      this.validateContent(newValue);
+
+      // Example: Autosave feature
+      // console.log("Content changed, could autosave now...");
+    },
+  },
+  methods: {
+    /**
+     * An example validation function. Checks if content is too short.
+     * @param {string} htmlContent The editor's HTML content.
+     */
+    validateContent(htmlContent) {
+      // A simple validator: strip HTML tags and check length
+      const text = htmlContent.replace(/<[^>]*>?/gm, '');
+      if (text.length > 0 && text.length < 10) {
+        this.validationError = 'Content is too short (minimum 10 characters).';
+      } else {
+        this.validationError = null;
+      }
+    },
+
+    /**
+     * Clears the editor's content.
+     */
+    clearEditor() {
+      this.documentContent = '';
+      this.documentDataObject = null;
+    },
+
+    /**
+     * Simulates saving the document to a server.
+     */
+    saveDocument() {
+      if (this.validationError) {
+        alert('Please fix the validation errors before saving.');
+        return;
+      }
+
+      console.log('--- Saving Document ---');
+
+      // Option 1: Save the native data format (Recommended)
+      // This is cleaner and more reliable for storage.
+      console.log('Native Data (JSON/Delta):', this.documentDataObject);
+      // Example API call:
+      // api.save({ content: this.documentDataObject, format: 'json' });
+
+      // Option 2: Save the HTML content
+      console.log('HTML Content:', this.documentContent);
+      // Example API call:
+      // api.save({ content: this.documentContent, format: 'html' });
+
+      alert('Document content logged to the console!');
+    },
+  },
+}
+</script>
+
+<style scoped>
+.actions {
+  margin-top: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.error {
+  color: red;
+  font-size: 0.9em;
+}
+</style>
+```
+
+---
+---
+
+## Dokumentasi Komponen Rich Text Editor
+
+### 1. Pendahuluan
+
+Komponen Vue `TiptapEditor` dan `QuillEditor` ini menyediakan fungsionalitas *rich text editing* dengan API yang konsisten. Hal ini memungkinkan developer untuk dengan mudah beralih antara editor yang sangat ringan dan dapat dikustomisasi (Tiptap) dengan editor yang kaya fitur dan mudah digunakan (Quill) tanpa perlu mengubah kode pada komponen induk.
+
+Komponen ini dirancang untuk dikontrol melalui `v-model` untuk konten HTML dan modifier `.sync` opsional untuk format data asli editor (JSON untuk Tiptap, Delta untuk Quill).
+
+---
+
+### 2. Instalasi & Prasyarat
+
+Sebelum menggunakan komponen, pastikan Anda telah menginstal dependensi yang diperlukan di proyek Vue 2 Anda.
+
+```bash
+# Untuk Tiptap v1 (kompatibel dengan Vue 2)
+npm install tiptap tiptap-extensions
+
+# Untuk Quill (wrapper yang kompatibel dengan Vue 2)
+npm install vue-quill-editor@^3.0.6
+
+# Untuk perbandingan objek mendalam di watcher
+npm install lodash.isequal
+```
+
+**Langkah Penting untuk Quill:** Anda harus mengimpor file CSS Quill secara global di titik masuk aplikasi Anda, biasanya di `main.js`.
+
+```javascript
+// di src/main.js
+import Vue from 'vue'
+import App from './App.vue'
+
+// Impor style Quill
+import 'quill/dist/quill.core.css'
+import 'quill/dist/quill.snow.css' // atau 'quill.bubble.css'
+
+Vue.config.productionTip = false
+
+new Vue({
+  render: h => h(App),
+}).$mount('#app')
+```
+
+---
+
+### 3. Referensi API (Props & Events)
+
+Baik `TiptapEditor` maupun `QuillEditor` memiliki API yang sama persis untuk integrasi yang mulus.
+
+#### **Props**
+
+| Prop           | Tipe     | Wajib    | Default         | Deskripsi                                                                                                                                              |
+| :------------- | :------- | :------- | :-------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `value`        | `String` | Tidak    | `''`            | Konten HTML dari editor. Gunakan dengan `v-model`.                                                                                                     |
+| `placeholder`  | `String` | Tidak    | `''`            | Teks placeholder yang ditampilkan saat editor kosong.                                                                                                  |
+| `editorConfig` | `Object` | Tidak    | `{}`            | Objek konfigurasi yang diteruskan langsung ke *library* editor (opsi konstruktor Tiptap atau objek opsi Quill).                                        |
+| `editorData`   | `Object` | Tidak    | `null`          | Format data asli dari editor. Gunakan dengan modifier `.sync` (`:editor-data.sync`). **Tiptap**: JSON ProseMirror. **Quill**: Objek Delta.               |
+
+#### **Events**
+
+| Event               | Payload  | Deskripsi                                                                                                |
+| :------------------ | :------- | :------------------------------------------------------------------------------------------------------- |
+| `input`             | `String` | Mengirimkan konten HTML yang telah diperbarui pada setiap perubahan. Digunakan oleh `v-model`.            |
+| `update:editor-data`| `Object` | Mengirimkan objek data asli (JSON/Delta) yang telah diperbarui pada setiap perubahan. Digunakan oleh `:editor-data.sync`. |
+
+---
+
+### 4. Contoh Penggunaan
+
+Berikut adalah contoh komprehensif dari komponen induk yang memanfaatkan semua fitur dari *wrapper* editor.
+
+#### Pengaturan Komponen Induk (`MyDocument.vue`)
+
+```html
+<template>
+  <div>
+    <h2>Dokumen Saya</h2>
+
+    <!-- Beralih antar editor secara dinamis -->
+    <component
+      :is="editorComponent"
+      v-model="documentContent"
+      :placeholder="placeholderText"
+      :editor-config="activeConfig"
+      :editor-data.sync="documentDataObject"
+      ref="editor"
+    />
+
+    <div class="actions">
+      <button @click="saveDocument">Simpan Dokumen</button>
+      <button @click="clearEditor">Kosongkan</button>
+      <div v-if="validationError" class="error">{{ validationError }}</div>
+    </div>
+  </div>
+</template>
+
+<script>
+import TiptapEditor from './components/TiptapEditor.vue';
+import QuillEditor from './components/QuillEditor.vue';
+
+// Contoh: Impor ekstensi Tiptap tambahan untuk konfigurasi
+import { Heading } from 'tiptap-extensions';
+
+export default {
+  components: {
+    TiptapEditor,
+    QuillEditor,
+  },
+  data() {
+    return {
+      // Atur ke 'TiptapEditor' atau 'QuillEditor'
+      editorComponent: 'TiptapEditor',
+
+      // Data untuk v-model (HTML)
+      documentContent: '<h2>Selamat Datang!</h2><p>Mulai mengedit...</p>',
+
+      // Data untuk :editor-data.sync (JSON/Delta)
+      documentDataObject: null,
+
+      placeholderText: 'Tulis sesuatu yang luar biasa...',
+      validationError: null,
+
+      // --- Objek Konfigurasi ---
+      tiptapConfig: {
+        // Timpa ekstensi default untuk menambahkan Heading
+        extensions: [
+            // Catatan: Anda mungkin perlu mengimpor ekstensi default dari
+            // komponen wrapper Anda jika ingin tetap menggunakannya.
+            // Untuk kesederhanaan, kita definisikan set baru di sini.
+            new Heading({ levels: [1, 2, 3] }),
+            // ... tambahkan ekstensi lain seperti Bold, Italic, dll. jika perlu
+        ],
+      },
+      quillConfig: {
+        // Ganti tema dan kustomisasi toolbar
+        theme: 'bubble',
+        modules: {
+          toolbar: [
+            ['bold', 'italic'],
+            [{ 'header': 1 }, { 'header': 2 }],
+            ['link', 'image']
+          ],
+        },
+      },
+    };
+  },
+  computed: {
+    // Menyediakan objek konfigurasi yang benar berdasarkan editor yang dipilih
+    activeConfig() {
+      return this.editorComponent === 'TiptapEditor'
+        ? this.tiptapConfig
+        : this.quillConfig;
+    },
+  },
+  watch: {
+    // Memantau perubahan untuk memvalidasi konten secara real-time
+    documentContent(newValue) {
+      this.validateContent(newValue);
+
+      // Contoh: Fitur simpan-otomatis (autosave)
+      // console.log("Konten berubah, bisa menjalankan autosave sekarang...");
+    },
+  },
+  methods: {
+    /**
+     * Contoh fungsi validasi. Memeriksa apakah konten terlalu pendek.
+     * @param {string} htmlContent Konten HTML dari editor.
+     */
+    validateContent(htmlContent) {
+      // Validator sederhana: hapus tag HTML dan periksa panjangnya
+      const text = htmlContent.replace(/<[^>]*>?/gm, '');
+      if (text.length > 0 && text.length < 10) {
+        this.validationError = 'Konten terlalu pendek (minimal 10 karakter).';
+      } else {
+        this.validationError = null;
+      }
+    },
+
+    /**
+     * Membersihkan konten editor.
+     */
+    clearEditor() {
+      this.documentContent = '';
+      this.documentDataObject = null;
+    },
+
+    /**
+     * Mensimulasikan penyimpanan dokumen ke server.
+     */
+    saveDocument() {
+      if (this.validationError) {
+        alert('Mohon perbaiki kesalahan validasi sebelum menyimpan.');
+        return;
+      }
+
+      console.log('--- Menyimpan Dokumen ---');
+
+      // Opsi 1: Simpan format data asli (Direkomendasikan)
+      // Ini lebih bersih dan andal untuk penyimpanan.
+      console.log('Data Asli (JSON/Delta):', this.documentDataObject);
+      // Contoh pemanggilan API:
+      // api.save({ content: this.documentDataObject, format: 'json' });
+
+      // Opsi 2: Simpan konten HTML
+      console.log('Konten HTML:', this.documentContent);
+      // Contoh pemanggilan API:
+      // api.save({ content: this.documentContent, format: 'html' });
+
+      alert('Konten dokumen telah di-log ke konsol!');
+    },
+  },
+}
+</script>
+
+<style scoped>
+.actions {
+  margin-top: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.error {
+  color: red;
+  font-size: 0.9em;
+}
+</style>
+```

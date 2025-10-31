@@ -1,0 +1,412 @@
+---
+title: Journal, GL and Report Generator in RDBMS
+---
+### Part 1: Journal Entry and General Ledger Structures
+
+#### A. Journal Entry Structure & Form
+
+A journal entry requires a header (for general information) and lines (for the debit/credit details).
+
+**1. Database Migrations (`journal_entries` & `journal_entry_lines`)**
+
+```php
+// database/migrations/xxxx_create_journal_entries_table.php
+Schema::create('journal_entries', function (Blueprint $table) {
+    $table->id();
+    $table->date('entry_date');
+    $table->string('description');
+    $table->string('reference_number')->nullable();
+    $table->enum('status', ['draft', 'pending_approval', 'approved', 'posted', 'rejected'])->default('draft');
+    $table->foreignId('created_by')->constrained('users');
+    $table->foreignId('approved_by')->nullable()->constrained('users');
+    $table->timestamps();
+});
+
+// database/migrations/xxxx_create_journal_entry_lines_table.php
+Schema::create('journal_entry_lines', function (Blueprint $table) {
+    $table->id();
+    $table->foreignId('journal_entry_id')->constrained('journal_entries')->onDelete('cascade');
+    $table->string('account_code', 10);
+    $table->foreign('account_code')->references('account_code')->on('dim_chart_of_accounts');
+    $table->enum('type', ['debit', 'credit']);
+    $table->decimal('amount', 15, 2);
+    $table->string('line_description')->nullable();
+    // Optional Dimensional Tags
+    $table->string('cost_center_code')->nullable();
+    $table->string('project_code')->nullable();
+    $table->timestamps();
+});
+```
+
+**2. Standard Form Layout (Conceptual)**
+
+A web form for creating a journal entry would look like this:
+
+---
+**Create Journal Entry**
+
+*   **Entry Date:** `[ 2023-10-27 ]`
+*   **Description:** `[ Payment for monthly office rent - Oct 2023 ]`
+*   **Reference:** `[ INV-RENT-1023 ]`
+
+**Entry Lines:**
+
+| Account | Line Description | Cost Center | Debit | Credit |
+| :--- | :--- | :--- | :--- | :--- |
+| `[ 82100 - Rent Expense ]` | Office Rent | `[ CC-HCGA ]` | `[ 50,000.00 ]` | `[ ]` |
+| `[ 11100 - Cash - Operating ]` | Payment from main account| `[ ]` | `[ ]` | `[ 50,000.00 ]` |
+| `[ + Add Line ]` | | | | |
+
+**Totals:**
+*   **Debit:** `50,000.00`
+*   **Credit:** `50,000.00`
+*   **Balance:** `0.00` (Must be 0 to submit)
+
+`[ Save as Draft ]` `[ Submit for Approval ]`
+---
+
+#### B. General Ledger (GL) Structure
+
+The GL is the final, immutable record of all transactions, aggregated by account. It's built from *posted* journal entries.
+
+**Database Migration (`general_ledger`)**
+
+```php
+// database/migrations/xxxx_create_general_ledger_table.php
+Schema::create('general_ledger', function (Blueprint $table) {
+    $table->id();
+    $table->string('account_code', 10);
+    $table->foreign('account_code')->references('account_code')->on('dim_chart_of_accounts');
+    $table->date('entry_date');
+    $table->foreignId('journal_entry_line_id')->constrained('journal_entry_lines');
+    $table->decimal('debit', 15, 2)->default(0);
+    $table->decimal('credit', 15, 2)->default(0);
+    $table->decimal('balance', 15, 2); // The running balance for this account at this point in time
+    $table->string('description');
+    $table->timestamps();
+});
+```
+
+### Part 2: The Journal Posting Process
+
+This process ensures accuracy, control, and auditability.
+
+1.  **Creation (Status: `draft`)**: An accountant creates a journal entry. The system validates that Debits = Credits. The entry has no financial impact yet.
+2.  **Verification (Status: `pending_approval`)**: The entry is submitted. A manager or senior accountant receives a notification. They review the entry for correctness (accounts used, amounts, description, supporting documents).
+3.  **Approval/Rejection (Status: `approved` / `rejected`)**:
+*   If correct, the manager sets the status to `approved`. The `approved_by` field is populated.
+*   If incorrect, it's set to `rejected` with a reason, and it goes back to the creator.
+4.  **Posting (Status: `posted`)**: This is the crucial step that writes to the General Ledger. It should be an atomic, transactional process, often run as a scheduled job or triggered manually by an authorized user.
+*   The system fetches all journal entries with `status = 'approved'`.
+*   For each `journal_entry_line` in the entry:
+*   It calculates the last `balance` for the given `account_code` from the `general_ledger` table.
+*   It creates a new record in the `general_ledger` table.
+*   The new `balance` is calculated: `previous_balance + debit - credit`.
+*   After all lines are successfully written to the GL, the journal entry's status is updated to `posted`.
+*   **A `posted` journal entry should be immutable.** It cannot be edited or deleted. To correct an error, a new *reversing journal entry* must be created and posted.
+
+### Part 3: Financial Statement Generators (Laravel Artisan Commands)
+
+First, let's assume you have an Eloquent Model `ChartOfAccount` for your `dim_chart_of_accounts` table.
+
+#### A. Trial Balance Generator
+
+This command shows the closing balance for each account, ensuring debits equal credits.
+
+**Command:** `php artisan report:trial-balance --endDate=2023-12-31`
+
+```php
+// app/Console/Commands/GenerateTrialBalance.php
+namespace App\Console\Commands;
+
+use Illuminate\Console\Command;
+use App\Models\ChartOfAccount;
+use Illuminate\Support\Facades\DB;
+
+class GenerateTrialBalance extends Command
+{
+    protected $signature = 'report:trial-balance {--endDate= : The closing date for the report (YYYY-MM-DD)}';
+    protected $description = 'Generates a Trial Balance report for a specific date.';
+
+    public function handle()
+    {
+        $endDate = $this->option('endDate') ?? now()->format('Y-m-d');
+        $this->info("Generating Trial Balance as of: {$endDate}");
+
+        // 1. Get balances for all posting accounts up to the end date
+        $balances = DB::table('general_ledger as gl')
+            ->select('gl.account_code',
+                DB::raw('SUM(gl.debit) as total_debit'),
+                DB::raw('SUM(gl.credit) as total_credit')
+            )
+            ->where('gl.entry_date', '<=', $endDate)
+            ->groupBy('gl.account_code')
+            ->get()
+            ->keyBy('account_code');
+
+        // 2. Get all posting accounts from CoA
+        $accounts = ChartOfAccount::where('is_posting_account', true)->get();
+
+        $reportData = [];
+        $totalDebit = 0;
+        $totalCredit = 0;
+
+        foreach ($accounts as $account) {
+            $balanceData = $balances->get($account->account_code);
+            if (!$balanceData) continue;
+
+            $balance = ($balanceData->total_debit ?? 0) - ($balanceData->total_credit ?? 0);
+
+            $debit = 0;
+            $credit = 0;
+
+            if ($account->normal_balance === 'Debit') {
+                $debit = $balance >= 0 ? $balance : 0;
+                $credit = $balance < 0 ? abs($balance) : 0;
+            } else { // Normal Balance is Credit
+                $credit = $balance <= 0 ? abs($balance) : 0;
+                $debit = $balance > 0 ? $balance : 0;
+            }
+
+            if ($debit == 0 && $credit == 0) continue;
+
+            $reportData[] = [
+                'code' => $account->account_code,
+                'name' => $account->account_name,
+                'debit' => number_format($debit, 2),
+                'credit' => number_format($credit, 2),
+            ];
+
+            $totalDebit += $debit;
+            $totalCredit += $credit;
+        }
+
+        $this->table(
+            ['Account Code', 'Account Name', 'Debit', 'Credit'],
+            $reportData
+        );
+
+        $this->info(str_repeat('-', 60));
+        $this->table(
+            [],
+            [['', 'TOTAL', number_format($totalDebit, 2), number_format($totalCredit, 2)]]
+        );
+
+        if (round($totalDebit) != round($totalCredit)) {
+            $this->error('WARNING: Totals do not balance!');
+        } else {
+            $this->info('Totals balance successfully.');
+        }
+
+        return 0;
+    }
+}
+```
+
+#### B. Profit & Loss (Income Statement) Generator
+
+This command uses the report mappers in the CoA to build the statement.
+
+**Command:** `php artisan report:profit-loss --startDate=2023-01-01 --endDate=2023-12-31`
+
+```php
+// app/Console/Commands/GenerateProfitAndLoss.php
+namespace App\Console\Commands;
+
+use Illuminate\Console\Command;
+use App\Models\ChartOfAccount;
+use Illuminate\Support\Facades\DB;
+
+class GenerateProfitAndLoss extends Command
+{
+    protected $signature = 'report:profit-loss {--startDate=} {--endDate=}';
+    protected $description = 'Generates a Profit and Loss statement for a specific period.';
+
+    public function handle()
+    {
+        $startDate = $this->option('startDate') ?? now()->startOfYear()->format('Y-m-d');
+        $endDate = $this->option('endDate') ?? now()->format('Y-m-d');
+        $this->info("Generating Profit & Loss Statement from {$startDate} to {$endDate}");
+
+        // 1. Get P&L accounts from CoA
+        $plAccounts = ChartOfAccount::where('fs_map_statement', 'PL')->orderBy('account_code')->get();
+        $accountCodes = $plAccounts->pluck('account_code');
+
+        // 2. Get balances for these accounts within the period
+        $balances = DB::table('general_ledger')
+            ->select('account_code', DB::raw('SUM(debit) - SUM(credit) as balance'))
+            ->whereIn('account_code', $accountCodes)
+            ->whereBetween('entry_date', [$startDate, $endDate])
+            ->groupBy('account_code')
+            ->get()
+            ->keyBy('account_code');
+
+        // 3. Structure the report
+        $report = [];
+        foreach ($plAccounts as $account) {
+            $balance = $balances->get($account->account_code)->balance ?? 0;
+            if ($account->rollup_operator === 'SUBTRACT') {
+                $balance = -$balance;
+            }
+            $section = $account->fs_map_section;
+            $line = $account->fs_map_line;
+            if (!isset($report[$section])) {
+                $report[$section] = ['lines' => [], 'total' => 0];
+            }
+            if (!isset($report[$section]['lines'][$line])) {
+                $report[$section]['lines'][$line] = 0;
+            }
+            $report[$section]['lines'][$line] += $balance;
+            $report[$section]['total'] += $balance;
+        }
+
+        // 4. Display the report
+        $netIncome = 0;
+        foreach($report as $sectionName => $sectionData) {
+            $this->line("\n## " . strtoupper($sectionName) . " ##");
+            foreach($sectionData['lines'] as $lineName => $lineTotal) {
+                $this->line(sprintf('%-40s %15s', $lineName, number_format($lineTotal, 2)));
+            }
+            $this->info(sprintf('%-40s %15s', 'Total ' . $sectionName, number_format($sectionData['total'], 2)));
+            $netIncome += $sectionData['total'];
+        }
+
+        $this->line(str_repeat('=', 57));
+        $this->info(sprintf('%-40s %15s', 'NET INCOME', number_format($netIncome, 2)));
+        $this->line(str_repeat('=', 57));
+
+        return 0;
+    }
+}
+```
+
+#### C. Balance Sheet Generator
+
+This is the most complex, as it needs the Net Income from the P&L calculation.
+
+**Command:** `php artisan report:balance-sheet --endDate=2023-12-31`
+
+```php
+// app/Console/Commands/GenerateBalanceSheet.php
+namespace App\Console\Commands;
+
+// ... (Use statements similar to P&L command)
+
+class GenerateBalanceSheet extends Command
+{
+    protected $signature = 'report:balance-sheet {--endDate=}';
+    protected $description = 'Generates a Balance Sheet statement for a specific date.';
+
+    public function handle()
+    {
+        $endDate = $this->option('endDate') ?? now()->format('Y-m-d');
+        // Assuming fiscal year starts on Jan 1st for Net Income calculation
+        $fiscalYearStart = date('Y-01-01', strtotime($endDate));
+        $this->info("Generating Balance Sheet as of: {$endDate}");
+
+        // Step A: Calculate Net Income for the period
+        $netIncome = $this->calculateNetIncome($fiscalYearStart, $endDate);
+
+        // Step B: Get BS accounts and their cumulative balances
+        $bsAccounts = ChartOfAccount::where('fs_map_statement', 'BS')->orderBy('account_code')->get();
+        $accountCodes = $bsAccounts->pluck('account_code');
+
+        $balances = DB::table('general_ledger')
+            ->select('account_code', DB::raw('SUM(debit) - SUM(credit) as balance'))
+            ->whereIn('account_code', $accountCodes)
+            ->where('entry_date', '<=', $endDate)
+            ->groupBy('account_code')
+            ->get()
+            ->keyBy('account_code');
+
+        // Step C: Structure the report
+        $report = [];
+        foreach ($bsAccounts as $account) {
+            $balance = $balances->get($account->account_code)->balance ?? 0;
+            if ($account->rollup_operator === 'SUBTRACT') {
+                $balance = -$balance;
+            }
+            $section = $account->fs_map_section;
+            $line = $account->fs_map_line;
+
+            // Logic to group assets, liabilities, and equity separately
+            $type = $account->account_type; // Asset, Liability, or Equity
+
+            if (!isset($report[$type])) $report[$type] = [];
+            if (!isset($report[$type][$section])) $report[$type][$section] = ['lines' => [], 'total' => 0];
+            if (!isset($report[$type][$section]['lines'][$line])) $report[$type][$section]['lines'][$line] = 0;
+
+            $report[$type][$section]['lines'][$line] += $balance;
+            $report[$type][$section]['total'] += $balance;
+        }
+
+        // Step D: Display the report
+        $totalAssets = 0;
+        $totalLiabilitiesAndEquity = 0;
+
+        // Display Assets
+        $this->line("\n========== ASSETS ==========");
+        foreach($report['Asset'] as $sectionName => $sectionData) {
+            $this->line("\n## " . strtoupper($sectionName) . " ##");
+            foreach($sectionData['lines'] as $lineName => $lineTotal) {
+                 $this->line(sprintf('%-40s %15s', $lineName, number_format($lineTotal, 2)));
+            }
+            $totalAssets += $sectionData['total'];
+        }
+        $this->line(str_repeat('=', 57));
+        $this->info(sprintf('%-40s %15s', 'TOTAL ASSETS', number_format($totalAssets, 2)));
+        $this->line(str_repeat('=', 57));
+
+        // Display Liabilities & Equity
+        $this->line("\n========== LIABILITIES AND EQUITY ==========");
+        foreach(['Liability', 'Equity'] as $type) {
+            if (!isset($report[$type])) continue;
+            foreach($report[$type] as $sectionName => $sectionData) {
+                $this->line("\n## " . strtoupper($sectionName) . " ##");
+                foreach($sectionData['lines'] as $lineName => $lineTotal) {
+                    $this->line(sprintf('%-40s %15s', $lineName, number_format($lineTotal, 2)));
+                }
+                if ($sectionName === 'Equity') {
+                     $this->line(sprintf('%-40s %15s', 'Current Year Net Income', number_format($netIncome, 2)));
+                     $sectionData['total'] += $netIncome;
+                }
+                $totalLiabilitiesAndEquity += $sectionData['total'];
+            }
+        }
+        $this->line(str_repeat('=', 57));
+        $this->info(sprintf('%-40s %15s', 'TOTAL LIABILITIES AND EQUITY', number_format($totalLiabilitiesAndEquity, 2)));
+        $this->line(str_repeat('=', 57));
+
+        if (round($totalAssets) != round($totalLiabilitiesAndEquity)) {
+            $this->error('WARNING: Balance Sheet does not balance!');
+        } else {
+            $this->info('Balance Sheet balances successfully.');
+        }
+
+        return 0;
+    }
+
+    private function calculateNetIncome(string $startDate, string $endDate): float
+    {
+        // This is a simplified version of the P&L logic
+        $plAccounts = ChartOfAccount::where('fs_map_statement', 'PL')->get();
+        $balances = DB::table('general_ledger')
+            ->select('account_code', DB::raw('SUM(debit) - SUM(credit) as balance'))
+            ->whereIn('account_code', $plAccounts->pluck('account_code'))
+            ->whereBetween('entry_date', [$startDate, $endDate])
+            ->groupBy('account_code')
+            ->get()
+            ->keyBy('account_code');
+
+        $netIncome = 0;
+        foreach($plAccounts as $account) {
+            $balance = $balances->get($account->account_code)->balance ?? 0;
+            if ($account->rollup_operator === 'SUBTRACT') {
+                $balance = -$balance;
+            }
+            $netIncome += $balance;
+        }
+        return $netIncome;
+    }
+}
+```

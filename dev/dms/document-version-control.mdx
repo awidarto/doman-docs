@@ -1,0 +1,247 @@
+---
+title: DMS - Document Version Control
+---
+## 2025-09-28
+### 1. MongoDB Data Structure Design
+
+For your requirements, a two-collection approach in MongoDB is clean, scalable, and highly effective. This separates the concept of the "master document" from its immutable historical versions.
+
+*   **`documents` collection:** Stores the master record for each document. It always points to the latest version, acting as the main entry point.
+*   **`documentVersions` collection:** Stores the immutable, chronological records of each version.
+
+---
+
+#### `documents` Collection Schema
+
+This collection holds one document per `callCode`. The `_id` of this document *is* the unifying `callCode`. This makes lookups for a specific document very fast.
+
+```json
+// Collection: documents
+{
+  "_id": "FIN-RPT-2023-001", // The unifying callCode
+  "title": "Annual Financial Report 2023 (Final Draft)",
+  "author": {
+    "userId": "u-123",
+    "name": "Alice Johnson"
+  },
+  "department": "Finance",
+  "latestRevisionNumber": 2,
+  "latestVersionId": ObjectId("64f8a1b2c3d4e5f6a7b8c9d0"), // ObjectId of the latest version in documentVersions
+  "status": "approved", // e.g., 'draft', 'in_review', 'approved', 'archived'
+  "createdAt": ISODate("2023-09-06T10:00:00Z"),
+  "updatedAt": ISODate("2023-09-06T14:30:00Z")
+}
+```
+
+**Field Explanations:**
+
+*   `_id`: **(string)** The unique, human-readable `callCode` for the document. Using this as the `_id` ensures uniqueness and provides a direct lookup key.
+*   `title`: **(string)** The current title of the document. This can be updated here when a new version is created.
+*   `latestRevisionNumber`: **(integer)** Caching the latest revision number allows you to quickly know the current version count without querying the other collection.
+*   `latestVersionId`: **(ObjectId)** A direct reference to the `_id` of the corresponding document in the `documentVersions` collection. This creates a fast link to the most recent version's full details.
+*   `createdAt`: Timestamp of the very first version (revision 0).
+*   `updatedAt`: Timestamp of the most recent version.
+
+---
+
+#### `documentVersions` Collection Schema
+
+This is the core of your version log. Every time a document is saved, a new, immutable document is created in this collection.
+
+```json
+// Collection: documentVersions
+
+// Version 0 (Initial Creation)
+{
+  "_id": ObjectId("64f8a1b2c3d4e5f6a7b8c9c8"),
+  "documentId": "FIN-RPT-2023-001", // Foreign key linking to documents._id
+  "revisionNumber": 0,
+  "changelog": "Initial document creation.",
+  "author": {
+    "userId": "u-123",
+    "name": "Alice Johnson"
+  },
+  "storage": {
+    "repository": "s3",
+    "bucket": "dms-archive",
+    "path": "FIN-RPT-2023-001/rev0_a9b8c7.pdf",
+    "fileName": "Annual Financial Report 2023.pdf",
+    "mimeType": "application/pdf",
+    "size": 5242880, // in bytes
+    "hash": "sha256:f2ca1bb6c7e907d06dafe4687e579fce76b37e4e93b7605022da52e6ccc26fd2"
+  },
+  "createdAt": ISODate("2023-09-06T10:00:00Z")
+}
+
+// Version 1
+{
+  "_id": ObjectId("64f8a1b2c3d4e5f6a7b8c9c9"),
+  "documentId": "FIN-RPT-2023-001",
+  "revisionNumber": 1,
+  "changelog": "Updated section 3 with Q2 results.",
+  "author": {
+    "userId": "u-456",
+    "name": "Bob Williams"
+  },
+  "storage": {
+    "repository": "s3",
+    "bucket": "dms-archive",
+    "path": "FIN-RPT-2023-001/rev1_d4e5f6.pdf",
+    "fileName": "Annual Financial Report 2023 Draft 2.pdf",
+    "mimeType": "application/pdf",
+    "size": 5310921,
+    "hash": "sha256:..."
+  },
+  "createdAt": ISODate("2023-09-06T11:45:00Z")
+}
+
+// Version 2 (Latest)
+{
+  "_id": ObjectId("64f8a1b2c3d4e5f6a7b8c9d0"),
+  "documentId": "FIN-RPT-2023-001",
+  "revisionNumber": 2,
+  "changelog": "Final review and typo corrections. Added appendix.",
+  "author": {
+    "userId": "u-123",
+    "name": "Alice Johnson"
+  },
+  "storage": {
+    // ... storage details for revision 2 ...
+  },
+  "createdAt": ISODate("2023-09-06T14:30:00Z")
+}
+```
+
+**Field Explanations:**
+
+*   `_id`: **(ObjectId)** A unique identifier for this specific version record.
+*   `documentId`: **(string)** The unifying `callCode`. This is the most important field for grouping versions. **You must create an index on this field.**
+*   `revisionNumber`: **(integer)** The 0-indexed version number. A compound index on `(documentId, revisionNumber)` would be highly beneficial for performance.
+*   `changelog`: **(string)** A user-provided message describing the changes in this version.
+*   `author`: **(object)** Details of the user who created *this specific version*.
+*   `storage`: **(object)** An object containing all information needed to retrieve the immutable file from your archival repository (e.g., S3, local filesystem). Including a file hash is crucial for data integrity checks.
+*   `createdAt`: The timestamp when this specific version was created.
+
+---
+
+#### How This Design Meets Your Requirements:
+
+1.  **View Chronological Change History:**
+This is a simple and efficient query.
+```php
+// In Laravel using a MongoDB library like jenssegers/mongodb
+$history = DB::collection('documentVersions')
+                ->where('documentId', 'FIN-RPT-2023-001')
+                ->orderBy('revisionNumber', 'asc') // or 'desc' for reverse chronological
+                ->get();
+    ```
+
+2.  **View a Specific Version Independently:**
+Each version has its own document and a direct path to its immutable file.
+```php
+$specificVersion = DB::collection('documentVersions')
+                       ->where('documentId', 'FIN-RPT-2023-001')
+                       ->where('revisionNumber', 1)
+                       ->first();
+// Now you can use $specificVersion['storage']['path'] to retrieve the file
+    ```
+
+3.  **Get the Latest Version:**
+You can either use the `documents` collection for a very fast lookup or query the `documentVersions` collection.
+```php
+// Option A (Fastest, using the master document)
+$masterDoc = DB::collection('documents')->find('FIN-RPT-2023-001');
+$latestVersion = DB::collection('documentVersions')->find($masterDoc['latestVersionId']);
+
+// Option B (Still very fast with an index)
+$latestVersion = DB::collection('documentVersions')
+                     ->where('documentId', 'FIN-RPT-2023-001')
+                     ->orderBy('revisionNumber', 'desc')
+                     ->first();
+    ```
+
+---
+
+### 2. Exploration with a Graph Database (Neo4j)
+
+A graph database excels at modeling and querying relationships. For version control, this is a very natural fit, creating a "chain" of revisions.
+
+#### Graph Model
+
+We'll define Nodes (the entities) and Relationships (how they connect).
+
+**Nodes:**
+
+*   `:Document`: The conceptual document.
+*   Properties: `callCode` (unique identifier), `title`.
+*   `:Version`: An immutable version of a document.
+*   Properties: `revisionNumber`, `changelog`, `createdAt`, `storagePath`, `hash`, etc.
+*   `:User`: The user who created the version.
+*   Properties: `userId`, `name`.
+
+**Relationships:**
+
+*   `HAS_VERSION`: Connects a `:Document` to all its `:Version` nodes.
+*   `PREVIOUS_VERSION`: Connects a version to the one that came before it. This forms the chronological linked list.
+*   `CREATED`: Connects a `:User` to the `:Version` they created.
+*   `LATEST_VERSION`: A special relationship from a `:Document` to its most current `:Version` for fast access.
+
+**Visual Representation:**
+
+```
+(:User {name: "Bob"}) -[:CREATED]-> (v1:Version {rev: 1})
+                                        ^
+                                        | [:PREVIOUS_VERSION]
+                                        |
+(d:Document {callCode: "FIN-RPT..."}) -[:HAS_VERSION]-> (v2:Version {rev: 2}) <-[:CREATED]- (:User {name: "Alice"})
+(d) -[:LATEST_VERSION]-> (v2)           ^
+                                        | [:PREVIOUS_VERSION]
+                                        |
+(d) -[:HAS_VERSION]-> (v0:Version {rev: 0}) <-[:CREATED]- (:User {name: "Alice"})
+```
+
+#### How This Model Meets Your Requirements:
+
+**1. View Chronological Change History:**
+You can traverse the `PREVIOUS_VERSION` chain backwards from the latest version. This is extremely efficient in a graph database.
+
+*Cypher Query:*
+```cypher
+// Find the latest version and then walk the chain of previous versions
+MATCH (d:Document {callCode: 'FIN-RPT-2023-001'})-[:LATEST_VERSION]->(latest:Version)
+MATCH path = (latest)-[:PREVIOUS_VERSION*0..]->(first:Version)
+// Unwind the nodes from the path to return them as a list
+WITH nodes(path) AS versions
+UNWIND versions AS version
+RETURN version
+ORDER BY version.revisionNumber ASC
+```
+
+**2. View a Specific Version Independently:**
+A direct lookup is simple.
+
+*Cypher Query:*
+```cypher
+MATCH (d:Document {callCode: 'FIN-RPT-2023-001'})-[:HAS_VERSION]->(v:Version {revisionNumber: 1})
+RETURN v.storagePath, v.changelog, v.createdAt
+```
+
+#### Comparison and Recommendation
+
+| Feature | MongoDB (Document Model) | Neo4j (Graph Model) |
+| :--- | :--- | :--- |
+| **Simplicity** | **Winner**. The two-collection model is intuitive, easy to implement in Laravel, and maps well to application logic. | Higher learning curve for Cypher and graph concepts. Laravel integration is less common. |
+| **Performance** | Excellent for the required queries (get history, get specific). Performance relies on proper indexing (`documentId`). | Excellent, especially for traversing the version chain. Can outperform MongoDB on complex relationship queries. |
+| **Flexibility** | Very flexible. Adding new metadata to versions is trivial. | Very flexible. The schema-less nature allows for easy evolution. |
+| **Querying** | Simple queries are very straightforward. Complex relationship queries (e.g., "find all documents revised by people in the same department") require application-side logic or aggregation pipelines. | **Winner**. Excels at answering questions *about relationships*. "Who approved a version that was later reverted?" is a natural graph query. |
+| **Future-Proofing** | Solid for most DMS needs. | **Winner for complex scenarios.** If you ever plan to add features like **branching and merging** documents, a graph model is vastly superior and almost purpose-built for it. |
+
+### Conclusion and Recommendation for Your Stack
+
+For your current requirements and your Laravel/PHP stack, the **MongoDB two-collection approach is the most pragmatic and recommended solution.**
+
+*   It's a robust, scalable, and well-understood pattern.
+*   Integration with Laravel is seamless with mature packages like `jenssegers/mongodb`.
+*   It perfectly satisfies all your stated needs with simple, performant queries.
+
+The Neo4j exploration is valuable because it shows a powerful alternative. You should seriously consider a graph database if you anticipate your DMS evolving to handle more complex relationships, such as branching/merging, complex approval workflows, or deep analysis of collaboration patterns. For now, MongoDB provides the best balance of power and implementation simplicity.

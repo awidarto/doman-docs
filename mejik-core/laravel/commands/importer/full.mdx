@@ -1,0 +1,313 @@
+Of course. Here is the final, complete code for the Artisan command, along with comprehensive usage documentation in both English and Bahasa Indonesia.
+
+---
+
+### 1. Prerequisites: Models & Migrations
+
+For this command to work, you need the corresponding Eloquent models and database tables. Here is the example setup for the `JournalHeader` and `JournalDetail` scenario.
+
+#### Migrations
+
+**`..._create_journal_headers_table.php`**
+```php
+Schema::create('journal_headers', function (Blueprint $table) {
+    $table->id();
+    $table->string('journalId')->unique();
+    $table->string('journalDescription');
+    $table->date('journalDate');
+    $table->decimal('totalAmount', 15, 2);
+    $table->timestamps();
+});
+```
+
+**`..._create_journal_details_table.php`**
+```php
+Schema::create('journal_details', function (Blueprint $table) {
+    $table->id();
+    $table->string('journalId'); // This is the foreign key
+    $table->string('trxDescription');
+    $table->date('trxDate');
+    $table->integer('trxQty');
+    // ... other detail columns
+    $table->timestamps();
+
+    $table->foreign('journalId')->references('journalId')->on('journal_headers')->onDelete('cascade');
+});
+```
+Run `php artisan migrate` after creating these.
+
+#### Models
+
+**`app/Models/JournalHeader.php`**
+```php
+<?php
+namespace App\Models;
+use Illuminate\Database\Eloquent\Model;
+
+class JournalHeader extends Model
+{
+    protected $fillable = [
+        'journalId', 'journalDescription', 'journalDate', 'totalAmount'
+    ];
+}
+```
+
+**`app/Models/JournalDetail.php`**
+```php
+<?php
+namespace App\Models;
+use Illuminate\Database\Eloquent\Model;
+
+class JournalDetail extends Model
+{
+    protected $fillable = [
+        'journalId', 'trxDescription', 'trxDate', 'trxQty', //... etc.
+    ];
+}
+```
+
+---
+
+### 2. Complete Artisan Command Code
+
+Create the command with `php artisan make:command ImportHeaderDetail`. Place the following code into the generated file at `app/Console/Commands/ImportHeaderDetail.php`.
+
+```php
+<?php
+
+namespace App\Console\Commands;
+
+use Illuminate\Console\Command;
+use Illuminate\Support\Facades\DB;
+use Maatwebsite\Excel\Facades\Excel;
+
+class ImportHeaderDetail extends Command
+{
+    /**
+     * The name and signature of the console command.
+     *
+     * @var string
+     */
+    protected $signature = 'import:header-detail
+                            {file : The path to the Excel file to import.}
+                            {--entities= : Map entity types to Models (e.g., header:ModelName,detail:DetailModel)}
+                            {--key= : The name of the primary/foreign key column (e.g., journalId). This is required.}';
+
+    /**
+     * The console command description.
+     *
+     * @var string
+     */
+    protected $description = 'Parse a structured header/detail Excel file and save data to the database.';
+
+    /**
+     * Execute the console command.
+     */
+    public function handle()
+    {
+        $filePath = $this->argument('file');
+        $keyField = $this->option('key');
+        $entityMappings = $this->parseEntityMappings($this->option('entities'));
+
+        // Validation for required options
+        if (!$keyField) {
+            $this->error('The --key option is required.');
+            return 1;
+        }
+        if (empty($entityMappings)) {
+            $this->error('Entity mappings are required. Use --entities=header:Model,child:Model,...');
+            return 1;
+        }
+        if (!file_exists($filePath)) {
+            $this->error("File not found at path: {$filePath}");
+            return 1;
+        }
+
+        $this->info("Starting import of {$filePath}...");
+
+        $rows = Excel::toArray(new \stdClass(), $filePath)[0];
+
+        $currentEntityType = null;
+        $currentHeaders = [];
+        $lastParentKeyValue = null;
+
+        DB::beginTransaction();
+        try {
+            foreach ($rows as $rowIndex => $row) {
+                // Skip completely empty rows
+                if (empty(array_filter($row))) {
+                    continue;
+                }
+
+                $entityType = strtolower(trim($row[0] ?? ''));
+
+                // This row defines a new entity type block (e.g., 'header', 'detail', 'education')
+                if (array_key_exists($entityType, $entityMappings)) {
+                    $currentEntityType = $entityType;
+                    // The next row contains the column headers for this block
+                    $currentHeaders = $rows[$rowIndex + 1];
+                    $this->line("Processing new block: '{$currentEntityType}'");
+                    continue;
+                }
+
+                // Skip the header row itself, as we've already stored it
+                if ($currentEntityType && $row === $currentHeaders) {
+                    continue;
+                }
+
+                // If we are inside a block, process this row as data
+                if ($currentEntityType) {
+                    $filteredHeaders = array_filter($currentHeaders, fn($h) => $h !== null);
+                    $dataRow = array_slice($row, 0, count($filteredHeaders));
+                    $data = array_combine($filteredHeaders, $dataRow);
+
+                    $modelClass = $entityMappings[$currentEntityType];
+                    $modelInstance = new $modelClass();
+
+                    // Logic for linking child entities to the parent
+                    if ($currentEntityType !== 'header' && $currentEntityType !== 'main') {
+                        // If the key field is NOT explicitly provided in the data row,
+                        // then use the key from the last header as a fallback.
+                        if (!isset($data[$keyField]) || empty($data[$keyField])) {
+                            if (!$lastParentKeyValue) {
+                                throw new \Exception("Found a '{$currentEntityType}' row without a preceding 'header'/'main' row and no explicit key.");
+                            }
+                            // Assign the foreign key from the last saved parent
+                            $data[$keyField] = $lastParentKeyValue;
+                        }
+                        // If the key IS provided in the data row, we will use that explicit value.
+                    }
+
+                    $modelInstance->fill($data);
+                    $modelInstance->save();
+
+                    // If this was a parent entity, store its key for subsequent children
+                    if ($currentEntityType === 'header' || $currentEntityType === 'main') {
+                        $lastParentKeyValue = $modelInstance->{$keyField};
+                        $this->info("  Saved Header with key: {$lastParentKeyValue}");
+                    } else {
+                        $savedKey = $modelInstance->{$keyField};
+                        $this->line("    - Saved '{$currentEntityType}' detail for key {$savedKey}");
+                    }
+                }
+            }
+
+            DB::commit();
+            $this->info('Import completed successfully!');
+            return 0;
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            $this->error("An error occurred: " . $e->getMessage());
+            $this->error("On row " . ($rowIndex + 1) . " while processing block '{$currentEntityType}'");
+            return 1;
+        }
+    }
+
+    /**
+     * Parses the --entities option string into a usable array.
+     */
+    private function parseEntityMappings(?string $entities): array
+    {
+        if (!$entities) return [];
+        $mappings = [];
+        $pairs = explode(',', $entities);
+        foreach ($pairs as $pair) {
+            list($key, $modelName) = explode(':', $pair);
+            // We assume models are in the App\Models namespace
+            $mappings[strtolower(trim($key))] = 'App\\Models\\' . trim($modelName);
+        }
+        // Also map 'main' to whatever 'header' is, for convenience
+        if (isset($mappings['header'])) {
+            $mappings['main'] = $mappings['header'];
+        }
+        return $mappings;
+    }
+}
+```
+---
+
+### 3. Usage Documentation (English)
+
+#### Command Synopsis
+
+```bash
+php artisan import:header-detail <file> --entities=<mappings> --key=<key_name>
+```
+
+#### Arguments & Options
+
+| Parameter | Description | Required | Example |
+| :--- | :--- | :--- | :--- |
+| `file` | The relative path to the Excel (.xlsx, .csv) file to be imported. | Yes | `storage/app/import_data.xlsx` |
+| `--entities` | A comma-separated list that maps the entity type from Column A to your Eloquent Model names. Use `header` or `main` for the parent entity. | Yes | `--entities=header:JournalHeader,detail:JournalDetail` |
+| `--key` | The name of the column that serves as the Primary Key for the header and the Foreign Key for the details. | Yes | `--key=journalId` |
+
+#### Example Excel File Structure
+
+The importer relies on a specific structure. Column A indicates the type of data block. The row immediately following the type declaration must contain the column headers, which must match the `$fillable` fields in your model.
+
+| | A | B | C | D | E |
+|---|---|---|---|---|---|
+| 1 | **header** | journalId | journalDescription | journalDate | totalAmount |
+| 2 | | J001 | Pembelian ATK | 2025-09-01 | 220000 |
+| 3 | | J002 | Pembelian Safety | 2025-09-02 | 650000 |
+| 4 | | | | | |
+| 5 | **detail** | **journalId** | trxDescription | trxQty | trxUom |
+| 6 | | | Bolpoint | 10 | box |
+| 7 | | | Pensil | 10 | box |
+| 8 | | **J002** | Sepatu | 5 | pair |
+| 9 | | **J002** | Raincoat | 5 | unit |
+
+**How this file is processed:**
+*   Rows 6 & 7 do not have `journalId` specified. They will be automatically linked to the last processed header, which is **J002**.
+*   Rows 8 & 9 have `journalId` explicitly set to **J002**. The importer will use this value. If you changed it to `J001`, they would be linked to the first header instead.
+
+#### Example Command Execution
+
+```bash
+php artisan import:header-detail storage/app/journals.xlsx --entities=header:JournalHeader,detail:JournalDetail --key=journalId
+```
+---
+
+### 4. Dokumentasi Penggunaan (Bahasa Indonesia)
+
+#### Sintaks Perintah
+
+```bash
+php artisan import:header-detail <file> --entities=<mappings> --key=<key_name>
+```
+
+#### Argumen & Opsi
+
+| Parameter | Deskripsi | Wajib | Contoh |
+| :--- | :--- | :--- | :--- |
+| `file` | Path relatif menuju file Excel (.xlsx, .csv) yang akan diimpor. | Ya | `storage/app/data_impor.xlsx` |
+| `--entities` | Daftar yang dipisahkan koma untuk memetakan tipe entitas dari Kolom A ke nama Model Eloquent Anda. Gunakan `header` atau `main` untuk entitas induk. | Ya | `--entities=header:JournalHeader,detail:JournalDetail` |
+| `--key` | Nama kolom yang berfungsi sebagai Kunci Primer (Primary Key) untuk data header dan Kunci Asing (Foreign Key) untuk data detail. | Ya | `--key=journalId` |
+
+#### Contoh Struktur File Excel
+
+Importer ini bergantung pada struktur file yang spesifik. Kolom A menandakan tipe blok data. Baris setelah deklarasi tipe harus berisi nama-nama kolom (header), yang harus cocok dengan properti `$fillable` pada Model Anda.
+
+| | A | B | C | D | E |
+|---|---|---|---|---|---|
+| 1 | **header** | journalId | journalDescription | journalDate | totalAmount |
+| 2 | | J001 | Pembelian ATK | 2025-09-01 | 220000 |
+| 3 | | J002 | Pembelian Safety | 2025-09-02 | 650000 |
+| 4 | | | | | |
+| 5 | **detail** | **journalId** | trxDescription | trxQty | trxUom |
+| 6 | | | Bolpoint | 10 | box |
+| 7 | | | Pensil | 10 | box |
+| 8 | | **J002** | Sepatu | 5 | pair |
+| 9 | | **J002** | Raincoat | 5 | unit |
+
+**Bagaimana file ini diproses:**
+*   Baris 6 & 7 tidak memiliki nilai pada kolom `journalId`. Keduanya akan otomatis terhubung ke header terakhir yang diproses, yaitu **J002**.
+*   Baris 8 & 9 memiliki nilai `journalId` yang diisi secara eksplisit, yaitu **J002**. Importer akan menggunakan nilai ini. Jika Anda mengubahnya menjadi `J001`, maka data tersebut akan terhubung ke header yang pertama.
+
+#### Contoh Eksekusi Perintah
+
+```bash
+php artisan import:header-detail storage/app/jurnal.xlsx --entities=header:JournalHeader,detail:JournalDetail --key=journalId
+```

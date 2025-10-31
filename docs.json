@@ -77,7 +77,9 @@
               "apps/fas/account-payable-module",
               "apps/fas/account-receivable-module",
               "apps/fas/chart-of-accounts",
-              "apps/fas/coa-cost-revenue-map"
+              "apps/fas/coa-cost-revenue-map",
+              "apps/fas/journal-gl-mongodb",
+              "apps/fas/journal-gl-rdbms"
             ]
           },
           {
@@ -106,6 +108,18 @@
       {
         "tab": "AI Dev",
         "groups": [
+          {
+            "group": "Laravel Workflow",
+            "pages": [
+              "ai-dev/laravel/laravel-workflow-simple"
+            ]
+          },
+          {
+            "group": "n8n",
+            "pages": [
+              "ai-dev/n8n/laravel-n8n-integration"
+            ]
+          },
           {
             "group": "Docling",
             "pages": [
@@ -137,7 +151,9 @@
             "pages": [
               "dev/dms/intelligent-dms-blueprint",
               "dev/dms/project-document-control",
-              "dev/dms/project-document-control-id"
+              "dev/dms/project-document-control-id",
+              "dev/dms/document-version-control",
+              "dev/dms/document-graph-implementation"
             ]
           }
         ]
@@ -145,6 +161,13 @@
       {
         "tab": "Mejik Core",
         "groups": [
+          {
+            "group": "Developer Guide",
+            "pages": [
+              "mejik-core/laravel/guide/mongodb-date-timezone",
+              "mejik-core/laravel/guide/mongodb-date-timezone-advanced"
+            ]
+          },
           {
             "group": "Installation",
             "pages": [
@@ -163,7 +186,8 @@
           {
             "group": "Framework",
             "pages": [
-              "mejik-core/laravel/framework/queue-events"
+              "mejik-core/laravel/framework/queue-events",
+              "mejik-core/laravel/framework/sse-notification"
             ]
           },
           {
@@ -175,6 +199,8 @@
           {
             "group": "Converter",
             "pages": [
+              "mejik-core/laravel/commands/converter/pdf-thumbnail-watermark",
+              "mejik-core/laravel/commands/converter/pdf-thumbnail-watermark-id",
               "mejik-core/laravel/commands/converter/pdf-thumbnail-generator",
               "mejik-core/laravel/commands/converter/pdf-convert-from-office",
               "mejik-core/laravel/commands/converter/images-convert-from-office",
@@ -186,6 +212,15 @@
             "group": "Utility",
             "pages": [
               "mejik-core/laravel/commands/utility/source-file-optimizer"
+            ]
+          },
+          {
+            "group": "Importer",
+            "pages": [
+              "mejik-core/laravel/commands/importer/header-detail-data-import",
+              "mejik-core/laravel/commands/importer/header-detail-data-export",
+              "mejik-core/laravel/commands/importer/adv-header-detail-data-import",
+              "mejik-core/laravel/commands/importer/header-detail-data-import-export"
             ]
           },
           {
@@ -230,14 +265,51 @@
               "mejik-core/laravel/tools/module-gen/guide"
 
             ]
-          },
+          }
+        ]
+      },
+      {
+        "tab": "Mejik Vue",
+        "groups": [
           {
             "group": "Vue",
             "pages": [
-              "mejik-core/vue/index",
-              "mejik-core/vue/quickstart",
-              "mejik-core/vue/development",
-              "mejik-core/vue/components/inlineediting"
+              "mejik-core/vue/components/sse-notification-dropdown",
+              "mejik-core/vue/components/advanced-repeater-form",
+              "mejik-core/vue/components/tiptap-quill-editor",
+              "mejik-core/vue/components/inlineediting",
+              "mejik-core/vue/components/treedatatable"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "Projects",
+        "groups": [
+          {
+            "group": "DMS",
+            "pages": [
+              "projects/dms/index",
+              "projects/dms/quickstart",
+              "projects/dms/development"
+            ]
+          },
+          {
+            "group": "FAS",
+            "pages": [
+              "projects/fas/account-payable-module",
+              "projects/fas/account-receivable-module",
+              "projects/fas/chart-of-accounts",
+              "projects/fas/coa-cost-revenue-map"
+            ]
+          },
+          {
+            "group": "Asset",
+            "pages": [
+              "projects/asset/asset-management-basic",
+              "projects/asset/core-design-erd",
+              "projects/asset/mongodb-implementation-design",
+              "projects/asset/eloquent-implementation-design"
             ]
           }
         ]

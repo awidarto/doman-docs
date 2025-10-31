@@ -1,0 +1,1268 @@
+---
+title: Journal, GL and Report Generator in MongoDb
+---
+
+### **Introduction**
+
+This guide provides a full implementation of an accounting system's backend in Laravel, leveraging MongoDB's document model and aggregation pipeline. We will build:
+1.  **Database Schemas & Models:** Using `camelCase` for collections and fields.
+2.  **Journal Posting Logic:** A conceptual guide to ensure data integrity.
+3.  **Three Artisan Commands:** For generating a Trial Balance, Profit & Loss Statement, and Balance Sheet directly from the database with a single, powerful query each.
+
+---
+
+### **Part 1: Setup and Configuration**
+
+First, ensure you have the `mongodb/laravel-mongodb` package installed and configured.
+
+1.  **Install the package:**
+```bash
+composer require mongodb/laravel-mongodb
+    ```
+
+2.  **Configure `config/database.php`:** Add a new MongoDB connection.
+```php
+// in 'connections' array
+'mongodb' => [
+    'driver'   => 'mongodb',
+    'host'     => env('DB_HOST', '127.0.0.1'),
+    'port'     => env('DB_PORT', 27017),
+    'database' => env('DB_DATABASE', 'homestead'),
+    'username' => env('DB_USERNAME', 'homestead'),
+    'password' => env('DB_PASSWORD', 'secret'),
+    'options'  => [
+        'database' => 'admin' // sets the authentication database
+    ]
+],
+    ```
+
+3.  **Update your `.env` file:**
+```env
+DB_CONNECTION=mongodb
+DB_HOST=127.0.0.1
+DB_PORT=27017
+DB_DATABASE=your_accounting_db
+DB_USERNAME=your_user
+DB_PASSWORD=your_password
+    ```
+
+---
+
+### **Part 2: MongoDB Schema and Laravel Models (camelCase)**
+
+We will define three collections: `dimChartOfAccounts`, `journalEntries`, and `generalLedger`.
+
+#### A. Chart of Accounts Model
+
+This collection acts as the blueprint for all financial reporting.
+
+*   **Collection Name:** `dimChartOfAccounts`
+*   **Purpose:** Stores the list of all accounts, their properties, and their mapping to financial statements.
+
+**File: `app/Models/ChartOfAccount.php`**
+```php
+<?php
+
+namespace App\Models;
+
+use MongoDB\Laravel\Eloquent\Model;
+
+/**
+ * Represents an account in the Chart of Accounts.
+ * This model is the single source of truth for financial report generation.
+ *
+ * @property string $_id The account code, e.g., "41100". Used as the primary key.
+ * @property string $accountName The human-readable name, e.g., "Product Sales Revenue".
+ * @property string $accountType The fundamental type: 'Asset', 'Liability', 'Equity', 'Revenue', 'Expense'.
+ * @property string $normalBalance 'Debit' or 'Credit'.
+ * @property bool   $isPostingAccount True if transactions can be posted to this account.
+ * @property string|null $parentAccountCode The code of the parent account for hierarchical grouping.
+ * @property string $fsMapStatement The financial statement this account belongs to: 'BS' (Balance Sheet) or 'PL' (Profit & Loss).
+ * @property string $fsMapSection The major section on the report, e.g., "Current Assets" or "Operating Expenses".
+ * @property string $fsMapLine The specific line item on the report, allowing multiple accounts to be grouped.
+ * @property string $rollupOperator 'ADD' or 'SUBTRACT'. Defines how this account's balance contributes to its line total (e.g., for contra-accounts).
+ * @property string|null $description A detailed explanation of the account's purpose.
+ */
+class ChartOfAccount extends Model
+{
+    /**
+     * The connection name for the model.
+     * @var string
+     */
+    protected $connection = 'mongodb';
+
+    /**
+     * The collection associated with the model.
+     * @var string
+     */
+    protected $collection = 'dimChartOfAccounts';
+
+    /**
+     * The primary key for the model. We use the account code as a natural key.
+     * @var string
+     */
+    protected $primaryKey = '_id';
+
+    /**
+     * Indicates if the IDs are auto-incrementing.
+     * @var bool
+     */
+    public $incrementing = false;
+
+    /**
+     * The "type" of the primary key ID.
+     * @var string
+     */
+    protected $keyType = 'string';
+
+    /**
+     * This is the crucial setting to disable snake_case conversion
+     * and work directly with camelCase attributes.
+     * @var bool
+     */
+    public static $snakeAttributes = false;
+
+    /**
+     * The attributes that are mass assignable.
+     * @var array
+     */
+    protected $fillable = [
+        '_id', 'accountName', 'accountType', 'normalBalance', 'isPostingAccount',
+        'parentAccountCode', 'fsMapStatement', 'fsMapSection', 'fsMapLine',
+        'rollupOperator', 'description'
+    ];
+}
+```
+
+---
+
+#### B. Journal Entry Model
+
+This collection stores the journal entries with their lines embedded, a natural fit for a document database.
+
+*   **Collection Name:** `journalEntries`
+*   **Purpose:** To record all financial transactions before they are finalized in the General Ledger.
+
+**File: `app/Models/JournalEntry.php`**
+```php
+<?php
+
+namespace App\Models;
+
+use Illuminate\Support\Carbon;
+use MongoDB\Laravel\Eloquent\Model;
+
+/**
+ * Represents a journal entry with its lines embedded.
+ *
+ * @property string $_id
+ * @property Carbon $entryDate
+ * @property string $description
+ * @property string|null $referenceNumber
+ * @property string $status ('draft', 'pending_approval', 'approved', 'posted', 'rejected')
+ * @property int $createdBy User ID of the creator.
+ * @property int|null $approvedBy User ID of the approver.
+ * @property array $lines An array of line-item documents.
+ */
+class JournalEntry extends Model
+{
+    protected $connection = 'mongodb';
+    protected $collection = 'journalEntries';
+    public static $snakeAttributes = false;
+
+    protected $fillable = [
+        'entryDate', 'description', 'referenceNumber', 'status', 'createdBy', 'approvedBy', 'lines'
+    ];
+
+    protected $casts = [
+        'entryDate' => 'datetime',
+        'lines' => 'array', // Ensures the 'lines' field is handled as an array
+    ];
+}
+```
+
+---
+
+#### C. General Ledger Model
+
+This collection is the final, immutable record of all transactions, optimized for fast reporting.
+
+*   **Collection Name:** `generalLedger`
+*   **Purpose:** Provides a flat, indexed list of every debit and credit for high-performance aggregation.
+
+**File: `app/Models/GeneralLedger.php`**
+```php
+<?php
+
+namespace App\Models;
+
+use Illuminate\Support\Carbon;
+use MongoDB\Laravel\Eloquent\Model;
+
+/**
+ * Represents a single, immutable line in the General Ledger.
+ * This is the source data for all financial reports.
+ *
+ * @property string $_id
+ * @property string $accountCode The code of the affected account.
+ * @property Carbon $entryDate The date of the transaction.
+ * @property string $journalEntryId The _id of the source JournalEntry document.
+ * @property float $debit The debit amount.
+ * @property float $credit The credit amount.
+ * @property string $description A description of the transaction.
+ */
+class GeneralLedger extends Model
+{
+    protected $connection = 'mongodb';
+    protected $collection = 'generalLedger';
+    public static $snakeAttributes = false;
+
+    protected $fillable = ['accountCode', 'entryDate', 'journalEntryId', 'debit', 'credit', 'description'];
+
+    protected $casts = [
+        'entryDate' => 'datetime',
+        'debit' => 'float',
+        'credit' => 'float',
+    ];
+}
+```
+
+---
+
+### **Part 3: The Business Logic - Journal Posting**
+
+The posting process moves data from an `approved` `JournalEntry` to the `generalLedger`. This action must be **atomic**. If any part fails, the entire operation should roll back. MongoDB transactions are perfect for this.
+
+**Conceptual Implementation (e.g., in a Job or Service class):**
+
+```php
+<?php
+
+namespace App\Services;
+
+use App\Models\JournalEntry;
+use App\Models\GeneralLedger;
+use Illuminate\Support\Facades\DB;
+use Throwable;
+
+class JournalPostingService
+{
+    public function postApprovedEntries()
+    {
+        $entriesToPost = JournalEntry::where('status', 'approved')->get();
+
+        if ($entriesToPost->isEmpty()) {
+            return;
+        }
+
+        // Use a MongoDB transaction to ensure atomicity
+        DB::connection('mongodb')->transaction(function () use ($entriesToPost) {
+            foreach ($entriesToPost as $entry) {
+                $glEntries = [];
+                foreach ($entry->lines as $line) {
+                    $glEntries[] = [
+                        'accountCode'    => $line['accountCode'],
+                        'entryDate'      => $entry->entryDate,
+                        'journalEntryId' => $entry->_id,
+                        'debit'          => $line['type'] === 'debit' ? (float) $line['amount'] : 0,
+                        'credit'         => $line['type'] === 'credit' ? (float) $line['amount'] : 0,
+                        'description'    => $entry->description,
+                        'createdAt'      => now(),
+                        'updatedAt'      => now(),
+                    ];
+                }
+                // Insert all GL lines for this entry
+                GeneralLedger::insert($glEntries);
+
+                // Update the journal entry status to 'posted'
+                $entry->update(['status' => 'posted']);
+            }
+        });
+    }
+}
+```
+
+---
+
+### **Part 4: Financial Statement Generators (Artisan Commands)**
+
+Here are the complete, fully documented Artisan commands.
+
+#### A. Trial Balance Generator
+
+This command verifies the fundamental accounting equation (Debits = Credits) across all accounts.
+
+**File: `app/Console/Commands/GenerateTrialBalance.php`**
+```php
+<?php
+
+namespace App\Console\Commands;
+
+use Illuminate\Console\Command;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
+
+class GenerateTrialBalance extends Command
+{
+    /**
+     * The name and signature of the console command.
+     * @var string
+     */
+    protected $signature = 'report:trial-balance {--endDate= : The closing date for the report (YYYY-MM-DD)}';
+
+    /**
+     * The console command description.
+     * @var string
+     */
+    protected $description = 'Generates a Trial Balance report using MongoDB aggregation with camelCase fields.';
+
+    /**
+     * Execute the console command.
+     * @return int
+     */
+    public function handle()
+    {
+        $endDate = $this->option('endDate') ? Carbon::parse($this->option('endDate'))->endOfDay() : now();
+        $this->info("Generating Trial Balance as of: {$endDate->toDateString()}");
+
+        $pipeline = [
+            // Stage 1: Filter GL entries up to the specified end date.
+            ['$match' => ['entryDate' => ['$lte' => $endDate->toDateTime()]]],
+
+            // Stage 2: Group by account code to calculate total debits and credits.
+            ['$group' => [
+                '_id' => '$accountCode',
+                'totalDebit' => ['$sum' => '$debit'],
+                'totalCredit' => ['$sum' => '$credit'],
+            ]],
+
+            // Stage 3: Join with the Chart of Accounts to get account details like name and normal balance.
+            ['$lookup' => [
+                'from' => 'dimChartOfAccounts',
+                'localField' => '_id',
+                'foreignField' => '_id',
+                'as' => 'coaDetails',
+            ]],
+
+            // Stage 4: Deconstruct the coaDetails array created by $lookup.
+            ['$unwind' => '$coaDetails'],
+
+            // Stage 5: Calculate the final balance for each account.
+            ['$project' => [
+                'accountName' => '$coaDetails.accountName',
+                'normalBalance' => '$coaDetails.normalBalance',
+                'balance' => ['$subtract' => ['$totalDebit', '$totalCredit']],
+            ]],
+
+            // Stage 6: Project the final balance into the correct Debit or Credit column based on the account's normal balance.
+            ['$project' => [
+                'accountName' => 1,
+                'debit' => [
+                    '$cond' => [
+                        'if' => ['$eq' => ['$normalBalance', 'Debit']],
+                        'then' => ['$cond' => ['if' => ['$gte' => ['$balance', 0]], 'then' => '$balance', 'else' => 0]],
+                        'else' => ['$cond' => ['if' => ['$gt' => ['$balance', 0]], 'then' => '$balance', 'else' => 0]],
+                    ]
+                ],
+                'credit' => [
+                    '$cond' => [
+                        'if' => ['$eq' => ['$normalBalance', 'Credit']],
+                        'then' => ['$cond' => ['if' => ['$lte' => ['$balance', 0]], 'then' => ['$abs' => '$balance'], 'else' => 0]],
+                        'else' => ['$cond' => ['if' => ['$lt' => ['$balance', 0]], 'then' => ['$abs' => '$balance'], 'else' => 0]],
+                    ]
+                ],
+            ]],
+
+            // Stage 7: Filter out any accounts that have a zero balance.
+            ['$match' => ['$or' => [['debit' => ['$gt' => 0]], ['credit' => ['$gt' => 0]]]]],
+
+            // Stage 8: Sort the final results by account code.
+            ['$sort' => ['_id' => 1]],
+        ];
+
+        $results = DB::connection('mongodb')->collection('generalLedger')->aggregate($pipeline);
+
+        $reportData = [];
+        $totalDebit = 0;
+        $totalCredit = 0;
+        foreach ($results as $row) {
+            $reportData[] = [
+                'code' => $row['_id'],
+                'name' => $row['accountName'],
+                'debit' => number_format($row['debit'], 2),
+                'credit' => number_format($row['credit'], 2),
+            ];
+            $totalDebit += $row['debit'];
+            $totalCredit += $row['credit'];
+        }
+
+        $this->table(['Account Code', 'Account Name', 'Debit', 'Credit'], $reportData);
+        $this->info(str_repeat('-', 60));
+        $this->table([], [['', 'TOTAL', number_format($totalDebit, 2), number_format($totalCredit, 2)]]);
+
+        if (round($totalDebit, 2) != round($totalCredit, 2)) {
+             $this->error('WARNING: Totals do not balance!');
+        } else {
+             $this->info('Totals balance successfully.');
+        }
+
+        return Command::SUCCESS;
+    }
+}
+```
+
+---
+
+#### B. Profit & Loss (Income Statement) Generator
+
+This command calculates the company's financial performance over a period.
+
+**File: `app/Console/Commands/GenerateProfitAndLoss.php`**
+```php
+<?php
+
+namespace App\Console\Commands;
+
+use Illuminate\Console\Command;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
+
+class GenerateProfitAndLoss extends Command
+{
+    /**
+     * The name and signature of the console command.
+     * @var string
+     */
+    protected $signature = 'report:profit-loss {--startDate= : The start date (YYYY-MM-DD)} {--endDate= : The end date (YYYY-MM-DD)}';
+
+    /**
+     * The console command description.
+     * @var string
+     */
+    protected $description = 'Generates a Profit and Loss statement using MongoDB aggregation with camelCase fields.';
+
+    /**
+     * Execute the console command.
+     * @return int
+     */
+    public function handle()
+    {
+        $startDate = $this->option('startDate') ? Carbon::parse($this->option('startDate'))->startOfDay() : now()->startOfYear();
+        $endDate = $this->option('endDate') ? Carbon::parse($this->option('endDate'))->endOfDay() : now();
+        $this->info("Generating Profit & Loss Statement from {$startDate->toDateString()} to {$endDate->toDateString()}");
+
+        $pipeline = [
+            // Stage 1: Filter GL entries for the specified date range.
+            ['$match' => ['entryDate' => ['$gte' => $startDate->toDateTime(), '$lte' => $endDate->toDateTime()]]],
+
+            // Stage 2: Join with CoA to get reporting metadata.
+            ['$lookup' => [
+                'from' => 'dimChartOfAccounts',
+                'localField' => 'accountCode',
+                'foreignField' => '_id',
+                'as' => 'coaDetails',
+            ]],
+            ['$unwind' => '$coaDetails'],
+
+            // Stage 3: Filter for Profit & Loss accounts only.
+            ['$match' => ['coaDetails.fsMapStatement' => 'PL']],
+
+            // Stage 4: Calculate the transaction's value for the P&L.
+            // Revenue (Credit normal balance) increases P&L, Expenses (Debit normal balance) decrease it.
+            // We also respect the rollupOperator for contra-accounts (e.g., Sales Returns).
+            ['$project' => [
+                'coa' => '$coaDetails',
+                'value' => [
+                    '$cond' => [
+                        'if' => ['$eq' => ['$coaDetails.rollupOperator', 'SUBTRACT']],
+                        'then' => ['$subtract' => ['$credit', '$debit']], // Reverse for contra-accounts
+                        'else' => ['$subtract' => ['$credit', '$debit']], // P&L = Credit - Debit
+                    ]
+                ],
+            ]],
+
+            // Stage 5: Group by report section and line to sum up line totals.
+            ['$group' => [
+                '_id' => [
+                    'section' => '$coa.fsMapSection',
+                    'line' => '$coa.fsMapLine'
+                ],
+                'lineTotal' => ['$sum' => '$value'],
+            ]],
+
+            // Stage 6: Group again by section to nest the lines within each section.
+            ['$group' => [
+                '_id' => '$_id.section',
+                'lines' => ['$push' => ['lineName' => '$_id.line', 'total' => '$lineTotal']],
+                'sectionTotal' => ['$sum' => '$lineTotal'],
+            ]],
+
+            // Stage 7: Sort sections (e.g., Revenue, COGS, Expenses).
+            ['$sort' => ['_id' => 1]],
+        ];
+
+        $results = DB::connection('mongodb')->collection('generalLedger')->aggregate($pipeline);
+
+        $report = [];
+        foreach ($results as $section) {
+            $report[$section['_id']] = [
+                'lines' => $section['lines'],
+                'sectionTotal' => $section['sectionTotal']
+            ];
+        }
+
+        $netIncome = 0;
+        $grossProfit = 0;
+        $order = ['Revenue', 'Cost of Goods Sold', 'Operating Expenses', 'Other Income & Expense'];
+
+        foreach ($order as $sectionName) {
+            if (!isset($report[$sectionName])) continue;
+
+            $sectionData = $report[$sectionName];
+            $this->line("\n## " . strtoupper($sectionName) . " ##");
+            foreach ($sectionData['lines'] as $line) {
+                $this->line(sprintf('%-40s %15s', $line['lineName'], number_format($line['total'], 2)));
+            }
+
+            $this->info(sprintf('%-40s %15s', 'Total ' . $sectionName, number_format($sectionData['sectionTotal'], 2)));
+
+            if ($sectionName === 'Revenue') {
+                $grossProfit += $sectionData['sectionTotal'];
+            }
+            if ($sectionName === 'Cost of Goods Sold') {
+                $grossProfit -= $sectionData['sectionTotal'];
+                $this->line(str_repeat('-', 57));
+                $this->info(sprintf('%-40s %15s', 'GROSS PROFIT', number_format($grossProfit, 2)));
+                $this->line(str_repeat('-', 57));
+            }
+        }
+
+        $netIncome = array_sum(array_column($report, 'sectionTotal'));
+
+        $this->line(str_repeat('=', 57));
+        $this->info(sprintf('%-40s %15s', 'NET INCOME', number_format($netIncome, 2)));
+        $this->line(str_repeat('=', 57));
+
+        return Command::SUCCESS;
+    }
+}
+```
+
+---
+
+#### C. Balance Sheet Generator
+
+This command presents a snapshot of the company's financial position (Assets = Liabilities + Equity).
+
+**File: `app/Console/Commands/GenerateBalanceSheet.php`**
+```php
+<?php
+
+namespace App\Console\Commands;
+
+use Illuminate\Console\Command;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Facades\DB;
+
+class GenerateBalanceSheet extends Command
+{
+    /**
+     * The name and signature of the console command.
+     * @var string
+     */
+    protected $signature = 'report:balance-sheet {--endDate= : The date for the balance sheet (YYYY-MM-DD)}';
+
+    /**
+     * The console command description.
+     * @var string
+     */
+    protected $description = 'Generates a Balance Sheet using MongoDB aggregation with camelCase fields.';
+
+    /**
+     * Execute the console command.
+     * @return int
+     */
+    public function handle()
+    {
+        $endDate = $this->option('endDate') ? Carbon::parse($this->option('endDate'))->endOfDay() : now();
+        $fiscalYearStart = Carbon::parse($endDate)->startOfYear();
+        $this->info("Generating Balance Sheet as of: {$endDate->toDateString()}");
+
+        // Step 1: Calculate Net Income for the current fiscal year. This is a critical component of Equity.
+        $netIncome = $this->calculateNetIncome($fiscalYearStart, $endDate);
+
+        // Step 2: Build the aggregation pipeline for the Balance Sheet accounts.
+        $pipeline = [
+            // Filter for all transactions up to the report date.
+            ['$match' => ['entryDate' => ['$lte' => $endDate->toDateTime()]]],
+
+            // Join with CoA to get reporting metadata.
+            ['$lookup' => [
+                'from' => 'dimChartOfAccounts',
+                'localField' => 'accountCode',
+                'foreignField' => '_id',
+                'as' => 'coaDetails',
+            ]],
+            ['$unwind' => '$coaDetails'],
+
+            // Filter for Balance Sheet accounts only.
+            ['$match' => ['coaDetails.fsMapStatement' => 'BS']],
+
+            // Calculate the final balance of each account.
+            ['$group' => [
+                '_id' => '$accountCode',
+                'coa' => ['$first' => '$coaDetails'],
+                'balance' => ['$sum' => ['$subtract' => ['$debit', '$credit']]],
+            ]],
+
+            // Apply the rollup operator for contra-accounts.
+            ['$project' => [
+                'coa' => 1,
+                'value' => [
+                    '$cond' => [
+                        'if' => ['$eq' => ['$coa.rollupOperator', 'SUBTRACT']],
+                        'then' => ['$multiply' => ['$balance', -1]], // Invert balance for contra-accounts
+                        'else' => '$balance',
+                    ]
+                ],
+            ]],
+
+            // Group by the final report structure (Type -> Section -> Line).
+            ['$group' => [
+                '_id' => [
+                    'type' => '$coa.accountType',
+                    'section' => '$coa.fsMapSection',
+                    'line' => '$coa.fsMapLine'
+                ],
+                'lineTotal' => ['$sum' => '$value'],
+            ]],
+            ['$group' => [
+                '_id' => ['type' => '$_id.type', 'section' => '$_id.section'],
+                'lines' => ['$push' => ['lineName' => '$_id.line', 'total' => '$lineTotal']],
+                'sectionTotal' => ['$sum' => '$lineTotal'],
+            ]],
+            ['$group' => [
+                '_id' => '$_id.type',
+                'sections' => ['$push' => ['sectionName' => '$_id.section', 'lines' => '$lines', 'total' => '$sectionTotal']],
+                'typeTotal' => ['$sum' => '$sectionTotal'],
+            ]],
+        ];
+
+        $results = DB::connection('mongodb')->collection('generalLedger')->aggregate($pipeline);
+
+        // Step 3: Organize the results for display.
+        $report = [];
+        foreach($results as $type) {
+            $report[$type['_id']] = [
+                'sections' => $type['sections'],
+                'typeTotal' => $type['typeTotal']
+            ];
+        }
+
+        // Step 4: Display the formatted report.
+        $totalAssets = $report['Asset']['typeTotal'] ?? 0;
+        $totalLiabilities = $report['Liability']['typeTotal'] ?? 0;
+        $totalEquity = $report['Equity']['typeTotal'] ?? 0;
+
+        // Display Assets
+        $this->line("\n========== ASSETS ==========");
+        if (isset($report['Asset'])) {
+            foreach($report['Asset']['sections'] as $section) {
+                $this->line("\n## " . strtoupper($section['sectionName']) . " ##");
+                foreach($section['lines'] as $line) {
+                    $this->line(sprintf('%-40s %15s', $line['lineName'], number_format($line['total'], 2)));
+                }
+            }
+        }
+        $this->line(str_repeat('=', 57));
+        $this->info(sprintf('%-40s %15s', 'TOTAL ASSETS', number_format($totalAssets, 2)));
+        $this->line(str_repeat('=', 57));
+
+        // Display Liabilities and Equity
+        $this->line("\n========== LIABILITIES AND EQUITY ==========");
+        if (isset($report['Liability'])) {
+            foreach($report['Liability']['sections'] as $section) {
+                $this->line("\n## " . strtoupper($section['sectionName']) . " ##");
+                foreach($section['lines'] as $line) {
+                    $this->line(sprintf('%-40s %15s', $line['lineName'], number_format($line['total'], 2)));
+                }
+            }
+        }
+        if (isset($report['Equity'])) {
+            foreach($report['Equity']['sections'] as $section) {
+                $this->line("\n## " . strtoupper($section['sectionName']) . " ##");
+                foreach($section['lines'] as $line) {
+                    $this->line(sprintf('%-40s %15s', $line['lineName'], number_format($line['total'], 2)));
+                }
+            }
+        }
+        $this->line(sprintf('%-40s %15s', 'Current Year Net Income', number_format($netIncome, 2)));
+
+        $totalLiabilitiesAndEquity = $totalLiabilities + $totalEquity + $netIncome;
+
+        $this->line(str_repeat('=', 57));
+        $this->info(sprintf('%-40s %15s', 'TOTAL LIABILITIES AND EQUITY', number_format($totalLiabilitiesAndEquity, 2)));
+        $this->line(str_repeat('=', 57));
+
+        // Final verification
+        if (round($totalAssets, 2) != round($totalLiabilitiesAndEquity, 2)) {
+            $this->error('WARNING: Balance Sheet does not balance!');
+        } else {
+            $this->info('Balance Sheet balances successfully.');
+        }
+
+        return Command::SUCCESS;
+    }
+
+    /**
+     * Helper function to calculate Net Income for a given period.
+     * Reuses the core logic from the P&L command.
+     */
+    private function calculateNetIncome(Carbon $startDate, Carbon $endDate): float
+    {
+        $pipeline = [
+            ['$match' => ['entryDate' => ['$gte' => $startDate->toDateTime(), '$lte' => $endDate->toDateTime()]]],
+            ['$lookup' => [
+                'from' => 'dimChartOfAccounts',
+                'localField' => 'accountCode',
+                'foreignField' => '_id',
+                'as' => 'coaDetails',
+            ]],
+            ['$unwind' => '$coaDetails'],
+            ['$match' => ['coaDetails.fsMapStatement' => 'PL']],
+            ['$project' => [
+                'value' => [
+                    '$cond' => [
+                        'if' => ['$eq' => ['$coaDetails.rollupOperator', 'SUBTRACT']],
+                        'then' => ['$subtract' => ['$credit', '$debit']],
+                        'else' => ['$subtract' => ['$credit', '$debit']],
+                    ]
+                ],
+            ]],
+            ['$group' => [
+                '_id' => null,
+                'netIncome' => ['$sum' => '$value']
+            ]]
+        ];
+
+        $result = DB::connection('mongodb')->collection('generalLedger')->aggregate($pipeline)->toArray();
+        return $result[0]['netIncome'] ?? 0.0;
+    }
+}
+```
+
+---
+
+### **Part 5: How to Use**
+
+1.  **Seed your `dimChartOfAccounts` collection:** You must populate this collection with your company's Chart of Accounts data first.
+2.  **Record and post journal entries:** Use your application logic to create `journalEntries` and run the posting service to populate the `generalLedger`.
+3.  **Run the commands from your terminal:**
+
+```bash
+# Generate a Trial Balance for the current date
+php artisan report:trial-balance
+
+# Generate a Trial Balance as of a specific date
+php artisan report:trial-balance --endDate=2023-09-30
+
+# Generate a Profit & Loss statement for the current year
+php artisan report:profit-loss
+
+# Generate a P&L for a specific quarter
+php artisan report:profit-loss --startDate=2023-07-01 --endDate=2023-09-30
+
+# Generate a Balance Sheet for the current date
+php artisan report:balance-sheet
+
+# Generate a Balance Sheet for the end of the last fiscal year
+php artisan report:balance-sheet --endDate=2022-12-31
+    ```
+### UI Wireframe
+
+Of course. Text-based wireframes are an excellent tool for focusing on structure, information hierarchy, and functionality without getting distracted by visual design. They clearly communicate the layout and user flow.
+
+Here are the text-based wireframes for the Journal Entry Form and the General Ledger View.
+
+---
+
+### **1. Text-Based Wireframe: Journal Entry Form**
+
+This wireframe illustrates the layout and key interactions of the form used to create a new journal entry.
+
+```
++-----------------------------------------------------------------------------+
+| Create Journal Entry                                                        |
+| [Subtitle: Fill in the details for the new journal entry.]                  |
+|=============================================================================|
+|                                                                             |
+| --- Header Information ---------------------------------------------------- |
+|                                                                             |
+| [Label: Entry Date*]                    [Label: Reference Number (Optional)]  |
+| [Date Input: YYYY-MM-DD]                [Text Input:                 ]        |
+|                                                                             |
+| [Label: Description*]                                                       |
+| [Text Input, wide:                                                 ]        |
+|                                                                             |
+| --- Entry Lines ----------------------------------------------------------- |
+|                                                                             |
+|  ACCOUNT                                 DEBIT         CREDIT               |
+| +-------------------------------------+ +-----------+ +-----------+ +----+    |
+| | [Dropdown: Select Account         v] | | [Num Input] | | [Num Input] | |(X) |    | <- Row 1
+| +-------------------------------------+ +-----------+ +-----------+ +----+    |
+| | [Dropdown: Select Account         v] | | [Num Input] | | [Num Input] | |(X) |    | <- Row 2
+| +-------------------------------------+ +-----------+ +-----------+ +----+    |
+|                                                                             |
+| [Button: + Add Line]                                                        |
+|                                                                             |
+| --- ANNOTATIONS FOR ENTRY LINES ------------------------------------------- |
+| * USER ACTION: Clicking [+ Add Line] appends a new, empty row to the table. |
+| * USER ACTION: Clicking (X) removes its corresponding row.                  |
+| * BEHAVIOR: The (X) button is hidden or disabled for the first two rows.    |
+| * BEHAVIOR: Entering a value in a 'Debit' input clears its 'Credit' input,  |
+|   and vice-versa, to prevent double-entry on a single line.                |
+|-----------------------------------------------------------------------------|
+|                                                                             |
+| --- Totals (Live Calculation) --------------------------------------------- |
+|                                                                             |
+|                                   Total Debit:   [Dynamic Value: $0.00]      |
+|                                   Total Credit:  [Dynamic Value: $0.00]      |
+|                                   Balance:       [Dynamic Value: $0.00]      |
+|                                                                             |
+| --- ANNOTATIONS FOR TOTALS ------------------------------------------------ |
+| * BEHAVIOR: These values update automatically as the user types.            |
+| * VISUAL CUE: The 'Balance' value is displayed in GREEN if 0, RED otherwise.|
+|=============================================================================|
+|                                                                             |
+| --- Actions --------------------------------------------------------------- |
+|                                                                             |
+|                                   [Button: Save as Draft] [Button: Submit]  |
+|                                                                             |
+| --- ANNOTATIONS FOR ACTIONS ----------------------------------------------- |
+| * BEHAVIOR: The 'Submit' button is DISABLED if the 'Balance' is not zero.   |
++-----------------------------------------------------------------------------+
+```
+
+---
+
+### **2. Text-Based Wireframe: General Ledger View**
+
+This wireframe illustrates the layout for viewing and filtering General Ledger entries for a specific account.
+
+```
++----------------------------------------------------------------------------------------+
+| General Ledger                                                                         |
+| [Subtitle: View and filter ledger transactions.]                                       |
+|========================================================================================|
+|                                                                                        |
+| --- Filters -------------------------------------------------------------------------- |
+|                                                                                        |
+| [Label: Account]                  [Label: Start Date]      [Label: End Date]           |
+| [Dropdown: All Accounts       v]   [Date Input:      ]      [Date Input:      ]   [Button: Filter] |
+|                                                                                        |
+| --- ANNOTATIONS FOR FILTERS ---------------------------------------------------------- |
+| * USER ACTION: Selecting options and clicking 'Filter' reloads the results table below.|
+| * DEFAULT: The form loads with default values (e.g., the current month).               |
+|----------------------------------------------------------------------------------------|
+|                                                                                        |
+| --- Results Table -------------------------------------------------------------------- |
+|                                                                                        |
+| | DATE       | ACCOUNT | DESCRIPTION                | DEBIT   | CREDIT  | BALANCE    | |
+| |------------|---------|----------------------------|---------|---------|------------| |
+| |            |         | **Opening Balance**        |         |         | **$1,500.00**| |
+| | 2023-10-01 | 11100   | Invoice #123 Payment       | 500.00  | -       | $2,000.00  | |
+| | 2023-10-05 | 11100   | Office Supplies Purchase   | -       | 75.50   | $1,924.50  | |
+| | 2023-10-07 | 11100   | Client Refund #456         | -       | 100.00  | $1,824.50  | |
+| | ... more rows ...                                                                    | |
+| |                                                                                        | |
+| | (Alternate State: No Results)                                                        | |
+| |                    [ Centered Message: No transactions found. ]                      | |
+|                                                                                        |
+| --- ANNOTATIONS FOR RESULTS ---------------------------------------------------------- |
+| * OPENING BALANCE: This row only appears when a specific account is filtered. It       |
+|   represents the account's total balance *before* the selected start date.             |
+| * RUNNING BALANCE: The 'Balance' column is calculated sequentially for each row.       |
+|   Balance(n) = Balance(n-1) + Debit(n) - Credit(n).                                    |
+| * ACCOUNT COLUMN: This is most useful when no specific account is filtered, allowing  |
+|   a view of all transactions.                                                          |
+|----------------------------------------------------------------------------------------|
+|                                                                                        |
+| --- Pagination ----------------------------------------------------------------------- |
+|                                                                                        |
+|                           [ < Previous ] [ 1 ] [ 2 ] [ 3 ] [ Next > ]                   |
+|                                  Showing 1 to 25 of 150 results                        |
+|                                                                                        |
++----------------------------------------------------------------------------------------+
+```
+
+
+
+### UI
+
+Of course. Building user-friendly interfaces for data entry and viewing is a critical next step. Here are complete, well-documented Blade component layouts for the **Journal Entry Form** and the **General Ledger View**.
+
+These layouts are designed using **Tailwind CSS** for styling and **Alpine.js** for client-side interactivity on the journal entry form, which are standard and highly effective tools in the Laravel ecosystem.
+
+---
+
+### **Part 1: Journal Entry Form Layout**
+
+This layout provides an interactive form for creating a new journal entry. It allows users to dynamically add and remove transaction lines, and it calculates debit/credit totals in real-time.
+
+#### **Conceptual Controller Method**
+
+First, you need a controller method to pass the necessary data (like the list of accounts) to the view.
+
+```php
+// In a controller like JournalEntryController.php
+
+use App\Models\ChartOfAccount;
+use Illuminate\Http\Request;
+
+public function create()
+{
+    // Fetch all accounts that can be posted to, for the dropdown.
+    $chartOfAccounts = ChartOfAccount::where('isPostingAccount', true)
+                                     ->orderBy('_id')
+                                     ->get(['_id', 'accountName']);
+
+    return view('journals.create', ['chartOfAccounts' => $chartOfAccounts]);
+}
+
+public function store(Request $request)
+{
+    // Add validation and logic to save the Journal Entry here...
+}
+```
+
+#### **Blade View: `resources/views/journals/create.blade.php`**
+
+This file contains the complete layout for the form.
+
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Create Journal Entry</title>
+    <!-- Include Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Include Alpine.js -->
+    <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+</head>
+<body class="bg-gray-100 p-8">
+
+    <div class="max-w-4xl mx-auto bg-white rounded-lg shadow-md" x-data="journalForm()">
+        <div class="p-6 border-b border-gray-200">
+            <h2 class="text-2xl font-semibold text-gray-700">Create Journal Entry</h2>
+            <p class="text-gray-500 mt-1">Fill in the details for the new journal entry.</p>
+        </div>
+
+        <form action="/journals" method="POST">
+            @csrf
+
+            <!-- Journal Entry Header -->
+            <div class="p-6 space-y-4">
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div>
+                        <label for="entryDate" class="block text-sm font-medium text-gray-700">Entry Date</label>
+                        <input type="date" id="entryDate" name="entryDate" value="{{ now()->format('Y-m-d') }}"
+                               class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm">
+                    </div>
+                    <div>
+                        <label for="referenceNumber" class="block text-sm font-medium text-gray-700">Reference Number (Optional)</label>
+                        <input type="text" id="referenceNumber" name="referenceNumber"
+                               class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm">
+                    </div>
+                </div>
+                <div>
+                    <label for="description" class="block text-sm font-medium text-gray-700">Description</label>
+                    <input type="text" id="description" name="description" placeholder="e.g., Monthly office supply purchase" required
+                           class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm">
+                </div>
+            </div>
+
+            <!-- Journal Entry Lines Table -->
+            <div class="px-6 pb-6">
+                <h3 class="text-lg font-medium text-gray-800 mb-2">Entry Lines</h3>
+                <div class="overflow-x-auto">
+                    <table class="min-w-full divide-y divide-gray-200">
+                        <thead class="bg-gray-50">
+                            <tr>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Account</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Debit</th>
+                                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Credit</th>
+                                <th class="w-12"></th>
+                            </tr>
+                        </thead>
+                        <tbody class="bg-white divide-y divide-gray-200">
+                            <!-- Alpine.js template to dynamically render lines -->
+                            <template x-for="(line, index) in lines" :key="index">
+                                <tr>
+                                    <td class="px-4 py-2 whitespace-nowrap">
+                                        <select :name="`lines[${index}][accountCode]`" x-model="line.accountCode" class="w-full rounded-md border-gray-300 text-sm" required>
+                                            <option value="">Select an account</option>
+                                            @foreach ($chartOfAccounts as $account)
+                                                <option value="{{ $account->_id }}">{{ $account->_id }} - {{ $account->accountName }}</option>
+                                            @endforeach
+                                        </select>
+                                    </td>
+                                    <td class="px-4 py-2">
+                                        <input type="number" :name="`lines[${index}][debit]`" x-model.number="line.debit" @input="line.credit = 0"
+                                               class="w-full text-right rounded-md border-gray-300 text-sm" placeholder="0.00" step="0.01">
+                                    </td>
+                                    <td class="px-4 py-2">
+                                        <input type="number" :name="`lines[${index}][credit]`" x-model.number="line.credit" @input="line.debit = 0"
+                                               class="w-full text-right rounded-md border-gray-300 text-sm" placeholder="0.00" step="0.01">
+                                    </td>
+                                    <td class="px-4 py-2 text-center">
+                                        <!-- Do not allow removing the last two lines -->
+                                        <button type="button" @click="removeLine(index)" x-show="lines.length > 2" class="text-red-500 hover:text-red-700">
+                                            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                                <path fill-rule="evenodd" d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm4 0a1 1 0 012 0v6a1 1 0 11-2 0V8z" clip-rule="evenodd" />
+                                            </svg>
+                                        </button>
+                                    </td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </div>
+
+                <button type="button" @click="addLine()" class="mt-4 px-4 py-2 bg-gray-200 text-gray-700 text-sm font-medium rounded-md hover:bg-gray-300">
+                    + Add Line
+                </button>
+            </div>
+
+            <!-- Totals Section -->
+            <div class="px-6 py-4 bg-gray-50 border-t border-gray-200 flex justify-end items-center space-x-6">
+                <div class="text-right">
+                    <p class="text-sm text-gray-500">Total Debit</p>
+                    <p class="text-lg font-semibold text-gray-800" x-text="formatCurrency(totalDebit)"></p>
+                </div>
+                <div class="text-right">
+                    <p class="text-sm text-gray-500">Total Credit</p>
+                    <p class="text-lg font-semibold text-gray-800" x-text="formatCurrency(totalCredit)"></p>
+                </div>
+                <div class="text-right">
+                    <p class="text-sm text-gray-500">Balance</p>
+                    <p class="text-lg font-semibold" :class="{ 'text-green-600': balance === 0, 'text-red-600': balance !== 0 }" x-text="formatCurrency(balance)"></p>
+                </div>
+            </div>
+
+            <!-- Form Actions -->
+            <div class="p-6 bg-gray-50 flex justify-end space-x-3">
+                <button type="button" class="px-4 py-2 bg-white text-gray-700 border border-gray-300 rounded-md shadow-sm hover:bg-gray-50">
+                    Save as Draft
+                </button>
+                <button type="submit" :disabled="balance !== 0"
+                        class="px-4 py-2 bg-indigo-600 text-white border border-transparent rounded-md shadow-sm hover:bg-indigo-700 disabled:bg-indigo-300 disabled:cursor-not-allowed">
+                    Submit for Approval
+                </button>
+            </div>
+        </form>
+    </div>
+
+    <!-- Alpine.js Component Logic -->
+    <script>
+        function journalForm() {
+            return {
+                lines: [
+                    { accountCode: '', debit: 0, credit: 0 },
+                    { accountCode: '', debit: 0, credit: 0 }
+                ],
+                addLine() {
+                    this.lines.push({ accountCode: '', debit: 0, credit: 0 });
+                },
+                removeLine(index) {
+                    this.lines.splice(index, 1);
+                },
+                get totalDebit() {
+                    return this.lines.reduce((total, line) => total + (parseFloat(line.debit) || 0), 0);
+                },
+                get totalCredit() {
+                    return this.lines.reduce((total, line) => total + (parseFloat(line.credit) || 0), 0);
+                },
+                get balance() {
+                    return this.totalDebit - this.totalCredit;
+                },
+                formatCurrency(value) {
+                    return Math.abs(value).toLocaleString('en-US', { style: 'currency', currency: 'USD' });
+                }
+            }
+        }
+    </script>
+</body>
+</html>
+```
+
+---
+
+### **Part 2: General Ledger View Layout**
+
+This layout provides a classic ledger view for a specific account. It includes filters, a summary, and a paginated list of transactions with a running balance.
+
+#### **Conceptual Controller Method**
+
+This controller method will handle filtering, fetching data, calculating the opening and running balances, and passing it all to the view.
+
+```php
+// In a controller like GeneralLedgerController.php
+
+use App\Models\ChartOfAccount;
+use App\Models\GeneralLedger;
+use Illuminate\Http\Request;
+
+public function index(Request $request)
+{
+    $request->validate([
+        'accountCode' => 'nullable|string|exists:dimChartOfAccounts,_id',
+        'startDate' => 'nullable|date',
+        'endDate' => 'nullable|date',
+    ]);
+
+    $filterAccountCode = $request->input('accountCode');
+    $filterStartDate = $request->input('startDate', now()->startOfMonth()->format('Y-m-d'));
+    $filterEndDate = $request->input('endDate', now()->endOfMonth()->format('Y-m-d'));
+
+    $query = GeneralLedger::query();
+    $openingBalance = 0;
+
+    if ($filterAccountCode) {
+        $query->where('accountCode', $filterAccountCode);
+
+        // Calculate opening balance before the start date
+        $openingBalance = GeneralLedger::where('accountCode', $filterAccountCode)
+            ->where('entryDate', '<', $filterStartDate)
+            ->sum(DB::raw('debit - credit'));
+    }
+
+    $query->whereBetween('entryDate', [$filterStartDate, $filterEndDate]);
+
+    $ledgerEntries = $query->orderBy('entryDate')->orderBy('id')->paginate(25);
+
+    $chartOfAccounts = ChartOfAccount::where('isPostingAccount', true)
+                                     ->orderBy('_id')
+                                     ->get(['_id', 'accountName']);
+
+    return view('ledger.index', [
+        'ledgerEntries' => $ledgerEntries,
+        'chartOfAccounts' => $chartOfAccounts,
+        'openingBalance' => $openingBalance,
+        'filters' => $request->only(['accountCode', 'startDate', 'endDate'])
+    ]);
+}
+```
+
+#### **Blade View: `resources/views/ledger/index.blade.php`**
+
+This file displays the filtered GL entries in a clean, readable table.
+
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>General Ledger</title>
+    <!-- Include Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+</head>
+<body class="bg-gray-100 p-8">
+
+    <div class="max-w-6xl mx-auto bg-white rounded-lg shadow-md">
+        <div class="p-6 border-b border-gray-200">
+            <h2 class="text-2xl font-semibold text-gray-700">General Ledger</h2>
+            <p class="text-gray-500 mt-1">View and filter ledger transactions.</p>
+        </div>
+
+        <!-- Filter Form -->
+        <div class="p-6 bg-gray-50">
+            <form method="GET" action="/ledger" class="grid grid-cols-1 md:grid-cols-4 gap-4 items-end">
+                <div>
+                    <label for="accountCode" class="block text-sm font-medium text-gray-700">Account</label>
+                    <select id="accountCode" name="accountCode" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm">
+                        <option value="">All Accounts</option>
+                        @foreach($chartOfAccounts as $account)
+                            <option value="{{ $account->_id }}" @if(isset($filters['accountCode']) && $filters['accountCode'] == $account->_id) selected @endif>
+                                {{ $account->_id }} - {{ $account->accountName }}
+                            </option>
+                        @endforeach
+                    </select>
+                </div>
+                <div>
+                    <label for="startDate" class="block text-sm font-medium text-gray-700">Start Date</label>
+                    <input type="date" name="startDate" id="startDate" value="{{ $filters['startDate'] ?? '' }}" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm sm:text-sm">
+                </div>
+                <div>
+                    <label for="endDate" class="block text-sm font-medium text-gray-700">End Date</label>
+                    <input type="date" name="endDate" id="endDate" value="{{ $filters['endDate'] ?? '' }}" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm sm:text-sm">
+                </div>
+                <div>
+                    <button type="submit" class="w-full px-4 py-2 bg-indigo-600 text-white border border-transparent rounded-md shadow-sm hover:bg-indigo-700">
+                        Filter
+                    </button>
+                </div>
+            </form>
+        </div>
+
+        <!-- Ledger Table -->
+        <div class="overflow-x-auto">
+            <table class="min-w-full divide-y divide-gray-200">
+                <thead class="bg-gray-50">
+                    <tr>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Account</th>
+                        <th class="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Description</th>
+                        <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Debit</th>
+                        <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Credit</th>
+                        <th class="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Balance</th>
+                    </tr>
+                </thead>
+                <tbody class="bg-white divide-y divide-gray-200">
+                    @if(isset($filters['accountCode']))
+                        <tr>
+                            <td class="px-6 py-4" colspan="5"><strong>Opening Balance</strong></td>
+                            <td class="px-6 py-4 text-right"><strong>{{ number_format($openingBalance, 2) }}</strong></td>
+                        </tr>
+                    @endif
+
+                    @php
+                        // Initialize running balance with the opening balance for display
+                        $runningBalance = $openingBalance;
+                    @endphp
+
+                    @forelse ($ledgerEntries as $entry)
+                        @php
+                            // Update running balance for each row
+                            $runningBalance += $entry->debit - $entry->credit;
+                        @endphp
+                        <tr>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{{ $entry->entryDate->format('Y-m-d') }}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900">{{ $entry->accountCode }}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">{{ Str::limit($entry->description, 50) }}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-right">{{ $entry->debit > 0 ? number_format($entry->debit, 2) : '-' }}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500 text-right">{{ $entry->credit > 0 ? number_format($entry->credit, 2) : '-' }}</td>
+                            <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-900 text-right">{{ number_format($runningBalance, 2) }}</td>
+                        </tr>
+                    @empty
+                        <tr>
+                            <td colspan="6" class="px-6 py-12 text-center text-gray-500">
+                                No transactions found for the selected criteria.
+                            </td>
+                        </tr>
+                    @endforelse
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Pagination -->
+        <div class="p-6 bg-white border-t border-gray-200">
+            {{ $ledgerEntries->withQueryString()->links() }}
+        </div>
+    </div>
+
+</body>
+</html>
+```

@@ -1,0 +1,235 @@
+---
+title: 'Asset Management: Core ERD'
+---
+### 1. Core Design Principles
+
+The best approach for this system is to use an **inheritance model**, also known as a **superclass/subclass** or **generalization/specialization** model.
+
+*   **General Asset (Superclass):** A core `Asset` entity will hold all the common attributes that *every* asset has, regardless of its type (e.g., Asset Tag, Purchase Date, Location, Status, Owner).
+*   **Specific Assets (Subclasses):** Specialized entities like `Vehicle`, `Machinery`, and `ITAsset` will inherit from the base `Asset` and add their own specific attributes (e.g., a `Vehicle` has a VIN, an `ITAsset` has a MAC address).
+
+For the database implementation, we will use a **Class Table Inheritance (CTI)** pattern. This means:
+1.  A base `assets` table for the common fields.
+2.  Separate tables for each specific asset type (`vehicles`, `it_assets`, etc.).
+3.  A one-to-one relationship between the base `assets` table and each specific table. This is clean, normalized, and highly scalable.
+
+---
+
+### 2. Entity-Relationship (ER) Structure
+
+Here is a description of the tables and their relationships.
+
+```
++----------------+      +------------------+      +----------------+
+|    Statuses    |      |    Locations     |      | Manufacturers  |
+|----------------|      |------------------|      |----------------|
+| PK status_id   |<--+  | PK location_id   |<--+  | PK manuf_id    |
+|    name        |   |  |    name          |   |  |    name        |
++----------------+   |  |    address_line1 |   |  +----------------+
+                     |  |    city          |   |
+                     |  |    country       |   |
++----------------+   |  +------------------+   |   +----------------+
+|     Users      |   |                         |   |  Departments   |
+|----------------|   |                         |   |----------------|
+| PK user_id     |<--+                         +-->| PK dept_id     |
+|    first_name  |   |                               |    name        |
+|    last_name   |   +------------------------------>| FK manager_id  |
+|    email       |                                   +----------------+
+| FK department_id|
++----------------+
+       ^
+       |
+       |                             (Superclass)
+       +-------------------------+   +-------------------+
+                                 |   |      Assets       |
+                                 |   |-------------------|
+                                 +---| PK asset_id       |
+                                     |    asset_tag (U)  |
+                                     |    name           |
+                                     |    purchase_date  |
+                                     |    cost           |
+                                     |    asset_type     | --(Discriminator: 'VEHICLE', 'IT_ASSET')
+                                     | FK status_id      |
+                                     | FK location_id    |
+                                     | FK manufacturer_id|
+                                     | FK assigned_to_user_id (nullable) |
+                                     +-------------------+
+                                             ^
+                                             | (Inheritance / 1-to-1 Relationship)
+                         +-------------------+-------------------+
+                         |                                       |
+           (Subclass)    |                                       | (Subclass)
++------------------------+-----+                   +-------------+----------------+
+|        Vehicles            |                   |          IT_Assets           |
+|----------------------------|                   |------------------------------|
+| PK/FK asset_id             |                   | PK/FK asset_id               |
+|       vin (U)              |                   |       hostname               |
+|       license_plate        |                   |       mac_address (U)        |
+|       make                 |                   |       ip_address             |
+|       model                |                   |       os (Operating System)  |
+|       year                 |                   |       cpu                    |
+|       mileage              |                   |       ram_gb                 |
+|       fuel_type            |                   |       storage_gb             |
++----------------------------+                   +------------------------------+
+
+(U) = Unique Constraint
+```
+
+#### Relationship Explanation:
+*   **One-to-Many:**
+*   One `Location` can have many `Assets`.
+*   One `Status` can apply to many `Assets`.
+*   One `Manufacturer` can produce many `Assets`.
+*   One `User` can be assigned many `Assets`.
+*   One `Department` can have many `Users`.
+*   **One-to-One (Inheritance):**
+*   Each record in the `Assets` table corresponds to exactly **one** record in one of the subclass tables (`Vehicles`, `IT_Assets`, `Machinery`, etc.). The `asset_id` is both the Primary Key (PK) and a Foreign Key (FK) in the subclass tables, enforcing this relationship.
+*   The `asset_type` field in the `Assets` table acts as a **discriminator**, telling the application which specific table to join with to get the full details of the asset.
+
+---
+
+### 3. Entity Object Structure (Fields & Data Types)
+
+This represents how you might structure these entities as objects in your application code (e.g., in JSON, a class definition, or a struct).
+
+#### 3.1. Lookup/Reference Objects
+
+These are simple objects that provide context to the main asset objects.
+
+```json
+// Status Object
+{
+  "status_id": "int (PK)",
+  "name": "string" // e.g., 'In Use', 'In Storage', 'Under Maintenance', 'Decommissioned'
+}
+
+// Location Object
+{
+  "location_id": "int (PK)",
+  "name": "string", // e.g., 'Building A, 4th Floor', 'Warehouse Section B'
+  "address_line1": "string",
+  "city": "string",
+  "country": "string"
+}
+
+// Manufacturer Object
+{
+  "manufacturer_id": "int (PK)",
+  "name": "string" // e.g., 'Dell', 'Ford', 'Caterpillar'
+}
+
+// User Object
+{
+  "user_id": "int (PK)",
+  "first_name": "string",
+  "last_name": "string",
+  "email": "string (unique)",
+  "department_id": "int (FK to Department)"
+}
+```
+
+#### 3.2. Core Asset Object (Superclass)
+
+This is the base object that all other asset types will extend.
+
+```json
+// Base Asset Object
+{
+  "asset_id": "int (PK)",
+  "asset_tag": "string (unique)", // e.g., 'IT-LPT-00123' or 'VEH-TRK-0045'
+  "name": "string", // e.g., 'Dell Latitude 7420' or 'Ford F-150'
+  "asset_type": "string", // Discriminator: 'VEHICLE', 'IT_ASSET', 'MACHINERY'
+  "purchase_date": "date",
+  "cost": "decimal(10, 2)",
+  "warranty_expiry_date": "date",
+
+  // Relationships (represented by IDs and nested objects)
+  "status_id": "int (FK)",
+  "status": { ...Status Object... }, // Populated on retrieval
+
+  "location_id": "int (FK)",
+  "location": { ...Location Object... }, // Populated on retrieval
+
+  "manufacturer_id": "int (FK)",
+  "manufacturer": { ...Manufacturer Object... }, // Populated on retrieval
+
+  "assigned_to_user_id": "int (FK, nullable)",
+  "assigned_to": { ...User Object... }, // Populated on retrieval
+
+  // Audit Fields
+  "created_at": "datetime",
+  "updated_at": "datetime"
+}
+```
+
+#### 3.3. Specific Asset Objects (Subclasses)
+
+These objects inherit all the fields from the base `Asset` and add their own specific details.
+
+**General Asset Class Example: Vehicle**
+
+```json
+// Vehicle Object (extends Asset)
+{
+  // --- Inherited fields from Asset ---
+  "asset_id": 101,
+  "asset_tag": "VEH-TRK-0045",
+  "name": "Ford F-150",
+  "asset_type": "VEHICLE",
+  "purchase_date": "2022-08-15",
+  "cost": 45000.00,
+  "status": { "status_id": 1, "name": "In Use" },
+  "location": { "location_id": 5, "name": "Main Office Parking Lot" },
+  "manufacturer": { "manufacturer_id": 22, "name": "Ford" },
+  "assigned_to": { "user_id": 15, "first_name": "John", "last_name": "Doe" },
+  // ... and all other base asset fields ...
+
+  // --- Vehicle-specific fields ---
+  "vin": "string (unique)", // Vehicle Identification Number
+  "license_plate": "string",
+  "make": "string",
+  "model": "string",
+  "year": "int",
+  "mileage": "int",
+  "fuel_type": "string", // e.g., 'Gasoline', 'Diesel', 'Electric'
+  "last_service_date": "date"
+}
+```
+
+**Specific Asset Class Example: IT Asset**
+
+```json
+// IT Asset Object (extends Asset)
+{
+  // --- Inherited fields from Asset ---
+  "asset_id": 250,
+  "asset_tag": "IT-LPT-00123",
+  "name": "Dell Latitude 7420",
+  "asset_type": "IT_ASSET",
+  "purchase_date": "2023-01-20",
+  "cost": 1850.50,
+  "status": { "status_id": 1, "name": "In Use" },
+  "location": { "location_id": 2, "name": "Building A, 4th Floor" },
+  "manufacturer": { "manufacturer_id": 10, "name": "Dell" },
+  "assigned_to": { "user_id": 34, "first_name": "Jane", "last_name": "Smith" },
+  // ... and all other base asset fields ...
+
+  // --- IT Asset-specific fields ---
+  "hostname": "string",
+  "mac_address": "string (unique)",
+  "ip_address": "string",
+  "os": "string", // Operating System, e.g., 'Windows 11 Pro'
+  "cpu": "string", // e.g., 'Intel Core i7-1185G7'
+  "ram_gb": "int",
+  "storage_type": "string", // e.g., 'SSD', 'HDD'
+  "storage_gb": "int"
+}
+```
+
+### Summary of the Design
+
+This high-level design provides a robust and scalable foundation for an Asset Management System:
+
+*   **Normalized:** Avoids data duplication by separating common and specific attributes. Lookup tables (`Statuses`, `Locations`) ensure data consistency.
+*   **Scalable:** Adding a new asset type (e.g., `Furniture`) is easy. You just create a new `furniture` table and add a new `asset_type` discriminator value. No changes are needed to the core `Assets` table or existing specific tables.
+*   **Clear and Maintainable:** The separation of concerns between the base class and subclasses makes the application logic easier to write and maintain. When you retrieve an asset, you query the base `Assets` table and then `JOIN` to the specific table based on the `asset_type` to get the complete object.

@@ -1,0 +1,519 @@
+---
+title: 'Chart of Accounts'
+description: 'Standard Enterprise Chart of Accounts'
+---
+## Chart of Accounts (CoA) for Entreprise
+
+Here is a comprehensive, standard Chart of Accounts (CoA) designed for an enterprise.
+
+This design emphasizes scalability, detailed reporting, and flexibility to support multiple departments, locations, and business units, which are crucial for a large organization.
+
+### **I. Guiding Principles for an Enterprise CoA**
+
+Before diving into the accounts, it's essential to understand the design philosophy:
+
+1.  **Hierarchy:** Accounts are structured in a parent-child relationship. This allows for high-level summary reporting (for executives) and detailed granular analysis (for department managers).
+2.  **Scalability:** The numbering system has gaps, allowing for new accounts to be added in the future without disrupting the logical flow.
+3.  **Consistency:** The structure is logical and consistent. For example, all salary-related expenses, regardless of department, might end in the same digits (e.g., `xx100`).
+4.  **Dimensionality:** This is the most critical aspect for an enterprise. The CoA is not just a flat list of accounts. It's one dimension in a multi-dimensional reporting structure. A single transaction is coded with:
+*   **Account Number (the "What"):** e.g., `71100 - Office Supplies`
+*   **Department/Cost Center (the "Who"):** e.g., `410 - Marketing Department`
+*   **Location/Business Unit (the "Where"):** e.g., `002 - London Office`
+*   **Project (the "Why"):** e.g., `PRJ-2024-A - Annual Conference`
+*   **Product Line:** e.g., `PL-SaaS-Enterprise`
+
+This allows you to slice and dice financial data in countless ways (e.g., "Show me the travel expenses for the Sales department in the APAC region for Q3").
+
+### **II. Standard Numbering System**
+
+We will use a 5-digit system, which is a common and robust standard.
+
+*   **1xxxx:** Assets
+*   **2xxxx:** Liabilities
+*   **3xxxx:** Equity
+*   **4xxxx:** Revenue / Income
+*   **5xxxx:** Cost of Goods Sold (COGS)
+*   **6xxxx - 8xxxx:** Operating Expenses (Grouped by function)
+*   **6xxxx:** Sales & Marketing Expenses
+*   **7xxxx:** Research & Development (R&D) Expenses
+*   **8xxxx:** General & Administrative (G&A) Expenses
+*   **9xxxx:** Other Income & Expenses (Non-Operating)
+
+---
+
+### **III. Detailed Chart of Accounts Structure**
+
+Here is the breakdown of the accounts. `(H)` indicates a header or parent account, not used for posting transactions.
+
+#### **1xxxx - ASSETS**
+
+*   **10000 - Current Assets (H)**
+*   **11000 - Cash and Cash Equivalents (H)**
+*   11100 - Cash - Operating Bank Account
+*   11200 - Cash - Payroll Bank Account
+*   11300 - Cash - Savings/Money Market
+*   11400 - Petty Cash
+*   11500 - Undeposited Funds
+*   **12000 - Accounts Receivable (H)**
+*   12100 - Accounts Receivable - Trade
+*   12900 - Allowance for Doubtful Accounts (Contra-Asset)
+*   **13000 - Inventory (H)**
+*   13100 - Inventory - Raw Materials
+*   13200 - Inventory - Work-in-Progress
+*   13300 - Inventory - Finished Goods
+*   **14000 - Prepaid Expenses (H)**
+*   14100 - Prepaid Insurance
+*   14200 - Prepaid Rent
+*   14300 - Prepaid Software Licenses
+*   **15000 - Non-Current Assets (H)**
+*   **16000 - Property, Plant & Equipment (PPE) (H)**
+*   16100 - Land
+*   16200 - Buildings
+*   16250 - Accumulated Depreciation - Buildings (Contra-Asset)
+*   16300 - Machinery & Equipment
+*   16350 - Accumulated Depreciation - Machinery (Contra-Asset)
+*   16400 - Computer Hardware
+*   16450 - Accumulated Depreciation - Computer Hardware (Contra-Asset)
+*   16500 - Furniture & Fixtures
+*   16550 - Accumulated Depreciation - Furniture (Contra-Asset)
+*   **17000 - Intangible Assets (H)**
+*   17100 - Goodwill
+*   17200 - Patents & Trademarks
+*   17250 - Accumulated Amortization - Patents (Contra-Asset)
+*   17300 - Capitalized Software Development Costs
+*   17350 - Accumulated Amortization - Software (Contra-Asset)
+*   **18000 - Other Assets (H)**
+*   18100 - Security Deposits
+
+#### **2xxxx - LIABILITIES**
+
+*   **20000 - Current Liabilities (H)**
+*   **21000 - Accounts Payable (H)**
+*   21100 - Accounts Payable - Trade
+*   **22000 - Accrued Liabilities (H)**
+*   22100 - Accrued Payroll
+*   22200 - Accrued Professional Fees
+*   22300 - Accrued Rent
+*   22400 - Accrued Interest
+*   **23000 - Taxes Payable (H)**
+*   23100 - Sales Tax Payable
+*   23200 - Payroll Taxes Payable (VAT, PAYE, etc.)
+*   23300 - Corporate Income Tax Payable
+*   **24000 - Short-Term Debt (H)**
+*   24100 - Line of Credit
+*   24200 - Current Portion of Long-Term Debt
+*   **25000 - Non-Current Liabilities (H)**
+*   **26000 - Long-Term Debt (H)**
+*   26100 - Bank Loans Payable
+*   26200 - Bonds Payable
+*   **27000 - Deferred Revenue (H)**
+*   27100 - Deferred Service Revenue
+*   27200 - Deferred Software Revenue
+*   **28000 - Deferred Tax Liability (H)**
+
+#### **3xxxx - EQUITY**
+
+*   **30000 - Equity (H)**
+*   31000 - Common Stock / Share Capital
+*   32000 - Additional Paid-in Capital
+*   33000 - Retained Earnings
+*   34000 - Dividends Paid / Shareholder Distributions
+*   39000 - Current Year Net Income (clears to Retained Earnings at year-end)
+
+#### **4xxxx - REVENUE**
+
+*   **40000 - Operating Revenue (H)**
+*   **41000 - Product Sales Revenue (H)**
+*   41100 - Sales - Product Line A
+*   41200 - Sales - Product Line B
+*   **42000 - Service Revenue (H)**
+*   42100 - Service - Consulting Fees
+*   42200 - Service - Maintenance & Support
+*   42300 - Service - Installation Fees
+*   **48000 - Sales Adjustments (Contra-Revenue) (H)**
+*   48100 - Sales Returns & Allowances
+*   48200 - Sales Discounts
+
+#### **5xxxx - COST OF GOODS SOLD (COGS)**
+
+*   **50000 - Cost of Goods Sold (H)**
+*   51000 - COGS - Cost of Materials
+*   52000 - COGS - Direct Labor
+*   53000 - COGS - Manufacturing Overhead
+*   54000 - COGS - Shipping & Delivery Costs
+*   55000 - COGS - Software Hosting Costs (for SaaS)
+
+#### **6xxxx - 8xxxx - OPERATING EXPENSES**
+
+*   **60000 - Sales & Marketing Expenses (H)**
+*   61000 - Personnel Costs (H)
+*   61100 - Salaries & Wages
+*   61200 - Sales Commissions
+*   61300 - Bonuses
+*   61400 - Payroll Taxes & Benefits
+*   62000 - Advertising & Promotion (H)
+*   62100 - Digital Advertising
+*   62200 - Print & Media
+*   62300 - Public Relations
+*   63000 - Travel & Entertainment
+*   64000 - Trade Shows & Events
+*   65000 - Dues & Subscriptions
+*   **70000 - Research & Development (R&D) Expenses (H)**
+*   71000 - Personnel Costs (H)
+*   71100 - Salaries & Wages
+*   71200 - Bonuses
+*   71300 - Payroll Taxes & Benefits
+*   72000 - Lab & Prototyping Supplies
+*   73000 - Consulting & Outside Services
+*   74000 - Software & Tools
+*   75000 - Dues & Subscriptions
+*   **80000 - General & Administrative (G&A) Expenses (H)**
+*   81000 - Personnel Costs (H)
+*   81100 - Executive Salaries
+*   81200 - Admin Salaries & Wages
+*   81300 - Bonuses
+*   81400 - Payroll Taxes & Benefits
+*   82000 - Facilities & Office (H)
+*   82100 - Rent Expense
+*   82200 - Utilities
+*   82300 - Repairs & Maintenance
+*   82400 - Office Supplies
+*   82500 - Janitorial Services
+*   83000 - Professional Fees (H)
+*   83100 - Legal Fees
+*   83200 - Accounting & Audit Fees
+*   83300 - Consulting Fees
+*   84000 - Technology & IT (H)
+*   84100 - Software Licenses
+*   84200 - IT Support & Maintenance
+*   84300 - Telephone & Internet
+*   85000 - Insurance
+*   86000 - Bank Fees & Charges
+*   87000 - Depreciation & Amortization Expense (G&A portion)
+*   88000 - Business Taxes & Licenses
+
+#### **9xxxx - OTHER INCOME & EXPENSE**
+
+*   **90000 - Other Income & Expense (H)**
+*   **91000 - Other Income (H)**
+*   91100 - Interest Income
+*   91200 - Gain on Sale of Assets
+*   **95000 - Other Expense (H)**
+*   95100 - Interest Expense
+*   95200 - Loss on Sale of Assets
+*   95300 - Foreign Exchange Gain/Loss
+
+### **IV. Implementation Best Practices**
+
+*   **Document Everything:** Create a CoA dictionary that defines what each account is used for, including examples of transactions. This ensures consistency across the organization.
+*   **Involve Stakeholders:** Work with department heads to ensure the CoA structure meets their reporting and budgeting needs.
+*   **Govern Changes:** Establish a formal process for requesting and approving new accounts or changes to the CoA. This prevents it from becoming cluttered and inconsistent.
+*   **Provide Training:** Train all employees involved in coding expenses or revenue on how to use the new CoA and its dimensional segments correctly.
+
+This Chart of Accounts provides a robust and scalable foundation for any enterprise's financial system, enabling both statutory reporting and powerful internal management analysis.
+
+### Bahasa Indonesia
+
+Berikut adalah terjemahan dari Bagan Akun Standar (Chart of Accounts) untuk perusahaan ke dalam Bahasa Indonesia.
+
+Desain ini menekankan skalabilitas, pelaporan yang detail, dan fleksibilitas untuk mendukung berbagai departemen, lokasi, dan unit bisnis, yang sangat penting bagi organisasi besar.
+
+### **I. Prinsip Panduan untuk CoA Perusahaan**
+
+Sebelum masuk ke daftar akun, penting untuk memahami filosofi desainnya:
+
+1.  **Hierarki:** Akun-akun disusun dalam hubungan induk-anak (parent-child). Ini memungkinkan pelaporan ringkas di tingkat tinggi (untuk eksekutif) dan analisis granular yang mendetail (untuk manajer departemen).
+2.  **Skalabilitas:** Sistem penomoran memiliki celah, memungkinkan penambahan akun baru di masa depan tanpa mengganggu alur logis yang sudah ada.
+3.  **Konsistensi:** Strukturnya logis dan konsisten. Sebagai contoh, semua beban terkait gaji, terlepas dari departemennya, mungkin diakhiri dengan digit yang sama (misalnya, `xx100`).
+4.  **Dimensionalitas:** Ini adalah aspek paling kritis untuk sebuah perusahaan. CoA bukan hanya daftar akun yang datar, melainkan satu dimensi dalam struktur pelaporan multi-dimensi. Satu transaksi diberi kode dengan:
+*   **Nomor Akun ("Apa"):** misal, `71100 - Perlengkapan Kantor`
+*   **Departemen/Pusat Biaya ("Siapa"):** misal, `410 - Departemen Pemasaran`
+*   **Lokasi/Unit Bisnis ("Di mana"):** misal, `002 - Kantor Jakarta`
+*   **Proyek ("Mengapa"):** misal, `PRJ-2024-A - Konferensi Tahunan`
+*   **Lini Produk:** misal, `PL-SaaS-Enterprise`
+
+Ini memungkinkan Anda untuk menganalisis data keuangan dalam berbagai cara (misalnya, "Tunjukkan beban perjalanan dinas untuk departemen Penjualan di wilayah APAC pada Kuartal 3").
+
+### **II. Sistem Penomoran Standar**
+
+Kami akan menggunakan sistem 5 digit, yang merupakan standar yang umum dan kuat.
+
+*   **1xxxx:** Aset (Assets)
+*   **2xxxx:** Liabilitas (Liabilities)
+*   **3xxxx:** Ekuitas (Equity)
+*   **4xxxx:** Pendapatan (Revenue / Income)
+*   **5xxxx:** Harga Pokok Penjualan (HPP) / Cost of Goods Sold (COGS)
+*   **6xxxx - 8xxxx:** Beban Operasional (Operating Expenses), dikelompokkan berdasarkan fungsi:
+*   **6xxxx:** Beban Penjualan & Pemasaran
+*   **7xxxx:** Beban Penelitian & Pengembangan (Litbang)
+*   **8xxxx:** Beban Umum & Administrasi
+*   **9xxxx:** Pendapatan & Beban Lain-lain (Non-Operasional)
+
+---
+
+### **III. Struktur Detail Bagan Akun Standar**
+
+Berikut adalah rincian akun-akunnya. `(H)` menandakan akun induk atau *header*, yang tidak digunakan untuk mencatat transaksi.
+
+#### **1xxxx - ASET**
+
+*   **10000 - Aset Lancar (H)**
+*   **11000 - Kas dan Setara Kas (H)**
+*   11100 - Kas - Rekening Bank Operasional
+*   11200 - Kas - Rekening Bank Gaji
+*   11300 - Kas - Tabungan/Pasar Uang
+*   11400 - Kas Kecil (Petty Cash)
+*   11500 - Dana Belum Disetor (Undeposited Funds)
+*   **12000 - Piutang Usaha (H)**
+*   12100 - Piutang Usaha - Pihak Ketiga
+*   12900 - Cadangan Kerugian Piutang (Akun Kontra-Aset)
+*   **13000 - Persediaan (H)**
+*   13100 - Persediaan - Bahan Baku
+*   13200 - Persediaan - Barang dalam Proses
+*   13300 - Persediaan - Barang Jadi
+*   **14000 - Beban Dibayar di Muka (H)**
+*   14100 - Asuransi Dibayar di Muka
+*   14200 - Sewa Dibayar di Muka
+*   14300 - Lisensi Perangkat Lunak Dibayar di Muka
+*   **15000 - Aset Tidak Lancar (H)**
+*   **16000 - Aset Tetap (Properti, Pabrik & Peralatan) (H)**
+*   16100 - Tanah
+*   16200 - Bangunan
+*   16250 - Akumulasi Penyusutan - Bangunan (Akun Kontra-Aset)
+*   16300 - Mesin & Peralatan
+*   16350 - Akumulasi Penyusutan - Mesin (Akun Kontra-Aset)
+*   16400 - Perangkat Keras Komputer
+*   16450 - Akumulasi Penyusutan - Perangkat Keras (Akun Kontra-Aset)
+*   16500 - Perabotan & Perlengkapan Kantor
+*   16550 - Akumulasi Penyusutan - Perabotan (Akun Kontra-Aset)
+*   **17000 - Aset Tak Berwujud (H)**
+*   17100 - Goodwill
+*   17200 - Paten & Merek Dagang
+*   17250 - Akumulasi Amortisasi - Paten (Akun Kontra-Aset)
+*   17300 - Biaya Pengembangan Perangkat Lunak yang Dikapitalisasi
+*   17350 - Akumulasi Amortisasi - Perangkat Lunak (Akun Kontra-Aset)
+*   **18000 - Aset Lainnya (H)**
+*   18100 - Uang Jaminan (Security Deposits)
+
+#### **2xxxx - LIABILITAS**
+
+*   **20000 - Liabilitas Jangka Pendek (H)**
+*   **21000 - Utang Usaha (H)**
+*   21100 - Utang Usaha - Pihak Ketiga
+*   **22000 - Liabilitas Akrual (Beban yang Masih Harus Dibayar) (H)**
+*   22100 - Gaji yang Masih Harus Dibayar
+*   22200 - Biaya Profesional yang Masih Harus Dibayar
+*   22300 - Sewa yang Masih Harus Dibayar
+*   22400 - Bunga yang Masih Harus Dibayar
+*   **23000 - Utang Pajak (H)**
+*   23100 - Utang PPN (Pajak Pertambahan Nilai)
+*   23200 - Utang PPh Pasal 21 (Pajak Karyawan)
+*   23300 - Utang PPh Badan
+*   **24000 - Utang Jangka Pendek (H)**
+*   24100 - Pinjaman Rekening Koran (Line of Credit)
+*   24200 - Bagian Utang Jangka Panjang yang Jatuh Tempo
+*   **25000 - Liabilitas Jangka Panjang (H)**
+*   **26000 - Utang Jangka Panjang (H)**
+*   26100 - Utang Bank
+*   26200 - Utang Obligasi
+*   **27000 - Pendapatan Diterima di Muka (H)**
+*   27100 - Pendapatan Jasa Diterima di Muka
+*   27200 - Pendapatan Perangkat Lunak Diterima di Muka
+*   **28000 - Liabilitas Pajak Tangguhan (H)**
+
+#### **3xxxx - EKUITAS**
+
+*   **30000 - Ekuitas (H)**
+*   31000 - Modal Saham
+*   32000 - Agio Saham (Additional Paid-in Capital)
+*   33000 - Laba Ditahan (Retained Earnings)
+*   34000 - Dividen yang Dibayarkan / Distribusi kepada Pemegang Saham
+*   39000 - Laba Bersih Tahun Berjalan (akan ditutup ke Laba Ditahan di akhir tahun)
+
+#### **4xxxx - PENDAPATAN**
+
+*   **40000 - Pendapatan Operasional (H)**
+*   **41000 - Pendapatan Penjualan Produk (H)**
+*   41100 - Penjualan - Lini Produk A
+*   41200 - Penjualan - Lini Produk B
+*   **42000 - Pendapatan Jasa (H)**
+*   42100 - Jasa - Biaya Konsultasi
+*   42200 - Jasa - Pemeliharaan & Dukungan
+*   42300 - Jasa - Biaya Instalasi
+*   **48000 - Penyesuaian Penjualan (Akun Kontra-Pendapatan) (H)**
+*   48100 - Retur & Potongan Penjualan
+*   48200 - Diskon Penjualan
+
+#### **5xxxx - HARGA POKOK PENJUALAN (HPP)**
+
+*   **50000 - Harga Pokok Penjualan (H)**
+*   51000 - HPP - Biaya Bahan Baku
+*   52000 - HPP - Biaya Tenaga Kerja Langsung
+*   53000 - HPP - Biaya Overhead Pabrik
+*   54000 - HPP - Biaya Pengiriman
+*   55000 - HPP - Biaya Hosting Perangkat Lunak (untuk SaaS)
+
+#### **6xxxx - 8xxxx - BEBAN OPERASIONAL**
+
+*   **60000 - Beban Penjualan & Pemasaran (H)**
+*   61000 - Biaya Personalia (H)
+*   61100 - Gaji & Upah
+*   61200 - Komisi Penjualan
+*   61300 - Bonus
+*   61400 - Pajak Karyawan & Tunjangan
+*   62000 - Iklan & Promosi (H)
+*   62100 - Iklan Digital
+*   62200 - Iklan Cetak & Media
+*   62300 - Hubungan Masyarakat (Public Relations)
+*   63000 - Perjalanan Dinas & Hiburan
+*   64000 - Pameran Dagang & Acara
+*   65000 - Iuran & Langganan
+*   **70000 - Beban Penelitian & Pengembangan (Litbang) (H)**
+*   71000 - Biaya Personalia (H)
+*   71100 - Gaji & Upah
+*   71200 - Bonus
+*   71300 - Pajak Karyawan & Tunjangan
+*   72000 - Perlengkapan Laboratorium & Prototyping
+*   73000 - Konsultan & Jasa Pihak Ketiga
+*   74000 - Perangkat Lunak & Peralatan
+*   75000 - Iuran & Langganan
+*   **80000 - Beban Umum & Administrasi (H)**
+*   81000 - Biaya Personalia (H)
+*   81100 - Gaji Eksekutif
+*   81200 - Gaji & Upah Staf Administrasi
+*   81300 - Bonus
+*   81400 - Pajak Karyawan & Tunjangan
+*   82000 - Fasilitas & Kantor (H)
+*   82100 - Beban Sewa
+*   82200 - Beban Utilitas (Listrik, Air, dll.)
+*   82300 - Perbaikan & Pemeliharaan
+*   82400 - Perlengkapan Kantor
+*   82500 - Jasa Kebersihan
+*   83000 - Biaya Profesional (H)
+*   83100 - Biaya Hukum
+*   83200 - Biaya Akuntansi & Audit
+*   83300 - Biaya Konsultasi
+*   84000 - Teknologi & TI (H)
+*   84100 - Lisensi Perangkat Lunak
+*   84200 - Dukungan & Pemeliharaan TI
+*   84300 - Telepon & Internet
+*   85000 - Asuransi
+*   86000 - Biaya Administrasi Bank
+*   87000 - Beban Penyusutan & Amortisasi (bagian Umum & Adm.)
+*   88000 - Pajak & Perizinan Usaha
+
+#### **9xxxx - PENDAPATAN & BEBAN LAIN-LAIN**
+
+*   **90000 - Pendapatan & Beban Lain-lain (H)**
+*   **91000 - Pendapatan Lain-lain (H)**
+*   91100 - Pendapatan Bunga
+*   91200 - Laba Penjualan Aset
+*   **95000 - Beban Lain-lain (H)**
+*   95100 - Beban Bunga
+*   95200 - Rugi Penjualan Aset
+*   95300 - Laba/Rugi Selisih Kurs
+
+### **IV. Praktik Terbaik Implementasi**
+
+*   **Dokumentasikan Segalanya:** Buat kamus CoA yang mendefinisikan fungsi setiap akun, termasuk contoh transaksinya. Ini memastikan konsistensi di seluruh organisasi.
+*   **Libatkan Pemangku Kepentingan (Stakeholder):** Bekerja samalah dengan kepala departemen untuk memastikan struktur CoA memenuhi kebutuhan pelaporan dan penganggaran mereka.
+*   **Kelola Perubahan:** Tetapkan proses formal untuk meminta dan menyetujui akun baru atau perubahan pada CoA. Ini mencegah CoA menjadi berantakan dan tidak konsisten.
+*   **Sediakan Pelatihan:** Latih semua karyawan yang terlibat dalam mengkodekan beban atau pendapatan tentang cara menggunakan CoA baru dan segmen dimensionalnya dengan benar.
+
+Bagan Akun Standar ini menyediakan fondasi yang kuat dan skalabel untuk sistem keuangan perusahaan mana pun, memungkinkan pelaporan resmi dan analisis manajemen internal yang kuat.
+
+## CoA Structure for Financial Reports
+
+Excellent question. This moves from a simple list of accounts to the intelligent "engine" that drives automated financial reporting. By adding metadata for report mapping and calculation rules directly into the Chart of Accounts structure, you create a single source of truth that governs how financial statements are generated.
+
+Here is a design for a CoA table structure that incorporates these advanced features.
+
+### **I. The Advanced CoA Table Structure**
+
+We will expand the basic CoA with columns specifically designed for reporting logic.
+
+**Table Name: `Dim_ChartOfAccounts`**
+
+| Column Name | Data Type | Description | Example |
+| :--- | :--- | :--- | :--- |
+| **`Account_Code`** | `VARCHAR(10)` | **Primary Key.** The unique identifier for the account. | `12900` |
+| `Account_Name` | `VARCHAR(255)`| The human-readable name of the account. | `Allowance for Doubtful Accounts` |
+| `Account_Type` | `ENUM` | The fundamental accounting category. | `Asset` |
+| | `('Asset', 'Liability', 'Equity', 'Revenue', 'Expense')`| | |
+| `Normal_Balance` | `ENUM('Debit', 'Credit')` | The side of the account where the balance is normally found. Crucial for Trial Balance logic. | `Credit` (for a contra-asset) |
+| `Is_Posting_Account` | `BOOLEAN` | `TRUE` if transactions can be posted directly to this account. `FALSE` for header/summary accounts. | `TRUE` |
+| `Parent_Account_Code` | `VARCHAR(10)` | Foreign key to `Account_Code` to create a hierarchy for drill-down and roll-ups. `NULL` for top-level accounts. | `12000` |
+| **`FS_Map_Statement`** | `ENUM('BS', 'PL', 'NA')` | **Report Mapper:** Maps the account to the Financial Statement (Balance Sheet, Profit & Loss, or Not Applicable). | `BS` |
+| **`FS_Map_Section`** | `VARCHAR(100)` | **Report Mapper:** The major section on the statement. | `Current Assets` |
+| **`FS_Map_Line`** | `VARCHAR(100)` | **Report Mapper:** The specific line item on the statement. Allows grouping multiple accounts into one line. | `Net Accounts Receivable` |
+| **`Rollup_Operator`** | `ENUM('ADD', 'SUBTRACT')` | **Calculation Rule:** Defines how this account's balance affects its parent line/section total. Default is `ADD`. | `SUBTRACT` |
+| `Description` | `TEXT` | A detailed definition of the account's purpose for the internal CoA dictionary. | `Contra-asset representing estimated uncollectible trade receivables.`|
+
+---
+
+### **II. Example: Populating the `Dim_ChartOfAccounts` Table**
+
+Here’s how some key accounts from our previous design would look in this new structure. This example truly demonstrates the power of the new columns.
+
+| Account_Code | Account_Name | Account_Type | Normal_Balance | Is_Posting_Account | Parent_Account_Code | FS_Map_Statement | FS_Map_Section | FS_Map_Line | Rollup_Operator |
+| :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
+| `10000` | Current Assets | Asset | Debit | FALSE | `NULL` | BS | Current Assets | (Header) | ADD |
+| `12000` | Accounts Receivable | Asset | Debit | FALSE | `10000` | BS | Current Assets | Net Accounts Receivable | ADD |
+| `12100` | Accounts Receivable - Trade | Asset | Debit | TRUE | `12000` | BS | Current Assets | Net Accounts Receivable | ADD |
+| **`12900`** | **Allowance for Doubtful Accounts**| Asset | Credit | TRUE | `12000` | BS | Current Assets | Net Accounts Receivable | **SUBTRACT** |
+| `33000` | Retained Earnings | Equity | Credit | TRUE | `30000` | BS | Equity | Retained Earnings | ADD |
+| `40000` | Operating Revenue | Revenue | Credit | FALSE | `NULL` | PL | Revenue | (Header) | ADD |
+| `41100` | Sales - Product Line A | Revenue | Credit | TRUE | `40000` | PL | Revenue | Product Sales Revenue | ADD |
+| **`48100`** | **Sales Returns & Allowances** | Revenue | Debit | TRUE | `40000` | PL | Revenue | Net Sales | **SUBTRACT** |
+| `80000` | General & Administrative Exp | Expense | Debit | FALSE | `NULL` | PL | Operating Expenses | (Header) | ADD |
+| `81100` | Executive Salaries | Expense | Debit | TRUE | `80000` | PL | Operating Expenses | General & Administrative | ADD |
+| `81200` | Admin Salaries & Wages | Expense | Debit | TRUE | `80000` | PL | Operating Expenses | General & Administrative | ADD |
+| **`99999`** | **Net Income** | Equity | Credit | FALSE | `NULL` | **BS** | Equity | Current Year Net Income | ADD |
+
+---
+
+### **III. How This Structure Drives Financial Reporting**
+
+Your reporting engine (whether in an ERP, BI tool, or even a sophisticated spreadsheet) would use this table as a blueprint.
+
+#### **1. Generating a Trial Balance**
+
+1.  Calculate the final balance for every account in the journal entries table where `Is_Posting_Account = TRUE`.
+2.  For each account, retrieve its `Normal_Balance` from the `Dim_ChartOfAccounts` table.
+3.  Place the final balance in the Debit or Credit column of the Trial Balance report based on its normal balance.
+4.  Sum the Debit and Credit columns. They must be equal.
+
+#### **2. Generating a Profit & Loss (Income Statement)**
+
+1.  **Filter:** Select all accounts where `FS_Map_Statement = 'PL'`.
+2.  **Group & Order:** Group the results by `FS_Map_Section`, then by `FS_Map_Line`. Order them logically (Revenue first, then COGS, then Operating Expenses, etc.).
+3.  **Calculate:**
+*   For each `FS_Map_Line`, calculate the line total.
+*   Iterate through each account mapped to that line.
+*   Get the account's balance from the journal entries.
+*   Apply the **`Rollup_Operator`**:
+*   If `ADD`, `Line_Total += Account_Balance`.
+*   If `SUBTRACT`, `Line_Total -= Account_Balance`.
+*   **Example:** The "Net Sales" line would be calculated as `SUM(Balances of Sales Accounts) - SUM(Balances of Sales Returns & Allowances Accounts)`.
+4.  **Calculate Subtotals:** Calculate Gross Profit (Revenue - COGS), Operating Income, and finally Net Income.
+
+#### **3. Generating a Balance Sheet**
+
+The logic is identical to the P&L, but with a different filter.
+
+1.  **Filter:** Select all accounts where `FS_Map_Statement = 'BS'`.
+2.  **Group & Order:** Group by `FS_Map_Section` (Current Assets, Non-Current Assets, Current Liabilities, etc.) and then by `FS_Map_Line`.
+3.  **Calculate:** Use the `Rollup_Operator` to calculate each line item total.
+*   **Example:** The "Net Accounts Receivable" line is calculated by summing the balance of `12100` and *subtracting* the balance of `12900`.
+4.  **Integrate Net Income:** The calculated Net Income from the P&L report is programmatically pulled and displayed on the Balance Sheet under Equity (as mapped for account `99999` in the example).
+5.  **Verify:** The final report must validate the accounting equation: **Total Assets = Total Liabilities + Total Equity**. The structure ensures this.
+
+### **Benefits of This Design**
+
+*   **Automation:** Financial statements can be generated automatically and instantly at any time.
+*   **Consistency:** All reports are built from the same logic, ensuring consistency across the board.
+*   **Flexibility:** To change how a report looks (e.g., move an account from one line to another), you only need to update the mapping in this single table, not recode the entire reporting logic.
+*   **Clarity:** It clearly defines how contra-accounts should be treated, removing ambiguity during report generation.
+*   **Auditability:** Auditors can easily see the direct mapping from general ledger accounts to the financial statement lines.
+
+

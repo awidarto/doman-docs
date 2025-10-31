@@ -1,0 +1,1159 @@
+---
+title: Laravel Simple Workflow Engine
+---
+Of course! Building a workflow engine is a fascinating project. Here’s a comprehensive guide on how to create a simple, yet powerful, workflow graph engine using Laravel for the backend, Vue 3 for the frontend, Laravel's Pipeline for execution, and an Artisan command for triggering.
+
+### High-Level Architecture
+
+1.  **Frontend (Vue 3):** A visual editor where users can drag, drop, and connect nodes to define a workflow. We'll use a library like **Vue Flow** for this. The state of the graph (nodes, edges, and their configurations) will be stored as a JSON object.
+2.  **Backend (Laravel API):**
+*   An API endpoint to save/load the workflow's JSON definition to a database.
+*   A `Workflow` model to represent the stored workflows.
+3.  **Execution Layer (Laravel Pipeline & Artisan):**
+*   An **Artisan command** (`workflow:run`) will trigger a specific workflow.
+*   A **Translator/Engine Service** will parse the workflow's JSON and translate it into a series of executable "Pipe" classes.
+*   **Laravel's Pipeline** will execute these pipes sequentially, passing a "state" object through each one, which nodes can read from and write to.
+*   **Branching Logic (Conditional/Switch):** The standard Laravel Pipeline is linear. We'll adapt our engine to handle branching by dynamically deciding the next node to execute based on the current state.
+
+---
+
+## Step 1: Backend Setup (Laravel)
+
+#### 1.1. Create Project and Database Model
+
+```bash
+laravel new workflow-engine
+cd workflow-engine
+php artisan make:model Workflow -m
+```
+
+Open the generated migration file `..._create_workflows_table.php` and define the schema.
+
+```php
+// database/migrations/YYYY_MM_DD_HHMMSS_create_workflows_table.php
+public function up()
+{
+    Schema::create('workflows', function (Blueprint $table) {
+        $table->id();
+        $table->string('name');
+        $table->text('description')->nullable();
+        $table->json('definition'); // This will store the graph from Vue
+        $table->timestamps();
+    });
+}
+```
+
+Run the migration:
+
+```bash
+php artisan migrate
+```
+
+#### 1.2. Set up the `Workflow` Model
+
+In `app/Models/Workflow.php`, add a cast for the `definition` field.
+
+```php
+// app/Models/Workflow.php
+class Workflow extends Model
+{
+    use HasFactory;
+
+    protected $fillable = ['name', 'description', 'definition'];
+
+    protected $casts = [
+        'definition' => 'array', // Automatically cast the JSON to an array
+    ];
+}
+```
+
+#### 1.3. Create the API Controller
+
+```bash
+php artisan make:controller Api/WorkflowController --api
+```
+
+Define the routes in `routes/api.php`.
+
+```php
+// routes/api.php
+use App\Http\Controllers\Api\WorkflowController;
+
+Route::apiResource('workflows', WorkflowController::class);
+Route::post('workflows/{workflow}/run', [WorkflowController::class, 'run']);
+```
+
+Implement the controller logic.
+
+```php
+// app/Http/Controllers/Api/WorkflowController.php
+namespace App\Http\Controllers\Api;
+
+use App\Models\Workflow;
+use Illuminate\Http\Request;
+use App\Http\Controllers\Controller;
+use Illuminate\Support\Facades\Artisan;
+
+class WorkflowController extends Controller
+{
+    public function index() {
+        return Workflow::all();
+    }
+
+    public function store(Request $request) {
+        $validated = $request->validate([
+            'name' => 'required|string|max:255',
+            'definition' => 'required|array'
+        ]);
+        return Workflow::create($validated);
+    }
+
+    public function show(Workflow $workflow) {
+        return $workflow;
+    }
+
+
+
+    public function update(Request $request, Workflow $workflow) {
+        $validated = $request->validate([
+            'name' => 'required|string|max:255',
+            'definition' => 'required|array'
+        ]);
+        $workflow->update($validated);
+        return $workflow;
+    }
+
+    public function destroy(Workflow $workflow) {
+        $workflow->delete();
+        return response()->noContent();
+    }
+
+    // This method triggers the workflow execution
+    public function run(Request $request, Workflow $workflow)
+    {
+        // For simplicity, we call Artisan directly.
+        // In a real app, you would dispatch a Job that calls the command.
+        Artisan::call('workflow:run', [
+            'workflow' => $workflow->id,
+            // Pass initial data from the request to the workflow
+            '--data' => json_encode($request->all())
+        ]);
+
+        // You could return the output or a job ID
+        return response()->json([
+            'message' => 'Workflow execution started.',
+            'output' => Artisan::output()
+        ]);
+    }
+}
+```
+
+---
+
+## Step 2: The Core Execution Engine
+
+This is the heart of our system. It translates the visual graph into executable code.
+
+#### 2.1. Define the State Object
+
+The "state" is an object that gets passed from one node to the next. Each node can read from it and write to it. A simple `DataObject` using `ArrayAccess` is perfect for this.
+
+```php
+// app/Workflows/State.php
+namespace App\Workflows;
+
+use Illuminate\Contracts\Support\Arrayable;
+
+class State implements \ArrayAccess, Arrayable
+{
+    private array $data;
+
+    public function __construct(array $initialData = [])
+    {
+        $this->data = $initialData;
+    }
+
+    public function offsetSet($offset, $value): void
+    {
+        if (is_null($offset)) {
+            $this->data[] = $value;
+        } else {
+            $this->data[$offset] = $value;
+        }
+    }
+
+    public function offsetExists($offset): bool
+    {
+        return isset($this->data[$offset]);
+    }
+
+    public function offsetUnset($offset): void
+    {
+        unset($this->data[$offset]);
+    }
+
+    public function offsetGet($offset): mixed
+    {
+        return $this->data[$offset] ?? null;
+    }
+
+    public function toArray(): array
+    {
+        return $this->data;
+    }
+}
+```
+
+#### 2.2. Create the Pipe Classes for Each Node Type
+
+Create a directory `app/Workflows/Pipes`. Each class will represent a node type and have an `handle` method.
+
+**a) DB Access Node**
+
+```php
+// app/Workflows/Pipes/DbAccessPipe.php
+namespace App\Workflows\Pipes;
+
+use App\Workflows\State;
+use Illuminate\Support\Facades\DB;
+use Closure;
+
+class DbAccessPipe
+{
+    public function handle(State $state, Closure $next, array $config)
+    {
+        $table = $config['table'];
+        $operation = $config['operation']; // e.g., 'first', 'get', 'insert'
+        $where = $config['where'] ?? [];
+        $dataToInsert = $config['data'] ?? [];
+        $outputKey = $config['outputKey'] ?? 'db_result';
+
+        $query = DB::table($table);
+
+        foreach($where as $w) {
+            // Very simple "where" parser. You can make this more robust.
+            // Example: ['field' => 'id', 'operator' => '=', 'value' => 1]
+            // Or to get value from state: ['valueFromState' => 'inputId']
+            $value = $w['valueFromState'] ? $state[$w['valueFromState']] : $w['value'];
+            $query->where($w['field'], $w['operator'], $value);
+        }
+
+        if ($operation === 'insert') {
+            // Similarly, parse data from state if needed
+            $result = $query->insertGetId($dataToInsert);
+        } else {
+            $result = $query->{$operation}();
+        }
+
+        $state[$outputKey] = $result;
+
+        return $next($state);
+    }
+}
+```
+
+**b) Custom Code Node**
+
+> **Security Warning:** Using `eval()` is extremely dangerous if the code comes from untrusted users. In a real-world scenario, you should use a sandboxed environment or a pre-approved list of invokable classes. For this example, we'll proceed with `eval` for simplicity.
+
+```php
+// app/Workflows/Pipes/CustomCodePipe.php
+namespace App\Workflows\Pipes;
+
+use App\Workflows\State;
+use Closure;
+
+class CustomCodePipe
+{
+    public function handle(State $state, Closure $next, array $config)
+    {
+        $code = $config['code'];
+
+        // The $state object is available inside the evaluated code
+        eval($code);
+
+        return $next($state);
+    }
+}
+```
+*Example code for this node:* `$state['fullName'] = $state['firstName'] . ' ' . $state['lastName'];`
+
+**c) Terminator Node**
+
+This node will stop the pipeline and can format the final output.
+
+```php
+// app/Workflows/Pipes/TerminatorPipe.php
+namespace App\Workflows\Pipes;
+
+use App\Workflows\State;
+use Closure;
+
+class TerminatorPipe
+{
+    // The terminator doesn't call $next(), ending the chain.
+    public function handle(State $state, Closure $next, array $config)
+    {
+        // You can use config to select what parts of the state to return
+        $keysToReturn = $config['keys'] ?? [];
+
+        if (empty($keysToReturn)) {
+            return $state; // Return the whole state
+        }
+
+        $result = [];
+        foreach ($keysToReturn as $key) {
+            $result[$key] = $state[$key];
+        }
+
+        // We wrap it in a new state to maintain type consistency
+        return new State($result);
+    }
+}
+```
+
+#### 2.3. The Workflow Engine Service (Handles Graph Traversal & Branching)
+
+This service is the most crucial piece. It takes the workflow definition and executes it node by node.
+
+```bash
+php artisan make:class Workflows/WorkflowEngine
+```
+
+```php
+// app/Workflows/WorkflowEngine.php
+namespace App\Workflows;
+
+use App\Models\Workflow;
+use Illuminate\Support\Facades\Pipeline;
+use Exception;
+
+class WorkflowEngine
+{
+    protected array $nodes;
+    protected array $edges;
+
+    // A map from our frontend node types to backend Pipe classes
+    const NODE_TYPE_MAP = [
+        'db_access' => \App\Workflows\Pipes\DbAccessPipe::class,
+        'custom_code' => \App\Workflows\Pipes\CustomCodePipe::class,
+        'terminator' => \App\Workflows\Pipes\TerminatorPipe::class,
+    ];
+
+    public function run(Workflow $workflow, array $initialData = []): State
+    {
+        $definition = $workflow->definition;
+        $this->nodes = collect($definition['nodes'])->keyBy('id')->all();
+        $this->edges = $definition['edges'];
+
+        $state = new State($initialData);
+        $currentNode = $this->findStartNode();
+
+        while ($currentNode) {
+            $nodeType = $currentNode['type'];
+            $nodeConfig = $currentNode['data'] ?? [];
+
+            // Execute the pipe for the current node
+            if (in_array($nodeType, ['db_access', 'custom_code'])) {
+                 $state = $this->executePipe($state, $nodeType, $nodeConfig);
+            }
+
+            // --- Logic for branching and moving to the next node ---
+
+            // 1. Handle Terminator Node
+            if ($nodeType === 'terminator') {
+                 return (new self::NODE_TYPE_MAP[$nodeType])->handle($state, fn($s) => $s, $nodeConfig);
+            }
+
+            // 2. Handle Conditional Node
+            if ($nodeType === 'conditional') {
+                $conditionResult = $this->evaluateCondition($state, $nodeConfig);
+                // The 'handle' on the edge ID should be 'true' or 'false'
+                $edgeHandle = $conditionResult ? 'true' : 'false';
+                $currentNode = $this->findNextNodeBySourceHandle($currentNode['id'], $edgeHandle);
+                continue; // Move to the next iteration
+            }
+
+            // 3. Handle Switch Node
+            if ($nodeType === 'switch') {
+                $switchValue = $state[$nodeConfig['variable']];
+                $currentNode = $this->findNextNodeBySourceHandle($currentNode['id'], (string) $switchValue);
+                if (!$currentNode) { // Optional: Default case
+                    $currentNode = $this->findNextNodeBySourceHandle($currentNode['id'], 'default');
+                }
+                continue;
+            }
+
+            // Default: For linear nodes, just find the next connected node
+            $currentNode = $this->findNextNode($currentNode['id']);
+        }
+
+        return $state;
+    }
+
+    private function executePipe(State $state, string $nodeType, array $config): State
+    {
+        $pipeClass = self::NODE_TYPE_MAP[$nodeType];
+
+        // We use the Pipeline facade to run a single pipe
+        return Pipeline::send($state)
+            ->through(
+                [
+                    function ($s, $next) use ($pipeClass, $config) {
+                        return (new $pipeClass)->handle($s, $next, $config);
+                    }
+                ]
+            )
+            ->then(fn ($s) => $s);
+    }
+
+    private function evaluateCondition(State $state, array $config): bool
+    {
+        $var1 = $state[$config['variable1']];
+        $var2 = $config['valueFromState'] ? $state[$config['valueFromState']] : $config['variable2'];
+        $operator = $config['operator']; // e.g., '==', '>', '<', '!='
+
+        return match ($operator) {
+            '==' => $var1 == $var2,
+            '>' => $var1 > $var2,
+            '<' => $var1 < $var2,
+            '!=' => $var1 != $var2,
+            default => false,
+        };
+    }
+
+    private function findStartNode()
+    {
+        return collect($this->nodes)->firstWhere('type', 'trigger');
+    }
+
+    private function findNextNode(string $sourceNodeId)
+    {
+        $edge = collect($this->edges)->firstWhere('source', $sourceNodeId);
+        return $edge ? $this->nodes[$edge['target']] : null;
+    }
+
+    private function findNextNodeBySourceHandle(string $sourceNodeId, string $sourceHandle)
+    {
+        $edge = collect($this->edges)->firstWhere(function ($e) use ($sourceNodeId, $sourceHandle) {
+            return $e['source'] === $sourceNodeId && $e['sourceHandle'] === $sourceHandle;
+        });
+        return $edge ? $this->nodes[$edge['target']] : null;
+    }
+}
+```
+
+---
+
+## Step 3: The Artisan Command
+
+```bash
+php artisan make:command RunWorkflow
+```
+
+Implement the command to use our `WorkflowEngine`.
+
+```php
+// app/Console/Commands/RunWorkflow.php
+namespace App\Console\Commands;
+
+use Illuminate\Console\Command;
+use App\Models\Workflow;
+use App\Workflows\WorkflowEngine;
+
+class RunWorkflow extends Command
+{
+    protected $signature = 'workflow:run {workflow : The ID of the workflow} {--data= : JSON string of initial data}';
+    protected $description = 'Executes a defined workflow';
+
+    public function handle(WorkflowEngine $engine)
+    {
+        $workflowId = $this->argument('workflow');
+        $workflow = Workflow::findOrFail($workflowId);
+
+        $initialData = json_decode($this->option('data') ?? '[]', true);
+
+        $this->info("Starting workflow: {$workflow->name}");
+
+        try {
+            $finalState = $engine->run($workflow, $initialData);
+            $this->info("Workflow completed successfully.");
+            $this->line("Final State:");
+            $this->line(json_encode($finalState->toArray(), JSON_PRETTY_PRINT));
+        } catch (\Exception $e) {
+            $this->error("Workflow failed: " . $e->getMessage());
+        }
+
+        return Command::SUCCESS;
+    }
+}
+```
+
+---
+
+## Step 4: Frontend Setup (Vue 3)
+
+We'll use **Vue Flow** to create the visual editor.
+
+#### 4.1. Install Vue and Dependencies
+
+```bash
+# In your Laravel project root
+npm install
+npm install vue@next vue-router@next
+npm install -D @vitejs/plugin-vue
+# Install Vue Flow and Axios
+npm install @vue-flow/core axios
+```
+
+Configure `vite.config.js` and `resources/js/app.js` to use Vue.
+
+#### 4.2. Create the `WorkflowEditor.vue` Component
+
+This component will contain the graph editor.
+
+```vue
+<!-- resources/js/components/WorkflowEditor.vue -->
+<template>
+  <div class="workflow-container">
+    <div class="controls">
+      <button @click="addNode('trigger')">Add Trigger</button>
+      <button @click="addNode('db_access')">Add DB Node</button>
+      <button @click="addNode('custom_code')">Add Code Node</button>
+      <button @click="addNode('conditional')">Add If/Else</button>
+      <button @click="addNode('switch')">Add Switch</button>
+      <button @click="addNode('terminator')">Add Terminator</button>
+      <button @click="saveWorkflow" class="save-btn">Save Workflow</button>
+    </div>
+    <div class="editor-area">
+      <VueFlow v-model="elements">
+        <Background />
+        <Controls />
+      </VueFlow>
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { ref } from 'vue';
+import { VueFlow, useVueFlow } from '@vue-flow/core';
+import { Background } from '@vue-flow/background';
+import { Controls } from '@vue-flow/controls';
+import '@vue-flow/core/dist/style.css';
+import '@vue-flow/core/dist/theme-default.css';
+import axios from 'axios';
+
+const { onConnect, addEdges, addNodes, project } = useVueFlow();
+
+const elements = ref([]);
+let nodeId = 0;
+
+// This would be loaded from the API
+const workflowId = 1;
+const workflowName = ref('My First Workflow');
+
+const addNode = (type) => {
+  const newNode = {
+    id: `node-${nodeId++}`,
+    type: type, // This corresponds to our backend node types
+    label: `${type} Node`,
+    position: { x: Math.random() * 400, y: Math.random() * 400 },
+    data: {}, // Config data for the node will go here
+  };
+  addNodes([newNode]);
+};
+
+onConnect((params) => addEdges([params]));
+
+// In a real app, you would load this from your API
+// onLoad(async () => {
+//   const response = await axios.get(`/api/workflows/${workflowId}`);
+//   elements.value = response.data.definition.elements;
+// });
+
+const saveWorkflow = async () => {
+  try {
+    const graphData = {
+      nodes: elements.value.filter(el => !el.source), // Filter out edges
+      edges: elements.value.filter(el => el.source),
+    };
+
+    await axios.put(`/api/workflows/${workflowId}`, {
+      name: workflowName.value,
+      definition: graphData,
+    });
+    alert('Workflow Saved!');
+  } catch (error) {
+    console.error('Failed to save workflow', error);
+    alert('Error saving workflow.');
+  }
+};
+</script>
+
+<style>
+.workflow-container {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+.controls {
+  padding: 10px;
+  background: #f0f0f0;
+  border-bottom: 1px solid #ddd;
+}
+.editor-area {
+  flex-grow: 1;
+}
+.save-btn {
+  float: right;
+  background-color: #3490dc;
+  color: white;
+}
+</style>
+```
+
+**Custom Nodes for Configuration**
+
+Vue Flow allows you to create custom nodes with forms to edit their configuration (`data` property). For a DB node, you would have inputs for Table, Operation, etc. This data is what gets passed as `$config` to your backend Pipe classes.
+
+Here is a simplified example of a custom DB node:
+
+```vue
+<!-- resources/js/components/CustomDbNode.vue -->
+<template>
+  <div>
+    <div><strong>DB Access</strong></div>
+    <Handle type="target" :position="Position.Left" />
+    <div class="node-body">
+      <label>Table:</label>
+      <input type="text" v-model="data.table" />
+      <label>Output Key:</label>
+      <input type="text" v-model="data.outputKey" />
+    </div>
+    <Handle type="source" :position="Position.Right" />
+  </div>
+</template>
+
+<script setup>
+import { Handle, Position } from '@vue-flow/core';
+// `data` is automatically passed when using custom nodes
+defineProps(['data']);
+</script>
+```
+
+You would then register this in your main editor component to be used when `type` is `db_access`.
+
+---
+
+## Step 5: Tying it all together
+
+1.  **Design a Workflow:** Use your Vue frontend to create a workflow.
+*   Add a **Trigger** node.
+*   Add a **DB Access** node. Configure it to fetch a user: `table: 'users'`, `operation: 'first'`, `where: [{field: 'id', operator: '=', value: 1}]`, `outputKey: 'user'`.
+*   Add a **Terminator** node.
+*   Connect Trigger -> DB Access -> Terminator.
+2.  **Save:** Click "Save". The Vue app sends a PUT request to `/api/workflows/1` with a JSON payload like this:
+```json
+{
+  "name": "My First Workflow",
+  "definition": {
+    "nodes": [
+      { "id": "node-0", "type": "trigger", "position": { ... }, "data": {} },
+      { "id": "node-1", "type": "db_access", "position": { ... }, "data": { "table": "users", ... } },
+      { "id": "node-2", "type": "terminator", "position": { ... }, "data": {} }
+    ],
+    "edges": [
+      { "source": "node-0", "target": "node-1" },
+      { "source": "node-1", "target": "node-2" }
+    ]
+  }
+}
+    ```
+3.  **Run:** Trigger the execution via an API call (e.g., from a button in your app) or directly via the command line.
+
+*   **Via CLI:**
+```bash
+# Pass an initial input ID
+php artisan workflow:run 1 --data='{"user_id": 1}'
+        ```
+*   **Via API:** A `POST` request to `http://your.app/api/workflows/1/run`.
+
+4.  **Execution Flow:**
+*   The `RunWorkflow` command starts.
+*   It calls the `WorkflowEngine`.
+*   The engine finds the `trigger` node and starts.
+*   It moves to the `db_access` node (`node-1`). It executes `DbAccessPipe` with the configured data. The pipe runs `DB::table('users')->where('id', 1)->first()` and stores the result in `$state['user']`.
+*   It moves to the `terminator` node (`node-2`), which ends the process and returns the final state.
+*   The Artisan command prints the final state containing the user object.
+
+This provides a solid foundation. You can now expand on it by creating more complex node types, adding better error handling, logging each run to a database, and building a more sophisticated UI for configuring nodes.
+
+### UI Wireframe
+
+Of course! Here is a text-based wireframe that visualizes the Vue front-end for your workflow engine. This wireframe illustrates the key components and their interactions.
+
+We'll visualize two states:
+1.  The main editor view with a workflow loaded.
+2.  The view when a specific node is selected, showing the contextual properties panel.
+
+---
+
+### Wireframe 1: Main Editor View
+
+This is the default view when a user opens a workflow to edit it.
+
+```
++--------------------------------------------------------------------------------------------------------------------+
+| Workflow Engine                                 [ My First Workflow ▼]                  [ Save ] [ Run Workflow ]   |
++--------------------------------------------------------------------------------------------------------------------+
+| [ WORKFLOWS ]       | [ NODE PALETTE ]                                                                             |
+|---------------------|----------------------------------------------------------------------------------------------|
+| > My First Workflow | [ T ] Trigger  [🗃️] DB Access  [</>] Code  [?] If/Else  [⟷] Switch  [ 🛑 ] Terminator          |
+|   User Onboarding   |                                                                                              |
+|   Nightly Report    |                                    ( C A N V A S )                                           |
+|                     |                                                                                              |
+|   [+ New Workflow]  |   +-----------+         +---------------+                                                      |
+|                     |   | T Trigger |-------->| 🗃️ DB Access |                                                      |
+|                     |   | (Input)   |         |  Find User    |                                                      |
+|                     |   +-----------+         +-------+-------+                                                      |
+|                     |                                 |                                                              |
+|                     |                                 v                                                              |
+|                     |                         +---------------+                                                      |
+|                     |                         | ? If/Else     |                                                      |
+|                     |                         |  User Exists? |                                                      |
+|                     |                         +-------+-------+                                                      |
+|                     |                                 |         \ (false)                                            |
+|                     |                          (true) |          \                                                    |
+|                     |                                 |           \--> +-----------------+                            |
+|                     |                                 v                | 🗃️ DB Access    |                            |
+|                     |                         +---------------+        |  Create User    |                            |
+|                     |                         | </> Code      |        +-----------------+                            |
+|                     |                         |  Format Name  |                |                                      |
+|                     |                         +---------------+                v                                      |
+|                     |                                 |               +------------------+                           |
+|                     |                                 +-------------->| 🛑 Terminator    |                           |
+|                     |                                                 |  Return Result   |                           |
+|                     |                                                 +------------------+                           |
+|                     |                                                                                              |
+|--------------------------------------------------------------------------------------------------------------------|
+| Status: Ready                                                                                                      |
++--------------------------------------------------------------------------------------------------------------------+
+```
+
+#### Breakdown of the Main View:
+
+1.  **Header:**
+    *   **`Workflow Engine`**: Application title.
+    *   **`[ My First Workflow ▼]`**: A dropdown to switch between existing workflows.
+    *   **`[ Save ]`**: Saves the current graph layout and node configurations to the Laravel backend.
+    *   **`[ Run Workflow ]`**: Triggers the Artisan command via the API, potentially opening a modal to ask for initial input data.
+
+2.  **Left Sidebar (`WORKFLOWS`):**
+    *   A list of all saved workflows.
+    *   The `>` indicates the currently selected workflow being displayed on the canvas.
+    *   `[+ New Workflow]` button to create a new, empty workflow.
+
+3.  **Main Content Area:**
+    *   **`NODE PALETTE`**: A toolbar with buttons for each available node type. Clicking one of these would add a new node of that type to the canvas.
+    *   **`( C A N V A S )`**: The main area where the graph is built.
+        *   **Nodes**: Represented by boxes (`+---+`). Each has an icon, a type (`Trigger`, `DB Access`), and a user-defined label (`Find User`).
+        *   **Edges**: Represented by lines and arrows (`--->`) connecting the nodes.
+        *   **Handles/Ports**: The points on a node where edges connect. For branching nodes like `If/Else`, the outgoing edges are labeled (`true`, `false`).
+
+4.  **Footer:**
+    *   Displays status messages like "Ready", "Saving...", "Workflow Saved", or "Execution Failed".
+
+---
+
+### Wireframe 2: Node Properties Panel (Contextual)
+
+This view shows what happens when the user clicks on the **"🗃️ DB Access (Find User)"** node on the canvas. The right sidebar appears to show its specific configuration.
+
+```
++--------------------------------------------------------------------------------------------------------------------+
+| Workflow Engine                                 [ My First Workflow ▼]                  [ Save ] [ Run Workflow ]   |
++--------------------------------------------------------------------------------------------------------------------+
+| [ WORKFLOWS ]       | [ NODE PALETTE ]                                        | [ PROPERTIES: DB Access ]            |
+|---------------------|---------------------------------------------------------|------------------------------------|
+| > My First Workflow | [ T ] Trigger  [🗃️] DB Access ... [ 🛑 ] Terminator       |                                    |
+|   User Onboarding   |                                                         |  Node Label:                       |
+|   Nightly Report    |    ( C A N V A S )                                      |  [ Find User                  ]    |
+|                     |                                                         |------------------------------------|
+|   [+ New Workflow]  |   +-----------+         +===============+               |  Table Name:                       |
+|                     |   | T Trigger |-------->| 🗃️ DB Access || (selected)    |  [ users                      ]    |
+|                     |   | (Input)   |         |  Find User    ||               |                                    |
+|                     |   +-----------+         +===============+               |  Operation:                        |
+|                     |                                 |                       |  < first                      ▼>   |
+|                     |                                 v                       |  (get, first, insert, update)      |
+|                     |                         +---------------+               |                                    |
+|                     |                         | ? If/Else     |               |  Output Key: (Save result as)      |
+|                     |                         |  User Exists? |               |  [ found_user                 ]    |
+|                     |                         +-------+-------+               |------------------------------------|
+|                     |                                 |         \ (false)     |  Conditions (WHERE Clause)         |
+|                     |                          (true) |          \            |                                    |
+|                     |                                 v            ...        |  Field      Operator    Value      |
+|                     |                         +---------------+               |  [ id       ] [ =      ] [ 1 ]  [x] |
+|                     |                         | </> Code      |               |  [ email    ] [ =      ] [         ]  |
+|                     |                         |  Format Name  |               |  (Value from state: `input_email`) |
+|                     |                         +---------------+               |                                    |
+|                     |                                 |                       |                         [+ Add]    |
+|                     |                                ...                      |                                    |
+|--------------------------------------------------------------------------------------------------------------------|
+| Status: Editing 'Find User' node.                                                                                  |
++--------------------------------------------------------------------------------------------------------------------+
+```
+
+#### Breakdown of the Properties View:
+
+1.  **Canvas Interaction:**
+    *   The selected node, **`DB Access (Find User)`**, is highlighted (represented by `+===============+`).
+
+2.  **Right Sidebar (`PROPERTIES`):**
+    *   This panel is **contextual**. Its content changes based on the selected node's type.
+    *   **`Node Label`**: A generic field for all nodes to give them a descriptive name.
+    *   **`Table Name`**: An input field specific to the `DB Access` node.
+    *   **`Operation`**: A dropdown (`<...▼>`) to select the database action (`first`, `get`, `insert`, etc.).
+    *   **`Output Key`**: The variable name under which the result of this node will be stored in the workflow's `State` object (e.g., `state['found_user']`).
+    *   **`Conditions`**: A dynamic form to build the `WHERE` clause. The user can add multiple conditions. This demonstrates how complex data for a node's configuration can be captured.
+        *   It shows how values can be hardcoded (`1`) or pulled from the workflow state (`input_email`), making the nodes dynamic.
+    *   **`[+ Add]`**: A button to add another `WHERE` condition row.
+
+This text-based wireframe provides a clear blueprint for what you need to build in Vue, showing the overall layout, the components, their states, and how they interact to create a functional workflow editor.
+
+## Vue2 Vertical Flow
+
+Absolutely! A vertically flowing workflow is a fantastic way to simplify the UI, and it's perfectly achievable in Vue 2 without the need for a complex graph library. This approach is often more intuitive for users who are used to step-by-step processes.
+
+Instead of a free-form canvas, we'll build an interface that resembles a structured list, where branching is handled through indentation.
+
+### Text-Based Wireframe: Vertical Workflow Editor
+
+This wireframe shows a workflow for processing a new user signup. It includes a conditional branch.
+
+```
++----------------------------------------------------------------------------------+
+| Workflow Name: [ User Signup Process                                          ] |
+|                                                              [ Save Workflow ] |
++----------------------------------------------------------------------------------+
+|                                                                                  |
+|  ( Step 1 )  [ Trigger / Input                                              ]   |
+|  +--------------------------------------------------------------------------+   |
+|  | Label: [ New User Signup Trigger                                       ] |   |
+|  |                                                                        [x] |   |
+|  | Define initial data keys (e.g., email, password)                       |   |
+|  | [ email, password, name                                                ] |   |
+|  +--------------------------------------------------------------------------+   |
+|                                     |                                          |
+|                                     v                                          |
+|                                                                                  |
+|  ( Step 2 )  [ Database Access                                              ]   |
+|  +--------------------------------------------------------------------------+   |
+|  | Label: [ Check if user exists                                          ] |   |
+|  |                                                                        [x] |   |
+|  | Table:         [ users                               ]                     |   |
+|  | Operation:     [ first                                ▼]                    |   |
+|  | Output Key:    [ existing_user                       ]                     |   |
+|  | Where: `email` `=` (from state: `email`)                                 |   |
+|  +--------------------------------------------------------------------------+   |
+|                                     |                                          |
+|                                     v                                          |
+|                                                                                  |
+|  ( Step 3 )  [ Conditional (If/Else)                                        ]   |
+|  +--------------------------------------------------------------------------+   |
+|  | Label: [ Does user exist?                                              ] |   |
+|  |                                                                        [x] |   |
+|  | If `existing_user` is not `null`                                         |   |
+|  |                                                                          |   |
+|  |   --- IF TRUE (User Exists) -------------------------------------------- |   |
+|  |                                                                          |   |
+|  |     ( Step 3a )  [ Terminator                                        ]   |   |
+|  |     +------------------------------------------------------------------+   |   |
+|  |     | Label: [ Return Error - User Already Exists                  ] |   |   |
+|  |     |                                                              [x] |   |   |
+|  |     | Return data: { "error": "User with this email exists." }     |   |   |
+|  |     +------------------------------------------------------------------+   |   |
+|  |                                                                          |   |
+|  |   --- IF FALSE (New User) ---------------------------------------------- |   |
+|  |                                                                          |   |
+|  |     ( Step 3b )  [ Database Access                                   ]   |   |
+|  |     +------------------------------------------------------------------+   |   |
+|  |     | Label: [ Create New User                                     ] |   |   |
+|  |     |                                                              [x] |   |   |
+|  |     | Table:     [ users                               ]                 |   |   |
+|  |     | Operation: [ insert                              ▼]                |   |   |
+|  |     | Data: `{ name: state.name, email: state.email, ... }`            |   |   |
+|  |     | Output Key:[ new_user_id                          ]                 |   |   |
+|  |     +------------------------------------------------------------------+   |   |
+|  |                                         |                                |   |
+|  |                                         v                                |   |
+|  |     ( Step 3c )  [ Terminator                                        ]   |   |
+|  |     +------------------------------------------------------------------+   |   |
+|  |     | Label: [ Return Success                                      ] |   |   |
+|  |     |                                                              [x] |   |   |
+|  |     | Return data: { "user_id": state.new_user_id }                  |   |   |
+|  |     +------------------------------------------------------------------+   |   |
+|  |                                                                          |   |
+|  |     [ + Add Step to this branch ]                                        |   |
+|  +--------------------------------------------------------------------------+   |
+|                                                                                  |
+|                               [ + Add Step ]                                     |
+|                                                                                  |
++----------------------------------------------------------------------------------+
+
+```
+
+### How to Build This in Vue 2
+
+This design is much simpler to implement as it doesn't require drag-and-drop or position management. It's essentially a recursive list of components.
+
+#### 1. The Data Structure (JSON)
+
+The visual structure above maps beautifully to a nested array of objects. This is the JSON you'll save to your Laravel backend.
+
+```json
+{
+  "name": "User Signup Process",
+  "definition": [
+    {
+      "id": "uuid-1",
+      "type": "trigger",
+      "data": { "label": "New User Signup Trigger", "inputs": ["email", "password", "name"] }
+    },
+    {
+      "id": "uuid-2",
+      "type": "db_access",
+      "data": { "label": "Check if user exists", "table": "users", "operation": "first", "outputKey": "existing_user", "where": "..." }
+    },
+    {
+      "id": "uuid-3",
+      "type": "conditional",
+      "data": { "label": "Does user exist?", "condition": "..." },
+      "branches": {
+        "true": [
+          {
+            "id": "uuid-4",
+            "type": "terminator",
+            "data": { "label": "Return Error - User Already Exists", "returnData": { "error": "..." } }
+          }
+        ],
+        "false": [
+          {
+            "id": "uuid-5",
+            "type": "db_access",
+            "data": { "label": "Create New User", "operation": "insert", "outputKey": "new_user_id", "insertData": "..." }
+          },
+          {
+            "id": "uuid-6",
+            "type": "terminator",
+            "data": { "label": "Return Success", "returnData": { "user_id": "state.new_user_id" } }
+          }
+        ]
+      }
+    }
+  ]
+}
+```
+
+#### 2. Vue 2 Component Structure
+
+You would primarily need two recursive components.
+
+**`WorkflowEditor.vue` (The Parent)**
+
+```html
+<template>
+  <div>
+    <input v-model="workflow.name" placeholder="Workflow Name" />
+    <button @click="saveWorkflow">Save Workflow</button>
+
+    <div class="workflow-steps">
+      <workflow-step
+        v-for="(step, index) in workflow.definition"
+        :key="step.id"
+        :step="step"
+        @remove="removeStep(index)"
+      />
+      <button @click="addStep(workflow.definition)">+ Add Step</button>
+    </div>
+  </div>
+</template>
+
+<script>
+import WorkflowStep from './WorkflowStep.vue';
+import { v4 as uuidv4 } from 'uuid'; // For unique IDs
+
+export default {
+  components: { WorkflowStep },
+  data() {
+    return {
+      workflow: {
+        name: 'My New Workflow',
+        definition: [], // This array holds the top-level steps
+      },
+    };
+  },
+  methods: {
+    addStep(stepsArray) {
+      // A modal would pop up to ask for the node type
+      const type = prompt("Enter step type: (trigger, db_access, conditional, terminator)");
+      if (!type) return;
+
+      const newStep = {
+        id: uuidv4(),
+        type: type,
+        data: { label: `New ${type} Step` },
+      };
+
+      if (type === 'conditional') {
+        newStep.branches = { true: [], false: [] };
+      }
+
+      stepsArray.push(newStep);
+    },
+    removeStep(index) {
+      this.workflow.definition.splice(index, 1);
+    },
+    saveWorkflow() {
+      // Axios call to your Laravel API endpoint
+      // axios.put(`/api/workflows/${this.workflow.id}`, this.workflow);
+      console.log('Saving:', JSON.stringify(this.workflow, null, 2));
+    },
+  },
+};
+</script>
+
+<style>
+/* Add styles for vertical lines, indentation, etc. */
+</style>
+```
+
+**`WorkflowStep.vue` (The Recursive Child)**
+
+This component renders a single step and, if it's a conditional, recursively renders more `WorkflowStep` components for its branches.
+
+```html
+<template>
+  <div class="step-container" :class="step.type">
+    <div class="step-header">
+      <strong>(Step) {{ step.type }}</strong>
+      <button class="remove-btn" @click="$emit('remove')">x</button>
+    </div>
+    <div class="step-body">
+      <!-- Common fields -->
+      <label>Label:</label>
+      <input type="text" v-model="step.data.label" />
+
+      <!-- Dynamic configuration component based on type -->
+      <component :is="configComponent" :data="step.data" />
+
+      <!-- Recursive part for conditional branches -->
+      <div v-if="step.type === 'conditional'" class="branches">
+        <div class="branch true-branch">
+          <h4>IF TRUE</h4>
+          <workflow-step
+            v-for="(branchStep, index) in step.branches.true"
+            :key="branchStep.id"
+            :step="branchStep"
+            @remove="step.branches.true.splice(index, 1)"
+          />
+          <button @click="addStep(step.branches.true)">+ Add Step to Branch</button>
+        </div>
+        <div class="branch false-branch">
+          <h4>IF FALSE</h4>
+          <!-- ... similar loop for the false branch ... -->
+          <button @click="addStep(step.branches.false)">+ Add Step to Branch</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script>
+// Import your specific config components
+import DbAccessConfig from './configs/DbAccessConfig.vue';
+import ConditionalConfig from './configs/ConditionalConfig.vue';
+// ...etc
+
+export default {
+  name: 'WorkflowStep', // The name is crucial for recursion
+  props: {
+    step: {
+      type: Object,
+      required: true,
+    },
+  },
+  computed: {
+    configComponent() {
+      // Map step type to a configuration component
+      const componentMap = {
+        db_access: DbAccessConfig,
+        conditional: ConditionalConfig,
+        // ... add other mappings here
+      };
+      return componentMap[this.step.type];
+    },
+  },
+  methods: {
+    addStep(stepsArray) {
+      // This could emit an event up to the parent to handle adding steps
+      // Or you can replicate the logic from the parent here.
+    },
+  },
+};
+</script>
+
+<style scoped>
+.step-container {
+  border: 1px solid #ccc;
+  padding: 10px;
+  margin: 10px 0;
+  border-radius: 5px;
+}
+.branches {
+  margin-left: 20px;
+  padding-left: 20px;
+  border-left: 2px dashed #eee;
+}
+/* ... more styles ... */
+</style>
+```
+
+#### 3. Backend Engine Adaptation
+
+Your Laravel `WorkflowEngine` would also be simplified. Instead of traversing edges, you would recursively execute the arrays.
+
+```php
+// app/Workflows/WorkflowEngine.php (simplified logic)
+
+public function run(Workflow $workflow, array $initialData = [])
+{
+    $state = new State($initialData);
+    $steps = $workflow->definition;
+
+    return $this->executeSteps($steps, $state);
+}
+
+private function executeSteps(array $steps, State $state)
+{
+    foreach ($steps as $step) {
+        // ... execute the pipe for the current step ...
+
+        if ($step['type'] === 'conditional') {
+            $result = $this->evaluateCondition($state, $step['data']);
+            $branchToExecute = $result ? 'true' : 'false';
+
+            // Recursively execute the chosen branch
+            $state = $this->executeSteps($step['branches'][$branchToExecute], $state);
+        }
+
+        if ($step['type'] === 'terminator') {
+            // Stop execution and return the final state
+            return (new TerminatorPipe)->handle($state, fn($s) => $s, $step['data']);
+        }
+    }
+
+    return $state;
+}
+```
+
+This vertical approach is an excellent starting point. It's robust, easy for users to understand, and simplifies both the frontend and backend logic significantly.

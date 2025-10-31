@@ -1,0 +1,376 @@
+---
+title: DMS - Document Graph
+---
+## 2025-09-28
+### 1. Document Relation Graph
+
+This hybrid approach, often called "polyglot persistence," is a powerful and modern way to build systems. You're using each database for what it excels at:
+
+*   **MongoDB:** Storing and querying rich, self-contained document metadata. It's fast, flexible, and perfect for the "what is this thing?" questions.
+*   **Neo4j:** Storing and querying complex, interconnected relationships. It's unparalleled for the "how does this thing relate to other things?" questions.
+
+Let's design this system from the ground up.
+
+### 1. System Architecture Overview
+
+Here's how the components will interact:
+
+```
++----------------+      1. Fetch/Update      +-----------------+      2. Read/Write      +-------------+
+|                | <----------------------> |                 | ---------------------> |             |
+|  Vue 2 Frontend|                          | Laravel Backend |                        |   MongoDB   |
+| (Visualizer)   |      (REST API)          |  (Orchestrator) |                        | (Metadata)  |
+|                |                          |                 | <--------------------  |             |
++----------------+      3. Fetch Graph Data  +-----------------+
+                           |                                       4. Read/Write      +-----------+
+                           |-------------------------------------> |           |
+                                                                   |   Neo4j   |
+                                                                   |(Relations)|
+                                                                   +-----------+
+```
+
+**Workflow:** When a user performs an action (e.g., creates a new version, links two documents), the Laravel backend acts as the orchestrator:
+1.  It writes the file to the archive repository.
+2.  It writes the full metadata to MongoDB.
+3.  It then creates/updates the corresponding nodes and relationships in Neo4j.
+
+### 2. Neo4j Graph Model Design
+
+This model is focused purely on the identities of documents and their relationships.
+
+#### Nodes
+
+We'll use two types of nodes to represent the document and its versions.
+
+1.  **`:Document` Node:** Represents the conceptual document, identified by its unifying `callCode`.
+*   **Properties:**
+*   `callCode`: (string, unique) e.g., "INV-2023-042"
+*   `title`: (string) The current title of the document.
+
+2.  **`:Version` Node:** Represents a specific, immutable version of a document. This is the node that will participate in most relationships.
+*   **Properties:**
+*   `versionId`: (string, unique) A composite key like `callCode + ':' + revisionNumber`. e.g., "INV-2023-042:1". This makes lookups easy.
+*   `revisionNumber`: (integer)
+*   `mongoId`: (string) The `_id` of the corresponding record in your MongoDB `documentVersions` collection. This is the crucial link back to the full metadata.
+*   `createdAt`: (datetime)
+
+#### Relationships
+
+These define how the nodes connect.
+
+*   `HAS_VERSION`: Connects a `:Document` to one of its `:Version` nodes. `(d:Document)-[:HAS_VERSION]->(v:Version)`
+*   `LATEST_VERSION`: A special, single relationship from a `:Document` to its most current `:Version`. This is an optimization for finding the latest version quickly. `(d:Document)-[:LATEST_VERSION]->(v:Version)`
+*   `PREVIOUS_VERSION`: The chronological link. `(v2:Version)-[:PREVIOUS_VERSION]->(v1:Version)`
+*   **Custom Referential Relationships:**
+*   `REFERS_TO`: For generic references. `(pr:Version)-[:REFERS_TO]->(inv:Version)`
+*   `INITIATED_BY`: A more semantically rich relationship. `(pr:Version)-[:INITIATED_BY]->(inv:Version)`
+*   `SUPERSEDES`: For when one document explicitly replaces another.
+*   You can add properties to relationships! For example:
+`(:Version)-[:REFERS_TO { comment: "Supporting data for audit" }]->(:Version)`
+
+**Example Graph:**
+
+```
+(d1:Document {callCode: "PR-2023-015"})
+  -[:LATEST_VERSION]->(pr_v1:Version {versionId: "PR-2023-015:1"})
+  -[:HAS_VERSION]->(pr_v1)
+  -[:HAS_VERSION]->(pr_v0:Version {versionId: "PR-2023-015:0"})
+
+(pr_v1)-[:PREVIOUS_VERSION]->(pr_v0)
+
+// The crucial referential link
+(pr_v1)-[:INITIATED_BY]->(inv_v1:Version {versionId: "INV-2023-042:1"})
+
+(d2:Document {callCode: "INV-2023-042"})
+  -[:LATEST_VERSION]->(inv_v1)
+  -[:HAS_VERSION]->(inv_v1)
+```
+
+### 3. Laravel Backend Implementation
+
+You'll need a Neo4j driver for PHP. A popular choice is `laudis/neo4j-php-client`.
+
+#### Key Logic: Creating a New Version
+
+Let's imagine a `DocumentService` class.
+
+```php
+use Laudis\Neo4j\ClientBuilder;
+
+class DocumentService
+{
+    // ... constructor to inject MongoDB and Neo4j clients
+
+    public function createNewVersion(string $callCode, array $metadata, string $filePath)
+    {
+        // 1. Save file to repository (S3, etc.) - omitted for brevity
+
+        // 2. Save metadata to MongoDB
+        $mongoVersion = DB::collection('documentVersions')->insertGetId($metadata);
+        $revisionNumber = $metadata['revisionNumber'];
+        $versionId = "{$callCode}:{$revisionNumber}";
+
+        DB::collection('documents')->where('_id', $callCode)->update([
+            'latestRevisionNumber' => $revisionNumber,
+            'latestVersionId' => $mongoVersion,
+            'updatedAt' => now()
+        ]);
+
+        // 3. Update Neo4j Graph
+        $neo4j = ClientBuilder::create()->withDriver('default', 'bolt://user:pass@host:7687')->build();
+
+        // Find the previous version node if it exists
+        $previousRevision = $revisionNumber - 1;
+        $previousVersionId = "{$callCode}:{$previousRevision}";
+
+        $neo4j->writeTransaction(function ($tx) use ($callCode, $versionId, $mongoVersion, $revisionNumber, $previousVersionId) {
+            // Create the new :Version node
+            $tx->run(
+                'MERGE (d:Document {callCode: $callCode})
+                 CREATE (v:Version {versionId: $versionId, mongoId: $mongoId, revisionNumber: $rev})
+                 CREATE (d)-[:HAS_VERSION]->(v)',
+                ['callCode' => $callCode, 'versionId' => $versionId, 'mongoId' => (string)$mongoVersion, 'rev' => $revisionNumber]
+            );
+
+            // Break old LATEST and create new one
+            $tx->run(
+                'MATCH (d:Document {callCode: $callCode})-[r:LATEST_VERSION]->() DELETE r',
+                ['callCode' => $callCode]
+            );
+            $tx->run(
+                'MATCH (d:Document {callCode: $callCode}), (v:Version {versionId: $versionId})
+                 CREATE (d)-[:LATEST_VERSION]->(v)',
+                ['callCode' => $callCode, 'versionId' => $versionId]
+            );
+
+            // Link to previous version if it exists
+            if ($revisionNumber > 0) {
+                $tx->run(
+                    'MATCH (new:Version {versionId: $newId}), (prev:Version {versionId: $prevId})
+                     CREATE (new)-[:PREVIOUS_VERSION]->(prev)',
+                    ['newId' => $versionId, 'prevId' => $previousVersionId]
+                );
+            }
+        });
+
+        return $mongoVersion;
+    }
+}
+```
+
+#### API Endpoint for Visualization
+
+This endpoint will query Neo4j and format the data for the frontend.
+
+```php
+// In routes/api.php
+Route::get('/documents/{callCode}/graph', 'DocumentController@getGraph');
+
+// In DocumentController.php
+public function getGraph(string $callCode)
+{
+    $neo4j = ClientBuilder::create()->withDriver('default', 'bolt://user:pass@host:7687')->build();
+
+    // Query for the central document and its neighbors up to 2 hops away
+    $result = $neo4j->run(
+        'MATCH path = (d:Document {callCode: $callCode})-[*1..2]-(neighbor)
+         RETURN path',
+        ['callCode' => $callCode]
+    );
+
+    $nodes = [];
+    $edges = [];
+    $nodeIds = [];
+
+    foreach ($result as $record) {
+        $path = $record->get('path');
+        foreach ($path->getNodes() as $node) {
+            if (!in_array($node->getId(), $nodeIds)) {
+                $nodeIds[] = $node->getId();
+                $nodes[] = [
+                    'id' => $node->getId(),
+                    'label' => $node->getProperty('callCode') ?? $node->getProperty('versionId'),
+                    'group' => $node->getLabels()->first() // e.g., 'Document' or 'Version' for styling
+                ];
+            }
+        }
+        foreach ($path->getRelationships() as $rel) {
+            $edges[] = [
+                'from' => $rel->getStartNodeId(),
+                'to' => $rel->getEndNodeId(),
+                'label' => $rel->getType()
+            ];
+        }
+    }
+
+    // Remove duplicate edges
+    $uniqueEdges = array_map("unserialize", array_unique(array_map("serialize", $edges)));
+
+    return response()->json([
+        'nodes' => array_values($nodes),
+        'edges' => array_values($uniqueEdges)
+    ]);
+}
+```
+
+### 4. Simple Vue 2 Component for Visualization
+
+We'll use the excellent [`vis-network`](https://visjs.github.io/vis-network/docs/network/) library for this.
+
+**Installation:**
+`npm install vis-network`
+
+**Component: `DocumentGraph.vue`**
+
+```vue
+<template>
+  <div class="graph-container">
+    <div v-if="loading" class="loading-state">Loading graph...</div>
+    <div v-if="error" class="error-state">{{ error }}</div>
+    <div ref="graph" class="graph-canvas"></div>
+  </div>
+</template>
+
+<script>
+import { Network } from "vis-network/standalone/umd/vis-network.min.js";
+import axios from "axios";
+
+export default {
+  name: "DocumentGraph",
+  props: {
+    callCode: {
+      type: String,
+      required: true,
+    },
+  },
+  data() {
+    return {
+      network: null,
+      loading: false,
+      error: null,
+    };
+  },
+  watch: {
+    // Re-fetch data if the callCode prop changes
+    callCode: {
+      immediate: true,
+      handler(newVal) {
+        if (newVal) {
+          this.fetchAndRenderGraph();
+        }
+      },
+    },
+  },
+  methods: {
+    async fetchAndRenderGraph() {
+      this.loading = true;
+      this.error = null;
+      if (this.network) {
+        this.network.destroy();
+      }
+
+      try {
+        const response = await axios.get(`/api/documents/${this.callCode}/graph`);
+        const graphData = response.data;
+
+        if (graphData.nodes.length === 0) {
+            this.error = "No relationship data found for this document.";
+            return;
+        }
+
+        const container = this.$refs.graph;
+        const data = {
+          nodes: graphData.nodes,
+          edges: graphData.edges,
+        };
+        const options = {
+          layout: {
+            hierarchical: false,
+          },
+          physics: {
+            // Makes the graph stabilize faster
+            stabilization: { iterations: 150 },
+          },
+          nodes: {
+            shape: "box",
+            font: { size: 14, color: "#333" },
+            margin: 10,
+          },
+          edges: {
+            arrows: "to",
+            font: {
+              align: "middle",
+            },
+          },
+          // Example of styling nodes based on their label/group
+          groups: {
+              Document: { color: { background: '#f0ad4e', border: '#eea236' }, shape: 'ellipse' },
+              Version: { color: { background: '#5bc0de', border: '#46b8da' } }
+          }
+        };
+
+        this.network = new Network(container, data, options);
+
+      } catch (err) {
+        console.error("Failed to fetch graph data:", err);
+        this.error = "Could not load document relationship graph.";
+      } finally {
+        this.loading = false;
+      }
+    },
+  },
+};
+</script>
+
+<style scoped>
+.graph-container {
+  position: relative;
+  width: 100%;
+  height: 600px;
+  border: 1px solid #ccc;
+  background-color: #f9f9f9;
+}
+.graph-canvas {
+  width: 100%;
+  height: 100%;
+}
+.loading-state, .error-state {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  height: 100%;
+  font-size: 1.2em;
+  color: #777;
+}
+.error-state {
+  color: #d9534f;
+}
+</style>
+```
+
+**How to use it in another component:**
+
+```vue
+<template>
+  <div>
+    <h1>Document Details</h1>
+    <p>Viewing graph for: {{ documentId }}</p>
+    <DocumentGraph :call-code="documentId" />
+  </div>
+</template>
+
+<script>
+import DocumentGraph from './components/DocumentGraph.vue';
+
+export default {
+  components: { DocumentGraph },
+  data() {
+    return {
+      documentId: 'PR-2023-015' // This would typically come from the route or user input
+    };
+  }
+}
+</script>
+```
+
+This complete setup gives you a powerful, scalable, and visually intuitive way to manage not just document versions, but the entire web of relationships within your DMS.

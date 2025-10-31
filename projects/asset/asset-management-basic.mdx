@@ -1,0 +1,151 @@
+---
+title: 'Asset Management: Basic Concept'
+---
+
+An Asset Management application's primary goal is to track an asset throughout its entire lifecycle: from procurement and deployment to maintenance and eventual retirement.
+
+---
+
+### Part 1: The Core Building Blocks (Business Entities)
+
+These are the fundamental "nouns" of the system. Think of them as the main tables in your database.
+
+#### 1. Asset
+This is the central entity. An asset is any item of value that the organization owns and wants to track.
+*   **Attributes:**
+*   `Asset ID / Tag`: A unique identifier (e.g., barcode, QR code, serial number).
+*   `Name`: A user-friendly name (e.g., "John Doe's Laptop").
+*   `Status`: The current state of the asset (e.g., In Stock, Deployed, In Repair, Missing, Retired).
+*   `Purchase Date`: When it was bought.
+*   `Purchase Cost`: The original price.
+*   `Warranty Expiry Date`: End of warranty period.
+*   `Expected Lifespan`: How long the asset is expected to be in service.
+*   `Notes`: Any other relevant information.
+
+#### 2. Asset Model / Category
+This is a template for creating assets. It prevents you from re-entering the same information for 100 identical laptops.
+*   **Attributes:**
+*   `Model Name`: (e.g., "Dell Latitude 5420").
+*   `Manufacturer`: (e.g., "Dell Inc.").
+*   `Category`: A broader grouping (e.g., Laptop, Monitor, Vehicle, Software).
+*   `Model Number`: The specific model identifier (e.g., "LAT5420-123").
+*   `Image`: A picture of the asset model.
+
+#### 3. User / Employee
+The people who are assigned or use the assets.
+*   **Attributes:**
+*   `User ID / Employee ID`: Unique identifier for the person.
+*   `Full Name`: (e.g., "John Doe").
+*   `Email`: `john.doe@company.com`.
+*   `Department`: The department the user belongs to (e.g., "Marketing", "IT").
+
+#### 4. Location
+The physical place where an asset is stored or used. This is often a hierarchical structure.
+*   **Attributes:**
+*   `Location Name`: (e.g., "Room 301", "Main Office", "Warehouse B").
+*   `Address`: Physical address.
+*   `Parent Location`: To create a tree-like structure (e.g., Room 301 is a child of "Floor 3", which is a child of "Main Office Building").
+
+#### 5. Status Label
+A simple lookup table that defines the possible states an asset can be in. This ensures consistency.
+*   **Examples:** Deployed, Ready to Deploy, In Storage, In Repair, Missing, Disposed/Retired.
+
+#### 6. Maintenance / Work Order
+A record of any service, repair, or maintenance performed on an asset.
+*   **Attributes:**
+*   `Work Order ID`: Unique identifier.
+*   `Title`: (e.g., "Screen Replacement").
+*   `Type`: (e.g., Repair, Scheduled Maintenance, Upgrade).
+*   `Start Date` / `Completion Date`.
+*   `Cost`: Cost of parts and labor.
+*   `Notes`: Details of the work performed.
+
+#### 7. Vendor / Supplier
+The company from which assets were purchased.
+*   **Attributes:**
+*   `Vendor Name`: (e.g., "Dell Inc.", "Office Depot").
+*   `Contact Info`: Phone, email, support website.
+
+#### 8. License (Primarily for IT Asset Management)
+Represents a software license. This is a critical and complex entity.
+*   **Attributes:**
+*   `License Name`: (e.g., "Microsoft Office 365 E3").
+*   `Product Key`.
+*   `Total Seats`: The number of installations allowed.
+*   `Available Seats`: The number of seats not yet assigned.
+*   `Purchase Date` / `Expiry Date`.
+
+---
+
+### Part 2: Interaction Between Entities (The Relationships)
+
+This is how the building blocks connect to form a cohesive system. The `Asset` entity is the hub that connects almost everything else.
+
+Here is a simplified visualization of the primary relationships:
+
+```
++----------------+      +----------------+      +---------------+
+|   Asset Model  |----< |      Asset     | >----|  Maintenance  |
+| (Dell Laptop)  | 1..* | (#12345)       | 1..* | (Repair Log)  |
++----------------+      +-------+--------+      +---------------+
+                            |
+                            | 1..1
+             +--------------+--------------+
+             |              |              |
+             v              v              v
+      +------------+   +-----------+   +----------+
+      |    User    |   | Location  |   |  Status  |
+      | (John Doe) |   | (Room 301)|   | (Deployed) |
+      +------------+   +-----------+   +----------+
+```
+
+**Let's break down the key interactions (the "verbs"):**
+
+1.  **Asset `is an instance of an` Asset Model:**
+*   Many `Assets` can be based on one `Asset Model`. (You own 50 "Dell Latitude 5420" laptops). This is a **One-to-Many** relationship.
+
+2.  **Asset `is assigned to a` User (Check-out):**
+*   At any given time, an `Asset` is typically assigned to one `User`. A `User` can have multiple `Assets`. (John Doe has a laptop and a monitor). This is a **One-to-Many** relationship. This is the core of accountability.
+
+3.  **Asset `is located at a` Location:**
+*   An `Asset` has one current `Location`. A `Location` can contain many `Assets`. (Room 301 has 10 computers and 2 printers). This is a **One-to-Many** relationship.
+
+4.  **Asset `has a` Status:**
+*   An `Asset` has exactly one `Status` at any point in time (e.g., it is either "Deployed" or "In Repair", not both). This is a **Many-to-One** relationship from Asset to Status Label.
+
+5.  **Asset `undergoes` Maintenance:**
+*   One `Asset` can have a history of many `Maintenance` events over its lifetime. Each `Maintenance` record is for a single `Asset`. This is a **One-to-Many** relationship.
+
+6.  **Asset `was purchased from a` Vendor:**
+*   Many `Assets` can be purchased from a single `Vendor`. This is a **Many-to-One** relationship.
+
+7.  **License `is assigned to an` Asset or User:**
+*   This is a more complex interaction.
+*   **Per-Device License:** A `License` seat is assigned directly to an `Asset` (e.g., Windows OS on a specific laptop).
+*   **Per-User License:** A `License` seat is assigned to a `User`, who can then use the software on multiple devices (e.g., Adobe Creative Cloud).
+*   This creates a **Many-to-Many** relationship between `Licenses` and `Assets`/`Users`, often managed through a linking table (e.g., `License_Assignments`).
+
+### Example Lifecycle in Action:
+
+1.  **Procurement:**
+*   A `Vendor` ("Dell") is created.
+*   An `Asset Model` ("Latitude 5420") is created.
+*   A new `Asset` (#55567) is created. It's linked to the "Latitude 5420" `Asset Model` and the "Dell" `Vendor`. Its initial `Status` is "In Stock" and its `Location` is "IT Storage Room".
+
+2.  **Deployment (Check-out):**
+*   `User` "Jane Smith" needs a new laptop.
+*   The `Asset` #55567 is assigned to "Jane Smith".
+*   Its `Status` is changed to "Deployed".
+*   Its `Location` might be updated to "Jane's Desk" or simply track with the user.
+
+3.  **Maintenance:**
+*   Jane's screen breaks.
+*   A `Maintenance` record is created for `Asset` #55567, with a type of "Repair".
+*   The `Asset`'s `Status` is changed to "In Repair".
+*   Once fixed, the `Maintenance` record is closed, and the `Status` is changed back to "Deployed".
+
+4.  **Retirement:**
+*   After 4 years, the laptop is obsolete.
+*   The `Asset` is unassigned from "Jane Smith".
+*   Its `Status` is changed to "Retired" or "Disposed".
+*   It's moved to a final `Location` like "e-Waste Storage". The asset's history is preserved for auditing and financial records.
