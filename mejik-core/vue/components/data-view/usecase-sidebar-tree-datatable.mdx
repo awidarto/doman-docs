@@ -1,0 +1,412 @@
+---
+title: Use Case for Sidebar Tree Data Table
+---
+
+### **Part 1: `TreeGroupEditor.vue` - Revisions**
+
+The logic in your component is sound, but the template for rendering icons can be simplified to fix the visual glitches and make it more robust.
+
+Here is the revised, pasteable code for `TreeGroupEditor.vue`.
+
+```vue
+<!-- TreeGroupEditor.vue -->
+<template>
+    <ul class="tree-group-list">
+        <li v-for="node in nodes" :key="node.id">
+            <div class="tree-node" :class="{ 'selected': node.id === selectedNodeId }" >
+                <div class="node-content" @click="selectNode(node)">
+                    <!-- Icon combination for expander and node type -->
+                    <span class="node-icon-wrapper">
+                        <!-- Expander Chevron (rotates) -->
+                        <i v-if="hasChildren(node)"
+                           class="las la-angle-right expand-icon"
+                           :class="{ 'rotated': node.isOpen }"
+                        ></i>
+                        <!-- Placeholder for alignment -->
+                        <span v-else class="expand-placeholder"></span>
+
+                        <!-- Folder/Item Icon -->
+                        <i class="node-icon" :class="getNodeIcon(node)"></i>
+                    </span>
+
+                    <!-- Name -->
+                    <span class="node-name ellipsis">{{ node.name }}</span>
+                </div>
+
+                <div class="actions d-flex align-items-center">
+                    <button class="btn btn-sm btn-link text-success p-0 me-1" title="Add Child" @click.stop="$emit('add-child-node', node)">
+                        <i class="las la-plus-circle"></i>
+                    </button>
+                    <b-dropdown size="sm" variant="link" toggle-class="text-decoration-none" no-caret right @click.stop>
+                        <template #button-content>
+                            <i class="las la-ellipsis-v text-secondary"></i>
+                        </template>
+                        <b-dropdown-item @click="$emit('edit-node', node)">
+                            <i class="las la-edit me-2"></i>Edit
+                        </b-dropdown-item>
+                        <b-dropdown-divider></b-dropdown-divider>
+                        <b-dropdown-item variant="danger" @click="$emit('delete-node', node)">
+                            <i class="las la-trash me-2"></i>Delete
+                        </b-dropdown-item>
+                    </b-dropdown>
+                </div>
+            </div>
+
+            <!-- Recursive Rendering -->
+            <TreeGroupEditor
+                v-if="hasChildren(node) && node.isOpen"
+                :nodes="node.children"
+                :selected-node-id="selectedNodeId"
+                @node-selected="bubbleSelect"
+                @edit-node="bubbleEdit"
+                @add-child-node="bubbleAddChild"
+                @delete-node="bubbleDelete"
+            />
+        </li>
+    </ul>
+</template>
+
+<script>
+export default {
+    name: 'TreeGroupEditor',
+    props: {
+        nodes: { type: Array, required: true },
+        selectedNodeId: { type: [String, Number], default: null },
+    },
+    methods: {
+        hasChildren(node) {
+            return node.children && node.children.length > 0;
+        },
+        selectNode(node) {
+            this.$emit('node-selected', node);
+            if (this.hasChildren(node)) {
+                this.toggle(node);
+            }
+        },
+        toggle(node) {
+            this.$set(node, 'isOpen', !node.isOpen);
+        },
+        getNodeIcon(node) {
+            if (this.hasChildren(node)) {
+                return node.isOpen ? 'las la-folder-open' : 'las la-folder';
+            }
+            // Use _type from backend for more specific icons if available
+            return node._type === 'category' ? 'lar la-bookmark' : 'lar la-circle';
+        },
+        // --- Event Bubbling Methods ---
+        bubbleSelect(node) { this.$emit('node-selected', node); },
+        bubbleEdit(node) { this.$emit('edit-node', node); },
+        bubbleAddChild(node) { this.$emit('add-child-node', node); },
+        bubbleDelete(node) { this.$emit('delete-node', node); },
+    }
+};
+</script>
+
+<style scoped>
+.tree-group-list { list-style-type: none; padding-left: 1rem; }
+.tree-node { padding: 0.4rem 0.5rem; border-radius: 4px; cursor: pointer; display: flex; align-items: center; justify-content: space-between; transition: background-color 0.15s ease-in-out; }
+.tree-node:hover { background-color: #f0f3f5; }
+.tree-node.selected { background-color: #e0e9f5; font-weight: bold; }
+.node-content { display: flex; align-items: center; min-width: 0; flex-grow: 1; }
+.node-icon-wrapper { display: flex; align-items: center; margin-right: 5px; }
+.expand-icon { transition: transform 0.2s; font-size: 0.8rem; }
+.expand-icon.rotated { transform: rotate(90deg); }
+.expand-placeholder { width: 0.8rem; /* Match width of expand-icon */ }
+.node-icon { font-size: 1.1rem; color: #6c757d; margin-left: 2px; }
+.node-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.actions { visibility: hidden; opacity: 0; transition: opacity 0.15s ease-in-out; }
+.tree-node:hover .actions { visibility: visible; opacity: 1; }
+.actions .btn i { font-size: 1.2rem; }
+::v-deep .b-dropdown .btn { padding: 0 0.25rem; }
+::v-deep .b-dropdown .dropdown-toggle::after { display: none; }
+.dropdown-item { display: flex; align-items: center; font-size: 0.9rem; }
+.dropdown-item i { font-size: 1.1rem; }
+</style>
+```
+
+### **Part 2: Documentation on Usage and Event Handling**
+
+This documentation explains how a parent Vue page should use the `SidebarTreeTable` component, handle its events, and manage the CRUD modals for the sidebar tree.
+
+## **Documentation: Implementing the SidebarTreeTable Component**
+
+The `SidebarTreeTable` component is a high-level "smart" component that orchestrates a master-detail view. The parent page is responsible for providing the data-fetching logic and handling the CRUD events emitted by the component.
+
+### **Use Case Overview**
+
+-   **Sidebar (`TreeGroupEditor`):** Displays a hierarchical tree of "Categories". This data is fetched from a dedicated options endpoint (e.g., `/api/category/get-option-tree`). Users can select, add, edit, and delete categories.
+-   **Main Content (`MejikDatatable`):** Displays a paginated, sortable, and filterable table of "Articles". The data shown is filtered based on the category selected in the sidebar. This data comes from the main datatable endpoint (e.g., `/api/article/index`).
+
+### **Parent Page Setup**
+
+Your parent Vue component (e.g., `ArticleManager.vue`) will look like this:
+
+```html
+<!-- ArticleManager.vue -->
+<template>
+  <div>
+    <SidebarTreeTable
+      sidebar-title="Article Categories"
+      content-title="Articles in Category:"
+      :columns="articleColumns"
+      :nodes-url="'/api/category/get-option-tree'"
+      :loader="loadArticles"
+      :rows="articles"
+      :total-rows="totalArticles"
+      :is-loading="isLoadingArticles"
+      @add-node="openCategoryModal"
+      @edit-node="openCategoryModal"
+      @delete-node="deleteCategory"
+      @node-selected="logSelectedCategory"
+    />
+
+    <!-- MODAL for Adding/Editing Categories -->
+    <b-modal id="category-modal" :title="modalTitle" @ok="saveCategory">
+      <!-- Your form for category details -->
+      <form ref="categoryForm">
+        <input v-model="currentCategory.name" class="form-control" />
+        <!-- Hidden input for parentId -->
+        <input type="hidden" v-model="currentCategory.parentId" />
+      </form>
+    </b-modal>
+  </div>
+</template>
+```
+
+### **Event Handling in the Parent Component**
+
+The parent's `<script>` section is where you implement the logic to respond to events from `SidebarTreeTable`.
+
+#### **1. Data Loading (`loader` prop)**
+
+The most important prop is `loader`. You must provide a function that knows how to fetch the datatable's data. `SidebarTreeTable` will call this function whenever the table needs to be refreshed (e.g., on page change, sort, or category selection).
+
+```javascript
+// In ArticleManager.vue <script>
+export default {
+    data() {
+        return {
+            articleColumns: [ /* ... column definitions for articles ... */ ],
+            articles: [],
+            totalArticles: 0,
+            isLoadingArticles: false,
+
+            // For the category modal
+            currentCategory: {},
+            modalTitle: '',
+        };
+    },
+    methods: {
+        async loadArticles(params) {
+            this.isLoadingArticles = true;
+            try {
+                // The 'params' object contains { pagination, sort, filters, etc. }
+                // The categoryId is automatically added to params.filters by SidebarTreeTable
+                const response = await axios.post('/api/article/index', params);
+                this.articles = response.data.data;
+                this.totalArticles = response.data.total;
+            } catch (error) {
+                console.error("Failed to load articles:", error);
+            } finally {
+                this.isLoadingArticles = false;
+            }
+        },
+        // ... other methods
+    }
+}
+```
+
+#### **2. Handling Tree CRUD Events**
+
+`SidebarTreeTable` bubbles up events from the `TreeGroupEditor`. You listen for these events to trigger your modals and API calls.
+
+| Event            | Payload                      | Action to Take in Parent Component                                                                             |
+|:-----------------|:-----------------------------|:---------------------------------------------------------------------------------------------------------------|
+| `@add-node`      | `{ parentId, parentNode }`   | Open a modal for creating a new category. Pre-fill the parent ID in your form.                                 |
+| `@edit-node`     | `node` (the category object) | Open the same modal, but pre-fill it with the data from the selected `node`.                                   |
+| `@delete-node`   | `node` (the category object) | Make a `DELETE` request to your category API endpoint. On success, refresh the tree.                           |
+| `@node-selected` | `node` (the category object) | (Optional) You can perform actions when a node is selected. The component already handles reloading the table. |
+
+**Example Implementation:**
+
+```javascript
+// In ArticleManager.vue methods
+methods: {
+    // ... loadArticles method from above ...
+
+    openCategoryModal(payload) {
+        if (payload.parentId !== undefined) { // This is an "add" event
+            this.modalTitle = payload.parentNode ? `Add Child to "${payload.parentNode.name}"` : 'Add Root Category';
+            this.currentCategory = { parentId: payload.parentId, name: '' };
+        } else { // This is an "edit" event
+            this.modalTitle = `Edit "${payload.name}"`;
+            this.currentCategory = { ...payload }; // Copy the node data to the form model
+        }
+        this.$bvModal.show('category-modal');
+    },
+
+    async saveCategory() {
+        try {
+            if (this.currentCategory.id) { // Editing existing category
+                await axios.put(`/api/category/${this.currentCategory.id}`, this.currentCategory);
+            } else { // Creating new category
+                await axios.post('/api/category', this.currentCategory);
+            }
+            // After saving, refresh the tree by calling a method on the child component
+            // Note: This requires adding a `ref` to the SidebarTreeTable component
+            this.$refs.sidebarTree.fetchTree();
+        } catch (error) {
+            console.error("Failed to save category:", error);
+            // Show an error toast
+        }
+    },
+
+    async deleteCategory(node) {
+        try {
+            await axios.delete(`/api/category/${node.id}`);
+            // Refresh the tree to show the change
+            this.$refs.sidebarTree.fetchTree();
+        } catch (error) {
+            console.error("Failed to delete category:", error);
+        }
+    },
+
+    logSelectedCategory(node) {
+        console.log('User selected category:', node.name);
+    }
+}
+```
+*To make `this.$refs.sidebarTree.fetchTree()` work, add `ref="sidebarTree"` to your `<SidebarTreeTable>` component in the template.*
+
+## **Dokumentasi (Bahasa Indonesia)**
+
+### **Dokumentasi: Implementasi Komponen SidebarTreeTable**
+
+Komponen `SidebarTreeTable` adalah komponen "pintar" tingkat tinggi yang mengatur tampilan *master-detail*. Halaman induk bertanggung jawab untuk menyediakan logika pengambilan data dan menangani *event* CRUD yang di-emit oleh komponen.
+
+### **Gambaran Studi Kasus**
+
+-   **Sidebar (`TreeGroupEditor`):** Menampilkan pohon hierarki "Kategori". Data ini diambil dari *endpoint* opsi khusus (misal, `/api/category/get-option-tree`). Pengguna dapat memilih, menambah, mengedit, dan menghapus kategori.
+-   **Konten Utama (`MejikDatatable`):** Menampilkan tabel "Artikel" yang terpaginasi, dapat diurutkan, dan difilter. Data yang ditampilkan difilter berdasarkan kategori yang dipilih di sidebar. Data ini berasal dari *endpoint* datatable utama (misal, `/api/article/index`).
+
+### **Pengaturan Halaman Induk**
+
+Komponen Vue induk Anda (misalnya, `ArticleManager.vue`) akan terlihat seperti ini:
+
+```html
+<!-- ArticleManager.vue -->
+<template>
+    <div>
+        <SidebarTreeTable
+            sidebar-title="Kategori Artikel"
+            content-title="Artikel dalam Kategori:"
+        :columns="articleColumns"
+        :nodes-url="'/api/category/get-option-tree'"
+        :loader="loadArticles"
+        :rows="articles"
+        :total-rows="totalArticles"
+        :is-loading="isLoadingArticles"
+        @add-node="openCategoryModal"
+        @edit-node="openCategoryModal"
+        @delete-node="deleteCategory"
+        />
+
+        <!-- MODAL untuk Tambah/Edit Kategori -->
+        <b-modal id="category-modal" :title="modalTitle" @ok="saveCategory">
+        <form ref="categoryForm">
+            <input v-model="currentCategory.name" class="form-control" />
+            <input type="hidden" v-model="currentCategory.parentId" />
+        </form>
+    </b-modal>
+</div>
+</template>
+```
+
+### **Penanganan Event di Komponen Induk**
+
+Bagian `<script>` dari komponen induk adalah tempat Anda mengimplementasikan logika untuk merespons *event* dari `SidebarTreeTable`.
+
+#### **1. Pemuatan Data (prop `loader`)**
+
+Prop terpenting adalah `loader`. Anda harus menyediakan sebuah fungsi yang tahu cara mengambil data datatable. `SidebarTreeTable` akan memanggil fungsi ini setiap kali tabel perlu diperbarui (misalnya, saat ganti halaman, mengurutkan, atau memilih kategori).
+
+```javascript
+// Di dalam <script> ArticleManager.vue
+export default {
+    data() {
+        return {
+            articleColumns: [ /* ... definisi kolom untuk artikel ... */ ],
+            articles: [],
+            totalArticles: 0,
+            isLoadingArticles: false,
+            currentCategory: {},
+            modalTitle: '',
+        };
+    },
+    methods: {
+        async loadArticles(params) {
+            this.isLoadingArticles = true;
+            try {
+                // Objek 'params' berisi { pagination, sort, filters, dll. }
+                // filter categoryId secara otomatis ditambahkan ke params.filters oleh SidebarTreeTable
+                const response = await axios.post('/api/article/index', params);
+                this.articles = response.data.data;
+                this.totalArticles = response.data.total;
+            } catch (error) { console.error("Gagal memuat artikel:", error); }
+            finally { this.isLoadingArticles = false; }
+        },
+        // ... metode lainnya
+    }
+}
+```
+
+#### **2. Menangani Event CRUD Pohon Data**
+
+`SidebarTreeTable` meneruskan *event* dari `TreeGroupEditor`. Anda mendengarkan *event-event* ini untuk memicu modal dan panggilan API Anda.
+
+| Event          | Payload                    | Aksi yang Dilakukan di Komponen Induk                                                       |
+|:---------------|:---------------------------|:--------------------------------------------------------------------------------------------|
+| `@add-node`    | `{ parentId, parentNode }` | Buka modal untuk membuat kategori baru. Isi `parentId` di form Anda secara otomatis.        |
+| `@edit-node`   | `node` (objek kategori)    | Buka modal yang sama, tetapi isi dengan data dari `node` yang dipilih.                      |
+| `@delete-node` | `node` (objek kategori)    | Lakukan request `DELETE` ke endpoint API kategori Anda. Jika berhasil, perbarui pohon data. |
+
+**Contoh Implementasi:**
+
+```javascript
+// Di dalam methods ArticleManager.vue
+methods: {
+    // ... metode loadArticles dari atas ...
+
+    openCategoryModal(payload) {
+        if (payload.parentId !== undefined) { // Ini adalah event "tambah"
+            this.modalTitle = payload.parentNode ? `Tambah Anak di "${payload.parentNode.name}"` : 'Tambah Kategori Akar';
+            this.currentCategory = { parentId: payload.parentId, name: '' };
+        } else { // Ini adalah event "edit"
+            this.modalTitle = `Edit "${payload.name}"`;
+            this.currentCategory = { ...payload };
+        }
+        this.$bvModal.show('category-modal');
+    },
+
+    async saveCategory() {
+        try {
+            if (this.currentCategory.id) { // Edit
+                await axios.put(`/api/category/${this.currentCategory.id}`, this.currentCategory);
+            } else { // Buat baru
+                await axios.post('/api/category', this.currentCategory);
+            }
+            // Setelah menyimpan, perbarui pohon dengan memanggil metode di komponen anak
+            // Catatan: Ini memerlukan penambahan `ref` pada komponen SidebarTreeTable
+            this.$refs.sidebarTree.fetchTree();
+        } catch (error) { console.error("Gagal menyimpan kategori:", error); }
+    },
+
+    async deleteCategory(node) {
+        try {
+            await axios.delete(`/api/category/${node.id}`);
+            this.$refs.sidebarTree.fetchTree();
+        } catch (error) { console.error("Gagal menghapus kategori:", error); }
+    },
+}
+```
+*Agar `this.$refs.sidebarTree.fetchTree()` berfungsi, tambahkan `ref="sidebarTree"` pada komponen `<SidebarTreeTable>` di dalam template Anda.*

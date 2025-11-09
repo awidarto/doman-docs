@@ -1,0 +1,320 @@
+---
+title: Calendar & Resource Timeline View
+---
+
+## Component Documentation (English)
+
+### 1. Architecture Overview
+
+This documentation covers two Vue 2 components, `CalendarView` and `ResourceTimelineView`, designed to work with a **"Parent Controller"** architecture that uses **on-demand data loading**.
+
+This strategy is highly performant and scalable, as it only fetches the data currently needed for the user's view.
+
+-   **Parent Component (`ResourceCalendarView` or a custom page):**
+    -   Holds all application state, including `currentDate`, `isLoading`, and the current resource page number.
+    -   Is responsible for making API calls (via Axios or Inertia.js) to the backend.
+    -   Listens for navigation events (`@navigate-prev`, `@navigate-next`) from the child components.
+    -   When navigation occurs, it updates `currentDate`, which triggers a **new API call** to fetch data for the new time range.
+    -   Passes the newly fetched data down to the children via props.
+-   **Child Components (`CalendarView`, `ResourceTimelineView`):**
+    -   Remain simple, "dumb" presentational components.
+    -   They do **not** perform any data fetching.
+    -   They receive data via props and re-render whenever that data changes.
+    -   They emit events for user interactions, signaling to the parent that a navigation change is requested.
+
+### 2. Backend API Requirements
+
+Your Laravel backend must support the following endpoints to enable this on-demand loading.
+
+#### For `CalendarView`
+
+-   **Endpoint:** e.g., `/api/events`
+-   **Method:** `GET`
+-   **Query Parameters:**
+    -   `start` (string, `YYYY-MM-DD`): The start of the date range to fetch.
+    -   `end` (string, `YYYY-MM-DD`): The end of the date range to fetch.
+-   **Logic:** The API should return all events that **intersect** with the given date range. The correct query is `WHERE start_datetime < [end_param] AND end_datetime > [start_param]`.
+-   **Response:** A standard Laravel API Resource collection of Event Objects.
+
+#### For `ResourceTimelineView`
+
+-   **Endpoint:** e.g., `/api/paginated-resources`
+-   **Method:** `GET`
+-   **Query Parameters:**
+    -   `start` (string, `YYYY-MM-DD`): The start date for fetching events.
+    -   `end` (string, `YYYY-MM-DD`): The end date for fetching events.
+    -   `page` (number): The desired page number for the resources list (e.g., `1`, `2`).
+-   **Logic:**
+    1.  Paginate the resources (e.g., `Resource::paginate(15)`).
+    2.  Get the IDs of the resources on the current page.
+    3.  Fetch events **only for those resource IDs** that fall within the `start` and `end` date range.
+-   **Response:** A custom JSON object containing the paginated resources and their corresponding events.
+    ```json
+    {
+      "resources": {
+        "current_page": 1,
+        "data": [ /* ... array of resource objects ... */ ],
+        "last_page": 10
+        // ... other pagination meta
+      },
+      "events": {
+        "data": [ /* ... array of event objects for the resources above ... */ ]
+      }
+    }
+    ```
+
+### 3. Data Structures
+
+#### Event Object
+```javascript
+{
+  "id": "string | number",
+  "title": "string",
+  "start": "string (ISO 8601 format)",
+  "end": "string (ISO 8601 format)",
+  "allDay": "boolean",
+  "resourceId": "string | number | null"
+}
+```
+
+#### Resource Object
+```javascript
+{
+  "id": "string | number",
+  "title": "string"
+}
+```
+
+### 4. Component Reference
+
+#### `CalendarView.vue`
+A simple component that renders a month grid. It receives all its data as props.
+
+-   **Props:** `monthData` (Array), `monthName` (String), `year` (Number), `dayLabels` (Array, optional)
+-   **Emits:** `@navigate-prev`, `@navigate-next`, `@navigate-today`, `@event-click`
+
+#### `ResourceTimelineView.vue`
+A simple component that renders a timeline for a single day. It receives all its data as props.
+
+-   **Props:** `events` (Array), `resources` (Array), `currentDate` (Date), `rowHeight` (Number, optional)
+-   **Emits:** `@navigate-prev`, `@navigate-next`, `@navigate-today`, `@event-click`
+
+### 5. Parent Controller Implementation Example
+
+This example demonstrates the full parent component (like `ResourceCalendarView`) that manages state and orchestrates the on-demand data fetching.
+
+```vue
+<!-- ResourceCalendarView.vue -->
+<template>
+  <div>
+    <!-- View Switcher -->
+    <div class="btn-group mb-4">
+      <button class="btn" :class="activeView === 'calendar' ? 'btn-primary' : 'btn-outline-primary'" @click="activeView = 'calendar'">
+        Calendar View
+      </button>
+      <button class="btn" :class="activeView === 'timeline' ? 'btn-primary' : 'btn-outline-primary'" @click="activeView = 'timeline'">
+        Resource Timeline View
+      </button>
+    </div>
+
+    <!-- Loading Indicator -->
+    <div v-if="isLoading" class="text-center my-5">
+      <div class="spinner-border" role="status"></div>
+    </div>
+
+    <!-- Main Content -->
+    <div v-else>
+      <calendar-view v-if="activeView === 'calendar'"
+        :month-data="calendarMonthData"
+        :month-name="currentMonthName"
+        :year="currentYear"
+        @navigate-prev="handlePrevMonth"
+        @navigate-next="handleNextMonth"
+        @navigate-today="handleGoToToday"
+        @event-click="(event) => $emit('event-click', event)"
+      />
+
+      <div v-if="activeView === 'timeline'">
+        <resource-timeline-view
+          :events="timelineVisibleEvents"
+          :resources="resources"
+          :current-date="currentDate"
+          @navigate-prev="handlePrevDay"
+          @navigate-next="handleNextDay"
+          @navigate-today="handleGoToToday"
+          @event-click="(event) => $emit('event-click', event)"
+        />
+        <nav v-if="resourcePagination.last_page > 1" class="mt-4">
+          <ul class="pagination justify-content-center">
+            <li class="page-item" :class="{ disabled: resourcePagination.current_page <= 1 }">
+              <a class="page-link" href="#" @click.prevent="changeResourcePage(resourcePagination.current_page - 1)">Previous</a>
+            </li>
+            <li class="page-item" :class="{ disabled: resourcePagination.current_page >= resourcePagination.last_page }">
+              <a class="page-link" href="#" @click.prevent="changeResourcePage(resourcePagination.current_page + 1)">Next</a>
+            </li>
+          </ul>
+        </nav>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script>
+import axios from 'axios';
+import CalendarView from './components/CalendarView.vue';
+import ResourceTimelineView from './components/ResourceTimelineView.vue';
+
+function toYmd(date) { return date.toISOString().split('T')[0]; }
+
+export default {
+  name: 'ResourceCalendarView',
+  // Props for API endpoints would be defined here
+  data() {
+    return {
+      activeView: 'calendar',
+      currentDate: new Date(),
+      allEvents: [],
+      resources: [],
+      isLoading: true,
+      resourcePage: 1,
+      resourcePagination: {},
+    };
+  },
+  watch: {
+    currentDate: 'fetchDataForView',
+    activeView: 'fetchDataForView'
+  },
+  mounted() {
+    this.fetchDataForView();
+  },
+  computed: {
+    currentYear() { return this.currentDate.getFullYear(); },
+    currentMonth() { return this.currentDate.getMonth(); },
+    currentMonthName() { return this.currentDate.toLocaleString('default', { month: 'long' }); },
+    timelineVisibleEvents() { return this.allEvents; },
+    calendarMonthData() {
+      // Logic to build the grid of days and assign events to each day
+      // This part processes the `allEvents` array fetched from the API
+    },
+  },
+  methods: {
+    fetchDataForView() {
+      if (this.activeView === 'calendar') this.fetchEventsForCalendar();
+      else if (this.activeView === 'timeline') this.fetchPaginatedResourcesAndEvents();
+    },
+    async fetchEventsForCalendar() { /* ... API call logic ... */ },
+    async fetchPaginatedResourcesAndEvents() { /* ... API call logic ... */ },
+    handlePrevMonth() { this.currentDate = new Date(this.currentYear, this.currentMonth - 1, 1); },
+    handleNextMonth() { this.currentDate = new Date(this.currentYear, this.currentMonth + 1, 1); },
+    handlePrevDay() { const d = new Date(this.currentDate); d.setDate(d.getDate() - 1); this.currentDate = d; },
+    handleNextDay() { const d = new Date(this.currentDate); d.setDate(d.getDate() + 1); this.currentDate = d; },
+    handleGoToToday() { this.currentDate = new Date(); },
+    changeResourcePage(page) {
+      if (page >= 1 && page <= this.resourcePagination.last_page) {
+        this.resourcePage = page;
+        this.fetchPaginatedResourcesAndEvents();
+      }
+    },
+  }
+};
+</script>
+```
+
+---
+
+## Dokumentasi Komponen (Bahasa Indonesia)
+
+### 1. Gambaran Umum Arsitektur
+
+Dokumentasi ini mencakup dua komponen Vue 2, `CalendarView` dan `ResourceTimelineView`, yang dirancang untuk bekerja dengan arsitektur **"Parent Controller"** yang menggunakan metode **pemuatan data sesuai permintaan (on-demand)**.
+
+Strategi ini sangat performan dan skalabel, karena hanya mengambil data yang sedang dibutuhkan untuk tampilan pengguna.
+
+-   **Komponen Induk (`ResourceCalendarView` atau halaman kustom):**
+    -   Menyimpan semua state aplikasi, termasuk `currentDate`, `isLoading`, dan nomor halaman resource.
+    -   Bertanggung jawab untuk melakukan panggilan API (via Axios atau Inertia.js) ke backend.
+    -   Mendengarkan event navigasi (`@navigate-prev`, `@navigate-next`) dari komponen anak.
+    -   Ketika navigasi terjadi, ia memperbarui `currentDate`, yang kemudian memicu **panggilan API baru** untuk mengambil data pada rentang waktu yang baru.
+    -   Mengoper data yang baru diambil ke komponen anak melalui props.
+-   **Komponen Anak (`CalendarView`, `ResourceTimelineView`):**
+    -   Tetap menjadi komponen presentasi yang "dumb" (pasif).
+    -   Mereka **tidak** melakukan pengambilan data apa pun.
+    -   Mereka menerima data melalui props dan akan me-render ulang setiap kali data tersebut berubah.
+    -   Mereka memancarkan event untuk interaksi pengguna, memberikan sinyal ke induk bahwa ada permintaan perubahan navigasi.
+
+### 2. Kebutuhan API Backend
+
+Backend Laravel Anda harus mendukung endpoint berikut untuk memungkinkan pemuatan data on-demand.
+
+#### Untuk `CalendarView`
+
+-   **Endpoint:** misal, `/api/events`
+-   **Metode:** `GET`
+-   **Parameter Query:** `start` (string, `YYYY-MM-DD`), `end` (string, `YYYY-MM-DD`).
+-   **Logika:** API harus mengembalikan semua event yang **bersinggungan** dengan rentang tanggal yang diberikan.
+-   **Respons:** Koleksi standar Laravel API Resource dari Objek Event.
+
+#### Untuk `ResourceTimelineView`
+
+-   **Endpoint:** misal, `/api/paginated-resources`
+-   **Metode:** `GET`
+-   **Parameter Query:** `start` (string, `YYYY-MM-DD`), `end` (string, `YYYY-MM-DD`), `page` (number).
+-   **Logika:** Lakukan paginasi pada resource, lalu ambil event hanya untuk resource di halaman tersebut dalam rentang waktu yang diberikan.
+-   **Respons:** Objek JSON kustom berisi resource terpaginasi dan event terkaitnya.
+
+### 3. Struktur Data
+
+#### Objek Event
+```javascript
+{
+  "id": "string | number",
+  "title": "string",
+  "start": "string (format ISO 8601)",
+  "end": "string (format ISO 8601)",
+  "allDay": "boolean",
+  "resourceId": "string | number | null"
+}
+```
+
+#### Objek Resource
+```javascript
+{
+  "id": "string | number",
+  "title": "string"
+}
+```
+
+### 4. Referensi Komponen
+
+#### `CalendarView.vue`
+Komponen sederhana yang me-render grid bulan. Menerima semua data sebagai props.
+
+-   **Props:** `monthData` (Array), `monthName` (String), `year` (Number), `dayLabels` (Array, opsional)
+-   **Emits:** `@navigate-prev`, `@navigate-next`, `@navigate-today`, `@event-click`
+
+#### `ResourceTimelineView.vue`
+Komponen sederhana yang me-render timeline untuk satu hari. Menerima semua data sebagai props.
+
+-   **Props:** `events` (Array), `resources` (Array), `currentDate` (Date), `rowHeight` (Number, opsional)
+-   **Emits:** `@navigate-prev`, `@navigate-next`, `@navigate-today`, `@event-click`
+
+### 5. Contoh Implementasi Parent Controller
+
+Contoh ini mendemonstrasikan komponen induk lengkap yang mengelola state dan mengatur pengambilan data on-demand. Kode di dalamnya sama dengan versi Bahasa Inggris, karena kode bersifat universal. Perhatikan penggunaan `toLocaleString('id-ID', ...)` untuk mendapatkan nama bulan dalam Bahasa Indonesia.
+
+```vue
+<script>
+// ...
+export default {
+  // ...
+  computed: {
+    // ...
+    currentMonthName() {
+      return this.currentDate.toLocaleString('id-ID', { month: 'long' });
+    },
+    // ...
+  },
+  // ...
+};
+</script>
+```

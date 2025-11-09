@@ -1,0 +1,253 @@
+---
+title: Pdf Stamping, Watermarking & Thumbnailing
+---
+
+## English Documentation
+
+### **PDF Processing & Automation Documentation**
+
+#### **1. Overview**
+
+This system provides a robust, automated workflow for processing PDF files after they are uploaded. It is designed to be sequential, ensuring that operations like stamping and thumbnail generation happen in the correct order.
+
+The core architecture follows this flow:
+
+1.  **Controller Hook (`afterSave`/`afterUpdate`)**: After a document is saved, a hook in the controller is triggered.
+2.  **Job Pipeline (`Bus::chain`)**: The hook dispatches a pipeline of jobs. This ensures that each job completes successfully before the next one starts.
+3.  **Individual Jobs (`StampDocumentJob`, `GenerateThumbnailJob`)**: Each job is responsible for a single task. It calls a general-purpose Artisan command to perform the actual work.
+4.  **Orchestrator Commands (`documents:*`)**: These commands find the correct documents and prepare the necessary parameters.
+5.  **Worker Commands (`pdf:*`)**: These low-level commands perform the heavy lifting of file manipulation (stamping, creating thumbnails).
+
+This documentation covers the setup, components, and usage of the system.
+
+#### **2. Prerequisites**
+
+Before using the system, ensure the following dependencies are installed on your server:
+
+1.  **pdftk-java**: Required for stamping/watermarking PDFs.
+*   `sudo apt-get install pdftk-java` or `brew install pdftk-java`
+2.  **Poppler-utils**: Required for generating thumbnails (`pdftoppm`) and reading PDF metadata (`pdfinfo`).
+*   `sudo apt-get install poppler-utils` or `brew install poppler`
+3.  **Ghostscript**: Often a dependency for the tools above.
+*   `sudo apt-get install ghostscript`
+4.  **Font File**: A TrueType Font (TTF) is required for watermarking. The system is configured to use Calibri.
+*   Place `Calibri.ttf` inside the `/public/fonts/Calibri/` directory.
+
+#### **3. Core Components**
+
+##### **3.1. Worker Commands (Low-Level)**
+
+These commands perform a single, specific task on a given input file.
+
+*   `php artisan pdf:stamp`
+*   **Description**: Applies a QR code stamp and/or a multi-line watermark onto a PDF file.
+*   **Key Options**: `--in`, `--out`, `--disk`, `--stamp-qr-string`, `--watermark-text`, `--watermark-text-2`, `--watermark-font-size`, `--watermark-font-size-2`, `--watermark-color`, `--watermark-color-2`, `--watermark-rotation`, etc.
+
+*   `php artisan pdf:thumbnail`
+*   **Description**: Creates a JPG thumbnail from the first page of a PDF file.
+*   **Key Options**: `--in`, `--out`, `--disk`, `--width`.
+
+##### **3.2. Orchestrator Commands (High-Level)**
+
+These commands are designed for batch processing and are general-purpose.
+
+*   `php artisan documents:generate-stamp`
+*   **Description**: Finds model instances (e.g., `Doc`) that need stamping and calls `pdf:stamp` for each one.
+*   **Key Options**:
+*   `--id`: Process a single record by its ID.
+*   `--force`: Reprocess even if the output file already exists.
+*   `--limit`: Limit number of document to process in one run.
+*   `--model`: The Eloquent model class to query (Default: `App\Models\Dms\Doc`).
+*   `--urlField`: The model attribute containing the source file URL (Default: `FileUrl`).
+*   `--urlSaveField`: The model attribute to save the new stamped file URL (Default: `StampedFileUrl`).
+*   `--suffix`: The suffix to add to the new filename (Default: `_stamped`).
+*   All watermark and QR code options from `pdf:stamp` are passed through.
+
+*   `php artisan documents:generate-thumbnails`
+*   **Description**: Finds model instances that need a thumbnail and calls `pdf:thumbnail` for each one.
+*   **Key Options**:
+*   `--id`, `--force`, `--model`, `--limit`.
+*   `--urlField`: The source URL to generate the thumbnail from (e.g., `FileUrl` or `StampedFileUrl`).
+*   `--urlSaveField`: The attribute to save the new thumbnail URL (Default: `ThumbnailUrl`).
+
+##### **3.3. Job Pipeline**
+
+The pipeline ensures sequential execution. It is defined in the controller and uses individual, focused jobs.
+
+*   **`StampDocumentJob`**: Takes a model instance, calls `documents:generate-stamp` to apply the watermark/stamp.
+*   **`GenerateThumbnailJob`**: Takes the same model instance, calls `documents:generate-thumbnails`. It is configured to use the newly created stamped URL as its source.
+
+#### **4. Usage Scenarios**
+
+##### **4.1. Automatic Processing on Upload (Synchronous Pipeline)**
+
+This is the primary use case. It processes the file immediately after it's saved.
+
+1.  **Configuration**: Ensure your `.env` file is set for synchronous execution:
+```env
+QUEUE_CONNECTION=sync
+    ```
+2.  **Controller Implementation**: In your CRUD controller, use the `afterSave` and `afterUpdate` hooks to dispatch the job pipeline using `Bus::chain()`.
+
+```php
+use Illuminate\Support\Facades\Bus;
+use App\Jobs\StampDocumentJob;
+use App\Jobs\GenerateThumbnailJob;
+
+public function afterSave(Doc $document)
+{
+    Bus::chain([
+        new StampDocumentJob($document),
+        new GenerateThumbnailJob($document),
+    ])->dispatch();
+}
+    ```
+
+##### **4.2. Manual Batch Processing (Via Command Line)**
+
+You can run these processes manually for all documents or for a single document.
+
+*   **To stamp all unprocessed documents:**
+```bash
+php artisan documents:generate-stamp --watermark-text="CONFIDENTIAL"
+    ```
+
+*   **To regenerate a thumbnail for a single document from its stamped file:**
+```bash
+php artisan documents:generate-thumbnails --id=5f11895c7dfdb46efb0d3022 --force --urlField=StampedFileUrl
+    ```
+
+*   **Example for a different model (`Contract.php`):**
+```bash
+php artisan documents:generate-stamp \
+  --model="App\Models\Contract" \
+  --urlField="contract_file_url" \
+  --urlSaveField="stamped_contract_url" \
+  --watermark-text="DRAFT"
+    ```
+
+---
+
+## Dokumentasi Bahasa Indonesia
+
+### **Dokumentasi Otomatisasi dan Pemrosesan PDF**
+
+#### **1. Gambaran Umum**
+
+Sistem ini menyediakan alur kerja (workflow) yang kokoh dan otomatis untuk memproses file PDF setelah diunggah. Sistem ini dirancang untuk berjalan secara sekuensial (berurutan), memastikan operasi seperti pemberian stempel dan pembuatan thumbnail terjadi dalam urutan yang benar.
+
+Arsitektur inti mengikuti alur berikut:
+
+1.  **Controller Hook (`afterSave`/`afterUpdate`)**: Setelah sebuah dokumen disimpan, sebuah "kait" di dalam controller akan terpicu.
+2.  **Job Pipeline (`Bus::chain`)**: Hook tersebut akan mengirimkan sebuah pipeline (rangkaian) job. Ini memastikan setiap job selesai dengan sukses sebelum job berikutnya dimulai.
+3.  **Job Individual (`StampDocumentJob`, `GenerateThumbnailJob`)**: Setiap job bertanggung jawab untuk satu tugas spesifik. Job ini akan memanggil perintah Artisan serbaguna untuk melakukan pekerjaan utamanya.
+4.  **Perintah Orkestrator (`documents:*`)**: Perintah ini bertugas mencari dokumen yang benar dan menyiapkan parameter yang diperlukan.
+5.  **Perintah Pekerja (`pdf:*`)**: Perintah tingkat rendah ini melakukan tugas berat manipulasi file (memberi stempel, membuat thumbnail).
+
+Dokumentasi ini mencakup pengaturan, komponen, dan cara penggunaan sistem.
+
+#### **2. Prasyarat**
+
+Sebelum menggunakan sistem, pastikan dependensi berikut telah terpasang di server Anda:
+
+1.  **pdftk-java**: Diperlukan untuk memberi stempel/watermark pada PDF.
+*   `sudo apt-get install pdftk-java` atau `brew install pdftk-java`
+2.  **Poppler-utils**: Diperlukan untuk membuat thumbnail (`pdftoppm`) dan membaca metadata PDF (`pdfinfo`).
+*   `sudo apt-get install poppler-utils` atau `brew install poppler`
+3.  **Ghostscript**: Seringkali menjadi dependensi untuk perangkat di atas.
+*   `sudo apt-get install ghostscript`
+4.  **File Font**: Font TrueType (TTF) diperlukan untuk watermark. Sistem ini dikonfigurasi untuk menggunakan Calibri.
+*   Letakkan file `Calibri.ttf` di dalam direktori `/public/fonts/Calibri/`.
+
+#### **3. Komponen Inti**
+
+##### **3.1. Perintah Pekerja (Tingkat Rendah)**
+
+Perintah ini melakukan satu tugas spesifik pada file input yang diberikan.
+
+*   `php artisan pdf:stamp`
+*   **Deskripsi**: Memberikan stempel QR code dan/atau watermark multi-baris pada file PDF.
+*   **Opsi Utama**: `--in`, `--out`, `--disk`, `--stamp-qr-string`, `--watermark-text`, `--watermark-text-2`, `--watermark-font-size`, `--watermark-font-size-2`, `--watermark-color`, `--watermark-color-2`, `--watermark-rotation`, dll.
+
+*   `php artisan pdf:thumbnail`
+*   **Deskripsi**: Membuat thumbnail JPG dari halaman pertama file PDF.
+*   **Opsi Utama**: `--in`, `--out`, `--disk`, `--width`.
+
+##### **3.2. Perintah Orkestrator (Tingkat Tinggi)**
+
+Perintah ini dirancang untuk pemrosesan batch dan bersifat serbaguna.
+
+*   `php artisan documents:generate-stamp`
+*   **Deskripsi**: Mencari instance model (misalnya `Doc`) yang perlu diberi stempel dan memanggil `pdf:stamp` untuk masing-masingnya.
+*   **Opsi Utama**:
+*   `--id`: Memproses satu data berdasarkan ID-nya.
+*   `--force`: Memproses ulang meskipun file output sudah ada.
+*   `--limit`: membatasi jumlah dokumen yang akan diproses dalam satu kali proses perintah.
+*   `--model`: Kelas model Eloquent yang akan diproses (Default: `App\Models\Dms\Doc`).
+*   `--urlField`: Atribut model yang berisi URL file sumber (Default: `FileUrl`).
+*   `--urlSaveField`: Atribut model untuk menyimpan URL file baru yang sudah distempel (Default: `StampedFileUrl`).
+*   `--suffix`: Akhiran yang ditambahkan pada nama file baru (Default: `_stamped`).
+*   Semua opsi watermark dan QR code dari `pdf:stamp` dapat digunakan.
+
+*   `php artisan documents:generate-thumbnails`
+*   **Deskripsi**: Mencari instance model yang memerlukan thumbnail dan memanggil `pdf:thumbnail` untuk masing-masingnya.
+*   **Opsi Utama**:
+*   `--id`, `--force`, `--model`.
+*   `--urlField`: URL sumber untuk membuat thumbnail (misalnya, `FileUrl` atau `StampedFileUrl`).
+*   `--urlSaveField`: Atribut untuk menyimpan URL thumbnail baru (Default: `ThumbnailUrl`).
+
+##### **3.3. Job Pipeline**
+
+Pipeline memastikan eksekusi berjalan secara berurutan. Ini didefinisikan di dalam controller dan menggunakan job yang terpisah dan fokus.
+
+*   **`StampDocumentJob`**: Menerima sebuah instance model, memanggil `documents:generate-stamp` untuk menerapkan watermark/stempel.
+*   **`GenerateThumbnailJob`**: Menerima instance model yang sama, memanggil `documents:generate-thumbnails`. Job ini dikonfigurasi untuk menggunakan URL file yang baru saja distempel sebagai sumbernya.
+
+#### **4. Skenario Penggunaan**
+
+##### **4.1. Proses Otomatis saat Unggah (Pipeline Sinkron)**
+
+Ini adalah skenario penggunaan utama. Proses ini akan berjalan segera setelah file disimpan.
+
+1.  **Konfigurasi**: Pastikan file `.env` Anda diatur untuk eksekusi sinkron:
+```env
+QUEUE_CONNECTION=sync
+    ```
+2.  **Implementasi Controller**: Di dalam controller CRUD Anda, gunakan hook `afterSave` dan `afterUpdate` untuk menjalankan job pipeline menggunakan `Bus::chain()`.
+
+```php
+use Illuminate\Support\Facades\Bus;
+use App\Jobs\StampDocumentJob;
+use App\Jobs\GenerateThumbnailJob;
+
+public function afterSave(Doc $document)
+{
+    Bus::chain([
+        new StampDocumentJob($document),
+        new GenerateThumbnailJob($document),
+    ])->dispatch();
+}
+    ```
+
+##### **4.2. Proses Batch Manual (Melalui Command Line)**
+
+Anda dapat menjalankan proses ini secara manual untuk semua dokumen atau untuk satu dokumen tertentu.
+
+*   **Untuk memberi stempel pada semua dokumen yang belum diproses:**
+```bash
+php artisan documents:generate-stamp --watermark-text="RAHASIA"
+    ```
+
+*   **Untuk membuat ulang thumbnail dari file yang sudah distempel untuk satu dokumen:**
+```bash
+php artisan documents:generate-thumbnails --id=5f11895c7dfdb46efb0d3022 --force --urlField=StampedFileUrl
+    ```
+
+*   **Contoh untuk model yang berbeda (`Contract.php`):**
+```bash
+php artisan documents:generate-stamp \
+  --model="App\Models\Contract" \
+  --urlField="contract_file_url" \
+  --urlSaveField="stamped_contract_url" \
+  --watermark-text="DRAFT"
+    ```

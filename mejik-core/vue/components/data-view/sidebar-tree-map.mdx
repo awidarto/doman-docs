@@ -1,0 +1,234 @@
+---
+title: Sidebar Tree Map
+---
+
+## Documentation: `SidebarTreeMap` Component (English)
+
+### 1. Overview
+
+`SidebarTreeMap` is a high-level layout component that combines a hierarchical tree-based sidebar with the powerful `MejikDataMap` controller. It is the ultimate tool for creating applications that require visual filtering of searchable and paginated geospatial data.
+
+This component operates on an "inversion of control" pattern. Its primary role is to **aggregate parameters** from all user interactions (tree selection, map movement, search, pagination) and pass them to a parent-provided `loader` function, which is responsible for the actual data fetching.
+
+### 2. Features
+
+-   **Geospatial Filtering:** The map view is dynamically updated based on the selected node in the sidebar tree.
+-   **Parent-Controlled Data Loading:** Provides maximum flexibility by letting the parent component handle the API calls via a `loader` function prop.
+-   **State Aggregation:** Combines filter state from the tree, viewport state (bounding box, zoom) from the map, and UI state (search, pagination) from `MejikDataMap` before calling the loader.
+-   **Full Pass-Through Functionality:** All unrecognized props (like `selectionMode`, `visibleLayers`) and events (like `@more-info-click`) are passed directly to `MejikDataMap`, allowing full customization of the map's features from the parent page.
+-   **CRUD Events:** Emits events for tree management, allowing the parent to handle create, edit, and delete logic.
+
+### 3. Props
+
+| Prop               | Type     | Required | Default        | Description                                                                                               |
+|:-------------------|:---------|:---------|:---------------|:----------------------------------------------------------------------------------------------------------|
+| `nodesUrl`         | String   | Yes      | -              | The API endpoint (POST) for fetching the tree structure data for the sidebar.                             |
+| `sidebarTitle`     | String   | No       | `'Layers'`     | The title displayed at the top of the sidebar.                                                            |
+| `treeServerSearch` | Bool     | No       | `false`        | If `true`, the search term is sent to `nodesUrl` for server-side searching.                               |
+| `contentTitle`     | String   | No       | `'Map for'`    | The prefix for the main content area's title (e.g., "Map for [Node Name]").                               |
+| `filterKey`        | String   | No       | `'categoryId'` | The **query parameter key** to use when filtering by the selected node's ID.                              |
+| `loader`           | Function | Yes      | -              | A function in the parent that fetches map data. It receives an object with all map and filter parameters. |
+| `geoJsonFeatures`  | Array    | No       | `[]`           | An array of GeoJSON features to display on the map, provided by the parent via the loader.                |
+| `totalRows`        | Number   | No       | `0`            | The total number of features available on the server, used for pagination.                                |
+| `isLoading`        | Boolean  | No       | `false`        | A boolean to show/hide the map's loading overlay. Passed from the parent.                                 |
+
+### 4. Pass-Through Props & Events
+
+This component acts as a transparent proxy to `MejikDataMap`. Any prop not listed above will be passed directly down. This means you can control all of `LeafletMap`'s features from here.
+
+**Examples of Pass-Through Props:**
+-   `:selection-mode="'multi'"`
+-   `:visible-layers="['live-position']"`
+-   `:selected-features.sync="mySelectionArray"`
+-   `:center="[newLat, newLng]"`
+
+Similarly, all events emitted by `MejikDataMap` and `LeafletMap` (e.g., `@feature-click`, `@more-info-click`) are automatically passed up to the parent.
+
+### 5. The `loader` Function Contract
+
+The parent component **must** provide a `loader` function. This function is called whenever the data needs to be refreshed. It receives one argument: a `params` object with all aggregated parameters:
+
+```javascript
+{
+  // From the map viewport
+  bbox: "swLng,swLat,neLng,neLat",
+  zoom: 13,
+
+  // From MejikDataMap UI
+  search: "searchTerm",
+  page: 1,
+  per_page: 100,
+
+  // From the sidebar tree
+  filters: {
+    categoryId: 123 // The key is determined by the `filterKey` prop
+  }
+}
+```
+
+### 6. Emitted Events (Originating from SidebarTreeMap)
+
+| Event               | Payload                    | Description                                                             |
+|:--------------------|:---------------------------|:------------------------------------------------------------------------|
+| `@node-selected`    | `(nodeObject)`             | Fired when a user selects a node in the sidebar tree.                   |
+| `@add-node`         | `{ parentId, parentNode }` | Fired to signal the parent to open a form for creating a new tree node. |
+| `@edit-node`        | `(nodeObject)`             | Fired when the user clicks the "edit" icon on a tree node.              |
+| `@delete-node`      | `(nodeObject)`             | Fired after confirmation when the user clicks the "delete" icon.        |
+| `@tree-fetch-error` | `(errorObject)`            | Fired if fetching the tree data from `nodesUrl` fails.                  |
+
+### 7. Usage Example
+
+```vue
+<!-- MyAdvancedGISPage.vue -->
+<template>
+  <div class="container-fluid mt-4">
+    <SidebarTreeMap
+      sidebar-title="Device Groups"
+      content-title="Live Map for:"
+      nodes-url="/api/device-groups/tree"
+      filter-key="groupId"
+
+      :loader="loadMapData"
+      :geo-json-features="features"
+      :total-rows="total"
+      :is-loading="isLoading"
+
+      <!-- Pass-through props for MejikDataMap/LeafletMap -->
+      :selection-mode="'multi'"
+      :selected-features.sync="selected"
+      :visible-layers="['live-position']"
+
+      @more-info-click="showDeviceDetails"
+      @edit-node="openGroupEditor"
+    />
+  </div>
+</template>
+
+<script>
+import axios from 'axios';
+import SidebarTreeMap from './components/SidebarTreeMap.vue';
+
+export default {
+  components: { SidebarTreeMap },
+  data() {
+    return {
+      features: [],
+      total: 0,
+      isLoading: false,
+      selected: [],
+    };
+  },
+  methods: {
+    // The required loader function
+    async loadMapData(params) {
+      this.isLoading = true;
+      try {
+        // The loader receives the combined params from all sources
+        const apiParams = {
+          bbox: params.bbox,
+          zoom: params.zoom,
+          search: params.search,
+          page: params.page,
+          per_page: params.per_page,
+          ...params.filters // Adds { groupId: ... } to the request
+        };
+
+        const response = await axios.get('/api/devices/live', { params: apiParams });
+        this.features = response.data.features || [];
+        this.total = response.data.meta.total || 0;
+      } catch (error) {
+        console.error("Failed to load map data:", error);
+      } finally {
+        this.isLoading = false;
+      }
+    },
+    showDeviceDetails(feature) {
+      console.log('Show details for device:', feature.properties.title);
+    },
+    openGroupEditor(node) {
+      console.log('Open modal to edit group:', node);
+    }
+  }
+}
+</script>
+```
+---
+---
+
+## Dokumentasi: Komponen `SidebarTreeMap` (Bahasa Indonesia)
+
+### 1. Gambaran Umum
+
+`SidebarTreeMap` adalah komponen tata letak tingkat tinggi yang menggabungkan sidebar berbasis pohon hierarkis dengan pengontrol `MejikDataMap` yang kuat. Ini adalah alat utama untuk membuat aplikasi yang memerlukan pemfilteran visual dari data geospasial yang dapat dicari dan dipaginasi.
+
+Komponen ini beroperasi dengan pola "inversion of control". Peran utamanya adalah untuk **menggabungkan parameter** dari semua interaksi pengguna (pemilihan pohon, pergerakan peta, pencarian, paginasi) dan meneruskannya ke fungsi `loader` yang disediakan oleh induk, yang bertanggung jawab untuk pengambilan data yang sebenarnya.
+
+### 2. Fitur
+
+-   **Filter Geospasial:** Tampilan peta diperbarui secara dinamis berdasarkan node yang dipilih di sidebar.
+-   **Pemuatan Data Dikontrol Induk:** Memberikan fleksibilitas maksimum dengan membiarkan komponen induk menangani panggilan API melalui prop fungsi `loader`.
+-   **Agregasi State:** Menggabungkan state filter dari pohon, state viewport (bounding box, zoom) dari peta, dan state UI (pencarian, paginasi) dari `MejikDataMap` sebelum memanggil loader.
+-   **Fungsionalitas Penerusan Penuh (Pass-Through):** Semua props (seperti `selectionMode`, `visibleLayers`) dan event (seperti `@more-info-click`) yang tidak dikenali diteruskan langsung ke `MejikDataMap`, memungkinkan kustomisasi penuh fitur peta dari halaman induk.
+-   **Event CRUD:** Memancarkan event untuk manajemen pohon, memungkinkan induk menangani logika buat, edit, dan hapus.
+
+### 3. Props
+
+| Prop               | Tipe     | Wajib | Default        | Deskripsi                                                                                                          |
+|:-------------------|:---------|:------|:---------------|:-------------------------------------------------------------------------------------------------------------------|
+| `nodesUrl`         | String   | Ya    | -              | Endpoint API (POST) untuk mengambil data struktur pohon untuk sidebar.                                             |
+| `sidebarTitle`     | String   | Tidak | `'Layers'`     | Judul yang ditampilkan di bagian atas sidebar.                                                                     |
+| `treeServerSearch` | Bool     | Tidak | `false`        | Jika `true`, istilah pencarian dikirim ke `nodesUrl` untuk pencarian di sisi server.                               |
+| `contentTitle`     | String   | Tidak | `'Map for'`    | Awalan untuk judul area konten utama (misalnya, "Peta untuk [Nama Node]").                                         |
+| `filterKey`        | String   | Tidak | `'categoryId'` | **Kunci parameter query** yang akan digunakan saat memfilter berdasarkan ID node yang dipilih.                     |
+| `loader`           | Function | Ya    | -              | Sebuah fungsi di induk yang mengambil data peta. Fungsi ini menerima objek dengan semua parameter peta dan filter. |
+| `geoJsonFeatures`  | Array    | Tidak | `[]`           | Array fitur GeoJSON untuk ditampilkan di peta, disediakan oleh induk melalui loader.                               |
+| `totalRows`        | Number   | Tidak | `0`            | Jumlah total fitur yang tersedia di server, digunakan untuk paginasi.                                              |
+| `isLoading`        | Boolean  | Tidak | `false`        | Boolean untuk menampilkan/menyembunyikan overlay loading peta. Diteruskan dari induk.                              |
+
+### 4. Props & Event Penerus (Pass-Through)
+
+Komponen ini bertindak sebagai perantara transparan ke `MejikDataMap`. Setiap prop yang tidak tercantum di atas akan diteruskan langsung ke bawah. Ini berarti Anda dapat mengontrol semua fitur `LeafletMap` dari sini.
+
+**Contoh Props Penerus:**
+-   `:selection-mode="'multi'"`
+-   `:visible-layers="['live-position']"`
+-   `:selected-features.sync="arraySeleksiSaya"`
+-   `:center="[latBaru, lngBaru]"`
+
+Demikian pula, semua event yang dipancarkan oleh `MejikDataMap` dan `LeafletMap` (misalnya, `@feature-click`, `@more-info-click`) secara otomatis diteruskan ke atas ke induk.
+
+### 5. Kontrak Fungsi `loader`
+
+Komponen induk **wajib** menyediakan fungsi `loader`. Fungsi ini dipanggil setiap kali data perlu diperbarui. Ia menerima satu argumen: objek `params` dengan semua parameter yang digabungkan:
+
+```javascript
+{
+  // Dari viewport peta
+  bbox: "swLng,swLat,neLng,neLat",
+  zoom: 13,
+
+  // Dari UI MejikDataMap
+  search: "istilahPencarian",
+  page: 1,
+  per_page: 100,
+
+  // Dari sidebar pohon
+  filters: {
+    categoryId: 123 // Kunci ditentukan oleh prop `filterKey`
+  }
+}
+```
+
+### 6. Event yang Di-emit (Berasal dari SidebarTreeMap)
+
+| Event               | Payload                    | Deskripsi                                                                       |
+|:--------------------|:---------------------------|:--------------------------------------------------------------------------------|
+| `@node-selected`    | `(nodeObject)`             | Dipicu saat pengguna memilih sebuah node di sidebar.                            |
+| `@add-node`         | `{ parentId, parentNode }` | Dipicu untuk memberi sinyal ke induk agar membuka form untuk membuat node baru. |
+| `@edit-node`        | `(nodeObject)`             | Dipicu saat pengguna mengklik ikon "edit" pada sebuah node.                     |
+| `@delete-node`      | `(nodeObject)`             | Dipicu setelah konfirmasi saat pengguna mengklik ikon "hapus".                  |
+| `@tree-fetch-error` | `(errorObject)`            | Dipicu jika pengambilan data pohon dari `nodesUrl` gagal.                       |
+
+### 7. Contoh Penggunaan
+
+(Kode untuk contoh penggunaan sama dengan versi Bahasa Inggris. Anda hanya perlu menerjemahkan teks UI dan komentar jika diperlukan untuk kejelasan.)

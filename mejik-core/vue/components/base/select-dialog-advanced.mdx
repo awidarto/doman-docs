@@ -1,0 +1,291 @@
+---
+title: Select Advanced Dialog
+---
+
+## English Documentation
+
+### 1. Vue Component: `SelectAdvancedDialog.vue`
+
+This is a highly configurable and advanced selection component. It presents as a simple text input but can open a feature-rich modal dialog for searching, browsing, and selecting items from a server-side data source. It supports both single and multiple selection modes, as well as tree-like data structures with lazy loading.
+
+#### **Key Features**
+
+*   **Modal Dialog:** Provides a large, user-friendly interface for selecting items, complete with search and pagination.
+*   **Single & Multi-Select:** Can be configured to allow selecting one or multiple items.
+*   **Read-only vs. Editable:**
+*   In `readonly` mode (default), it acts as a pure item selector. Clicking the input opens the modal.
+*   When `readonly` is `false`, it functions as a combo-box, allowing the user to either type a free-text value or select a structured item from the modal.
+*   **Server-Side Data:** Fetches options asynchronously from a specified API endpoint, making it suitable for large datasets.
+*   **Tree View & Lazy Loading:** Can display hierarchical data and efficiently load child nodes on demand.
+
+---
+
+#### **Props**
+
+| Prop Name       | Type                                  | Default    | Required | Description                                                                                                                                                                                       |
+|:----------------|:--------------------------------------|:-----------|:---------|:--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `value`         | `String`, `Array`, `Number`, `Object` | `null`     | No       | The `v-model` binding for the component's value. In `single` mode, it holds the ID of the selected item. In `multi` mode, it's an array of IDs. If not `readonly`, it holds the typed text value. |
+| `selectedItems` | `Array`                               | `[]`       | No       | A bindable array (using `.sync` modifier) that holds the full object(s) of the selected item(s). This is useful for accessing other properties of the selected data.                              |
+| `readonly`      | `Boolean`                             | `true`     | No       | If `true`, the input field cannot be typed into; clicking it opens the modal. If `false`, the user can type directly into the input, which updates the `value` prop.                              |
+| `mode`          | `String`                              | `'single'` | No       | The selection mode. Can be `'single'` or `'multi'`.                                                                                                                                               |
+| `url`           | `String`                              | -          | **Yes**  | The API endpoint URL to fetch data from. The component sends a POST request with `search`, `page`, and `limit` parameters.                                                                        |
+| `displayField`  | `String`                              | `'text'`   | No       | The field name from the `selectedItems` object to display in the input box when an item is selected.                                                                                              |
+| `lazyLoad`      | `Boolean`                             | `false`    | No       | Enables lazy loading for tree structures. When a user expands a node, a new API request is made to fetch its children.                                                                            |
+| `treeMode`      | `String`                              | `'simple'` | No       | Used with `lazyLoad`. Defines the payload for fetching children. `'simple'` sends `parentId`. `'compound'` sends `parentId` and `parentType`.                                                     |
+
+---
+
+#### **Events**
+
+| Event Name             | Payload             | Description                                                                                                                                          |
+|:-----------------------|:--------------------|:-----------------------------------------------------------------------------------------------------------------------------------------------------|
+| `input`                | `String` or `Array` | Standard `v-model` event. Emitted when a selection is confirmed in the modal or when text is typed in non-readonly mode.                             |
+| `update:selectedItems` | `Array`             | Standard `.sync` event. Emitted when a selection is confirmed, updating the parent component's `selectedItems` array with the full selected objects. |
+
+---
+
+#### **Usage Example**
+
+```vue
+<template>
+  <div>
+    <!-- Example 1: Read-only, single selection for a User -->
+    <SelectAdvancedDialog
+      v-model="selectedUserId"
+      :selected-items.sync="selectedUserObjects"
+      url="/api/users/get-options"
+      display-field="name"
+      mode="single"
+      :readonly="true"
+    />
+
+    <!-- Example 2: Editable, multi-selection for Chart of Accounts -->
+    <SelectAdvancedDialog
+      v-model="accountNumbersOrText"
+      :selected-items.sync="selectedAccountObjects"
+      url="/api/wcp/fat2/chart-of-account/get-option-tree"
+      display-field="name"
+      mode="multi"
+      :readonly="false"
+      lazy-load
+    />
+  </div>
+</template>
+
+<script>
+export default {
+  data() {
+    return {
+      // For Example 1
+      selectedUserId: null,
+      selectedUserObjects: [],
+
+      // For Example 2
+      accountNumbersOrText: '', // Can be an array of IDs or typed text
+      selectedAccountObjects: []
+    }
+  }
+}
+</script>
+```
+
+---
+
+### 2. Laravel Backend Controller
+
+The provided `ChartOfAccountController.php` (and its superclass `AdminController.php`) serves as the backend data provider for the `SelectAdvancedDialog` component. It exposes an endpoint that the component's `url` prop can point to.
+
+#### **Relationship with `SelectAdvancedDialog.vue`**
+
+The `postGetOptionTree` method (inherited from `AdminController` and used by `ChartOfAccountController`) is designed to respond to the component's data requests.
+
+*   The `url` prop in the Vue component should point to the route that executes this method (e.g., `/wcp/fat2/chart-of-account/get-option-tree`).
+*   The method handles search, pagination, and lazy-loading requests initiated by the component.
+
+#### **Key Configuration Properties in `ChartOfAccountController`**
+
+The behavior of the generic data-fetching methods in `AdminController` is configured by setting specific properties in the child controller's constructor. For `ChartOfAccountController`, these are:
+
+| Property                         | Value in Controller     | Effect on the Component                                                                                                                                                                |
+|:---------------------------------|:------------------------|:---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `$option_search_fields`          | `['accountNo', 'name']` | When a user types in the modal's search box, the API searches the `accountNo` and `name` columns in the database.                                                                      |
+| `$option_text_fields`            | `['accountNo', 'name']` | Each item listed in the modal will be displayed as a combination of its account number and name (e.g., "1001 - Cash").                                                                 |
+| `$option_text_separator`         | `' - '`                 | The separator used between the text fields (as shown above).                                                                                                                           |
+| `$option_value_field`            | `'accountNo'`           | When an item is selected, its `accountNo` is emitted as the component's `value` (for `v-model`).                                                                                       |
+| `$option_tree_parent_field`      | `'parentAccount'`       | Specifies that the `parentAccount` field is used to build the tree hierarchy.                                                                                                          |
+| `$option_tree_root_parent_value` | `""`                    | Items with an empty string in `parentAccount` are considered root-level nodes.                                                                                                         |
+| `$option_tree_eager_load`        | `true`                  | **Note:** This is set to `true`, meaning the backend builds the entire filtered tree in memory. For very large trees, this might be better set to `false` to enable true lazy-loading. |
+
+#### **Data Endpoint Analysis (`postGetOptionTree`)**
+
+*   **Request:** The endpoint expects a `POST` request with an optional JSON body containing:
+*   `search` (string): The search term from the modal's input.
+*   `page` (integer): The requested page number for pagination.
+*   `limit` (integer): The number of items per page.
+*   `parentId` (string/int): The ID of the parent node when lazy-loading children.
+*   **Response:** The response is a standard Laravel paginated JSON object that the Vue component is built to understand.
+```json
+{
+  "current_page": 1,
+  "data": [
+    {
+      "id": "1101",
+      "name": "1101 - Cash on Hand",
+      "text": "1101 - Cash on Hand",
+      "parent": "",
+      "node": { ...full_chart_of_account_object },
+      "children": [],
+      "_hasChildren": true,
+      "_selectable": true
+    }
+  ],
+  "total": 50,
+  "per_page": 20,
+  ...
+}
+    ```
+
+***
+
+## Dokumentasi Bahasa Indonesia
+
+### 1. Komponen Vue: `SelectAdvancedDialog.vue`
+
+Ini adalah komponen seleksi yang canggih dan sangat dapat dikonfigurasi. Komponen ini tampil sebagai input teks sederhana namun dapat membuka dialog modal yang kaya fitur untuk mencari, menelusuri, dan memilih item dari sumber data di sisi server. Komponen ini mendukung mode seleksi tunggal dan ganda, serta struktur data berbentuk pohon (tree) dengan *lazy loading*.
+
+#### **Fitur Utama**
+
+*   **Dialog Modal:** Menyediakan antarmuka yang besar dan ramah pengguna untuk memilih item, lengkap dengan pencarian dan paginasi.
+*   **Seleksi Tunggal & Ganda:** Dapat dikonfigurasi untuk memungkinkan pemilihan satu atau beberapa item.
+*   **Read-only vs. Editable:**
+*   Dalam mode `readonly` (default), komponen ini berfungsi sebagai pemilih item murni. Mengklik input akan membuka modal.
+*   Ketika `readonly` diatur ke `false`, komponen ini berfungsi sebagai *combo-box*, memungkinkan pengguna untuk mengetik nilai teks bebas atau memilih item terstruktur dari modal.
+*   **Data dari Server:** Mengambil opsi secara asinkron dari endpoint API yang ditentukan, sehingga cocok untuk dataset yang sangat besar.
+*   **Tampilan Pohon & Lazy Loading:** Dapat menampilkan data hierarkis dan memuat *child node* secara efisien sesuai permintaan.
+
+---
+
+#### **Props**
+
+| Nama Prop | Tipe | Default | Wajib | Deskripsi |
+| :--- | :--- | :--- | :--- | :--- |
+| `value` | `String`, `Array`, `Number`, `Object` | `null` | Tidak | Binding `v-model` untuk nilai komponen. Dalam mode `single`, ini berisi ID dari item yang dipilih. Dalam mode `multi`, ini adalah array berisi ID. Jika tidak `readonly`, ini berisi nilai teks yang diketik. |
+| `selectedItems` | `Array` | `[]` | Tidak | Sebuah array yang dapat di-binding (menggunakan modifier `.sync`) yang berisi objek lengkap dari item yang dipilih. Berguna untuk mengakses properti lain dari data yang dipilih. |
+| `readonly` | `Boolean` | `true` | Tidak | Jika `true`, input tidak dapat diketik; mengkliknya akan membuka modal. Jika `false`, pengguna dapat mengetik langsung ke dalam input, yang akan memperbarui prop `value`. |
+| `mode` | `String` | `'single'` | Tidak | Mode seleksi. Bisa berupa `'single'` atau `'multi'`. |
+| `url` | `String` | - | **Ya** | URL endpoint API untuk mengambil data. Komponen mengirimkan permintaan POST dengan parameter `search`, `page`, dan `limit`. |
+| `displayField` | `String` | `'text'` | Tidak | Nama field dari objek `selectedItems` yang akan ditampilkan di kotak input ketika sebuah item dipilih. |
+| `lazyLoad` | `Boolean` | `false` | Tidak | Mengaktifkan *lazy loading* untuk struktur data pohon. Ketika pengguna membuka sebuah node, permintaan API baru akan dibuat untuk mengambil turunannya. |
+| `treeMode` | `String` | `'simple'` | Tidak | Digunakan bersama `lazyLoad`. Mendefinisikan payload untuk mengambil turunan. `'simple'` mengirim `parentId`. `'compound'` mengirim `parentId` dan `parentType`. |
+
+---
+
+#### **Events**
+
+| Nama Event | Payload | Deskripsi |
+| :--- | :--- | :--- |
+| `input` | `String` atau `Array` | Event standar `v-model`. Dikeluarkan (emitted) saat pilihan dikonfirmasi di modal atau saat teks diketik dalam mode non-readonly. |
+| `update:selectedItems` | `Array` | Event standar `.sync`. Dikeluarkan saat pilihan dikonfirmasi, memperbarui array `selectedItems` di komponen induk dengan objek lengkap yang dipilih. |
+
+---
+
+#### **Contoh Penggunaan**
+
+```vue
+<template>
+  <div>
+    <!-- Contoh 1: Read-only, seleksi tunggal untuk Pengguna -->
+    <SelectAdvancedDialog
+      v-model="selectedUserId"
+      :selected-items.sync="selectedUserObjects"
+      url="/api/users/get-options"
+      display-field="name"
+      mode="single"
+      :readonly="true"
+    />
+
+    <!-- Contoh 2: Editable, seleksi ganda untuk Bagan Akun (Chart of Accounts) -->
+    <SelectAdvancedDialog
+      v-model="accountNumbersOrText"
+      :selected-items.sync="selectedAccountObjects"
+      url="/api/wcp/fat2/chart-of-account/get-option-tree"
+      display-field="name"
+      mode="multi"
+      :readonly="false"
+      lazy-load
+    />
+  </div>
+</template>
+
+<script>
+export default {
+  data() {
+    return {
+      // Untuk Contoh 1
+      selectedUserId: null,
+      selectedUserObjects: [],
+
+      // Untuk Contoh 2
+      accountNumbersOrText: '', // Bisa berupa array ID atau teks yang diketik
+      selectedAccountObjects: []
+    }
+  }
+}
+</script>
+```
+
+---
+
+### 2. Controller Backend Laravel
+
+Controller `ChartOfAccountController.php` (dan superclass-nya `AdminController.php`) yang disediakan berfungsi sebagai penyedia data backend untuk komponen `SelectAdvancedDialog`. Controller ini mengekspos sebuah endpoint yang dapat dituju oleh prop `url` dari komponen.
+
+#### **Hubungan dengan `SelectAdvancedDialog.vue`**
+
+Metode `postGetOptionTree` (diwarisi dari `AdminController` dan digunakan oleh `ChartOfAccountController`) dirancang untuk merespons permintaan data dari komponen.
+
+*   Prop `url` di komponen Vue harus menunjuk ke route yang mengeksekusi metode ini (misalnya, `/wcp/fat2/chart-of-account/get-option-tree`).
+*   Metode ini menangani permintaan pencarian, paginasi, dan *lazy-loading* yang diinisiasi oleh komponen.
+
+#### **Properti Konfigurasi Utama di `ChartOfAccountController`**
+
+Perilaku metode pengambilan data generik di `AdminController` dikonfigurasi dengan mengatur properti spesifik di dalam constructor controller turunan. Untuk `ChartOfAccountController`, properti-properti ini adalah:
+
+| Properti                         | Nilai di Controller     | Efek pada Komponen                                                                                                                                                                                                         |
+|:---------------------------------|:------------------------|:---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `$option_search_fields`          | `['accountNo', 'name']` | Saat pengguna mengetik di kotak pencarian modal, API akan mencari di kolom `accountNo` dan `name` di database.                                                                                                             |
+| `$option_text_fields`            | `['accountNo', 'name']` | Setiap item yang terdaftar di modal akan ditampilkan sebagai kombinasi dari nomor akun dan namanya (contoh: "1001 - Kas").                                                                                                 |
+| `$option_text_separator`         | `' - '`                 | Pemisah yang digunakan antara field teks (seperti contoh di atas).                                                                                                                                                         |
+| `$option_value_field`            | `'accountNo'`           | Saat sebuah item dipilih, `accountNo`-nya akan di-emit sebagai `value` dari komponen (untuk `v-model`).                                                                                                                    |
+| `$option_tree_parent_field`      | `'parentAccount'`       | Menentukan bahwa field `parentAccount` digunakan untuk membangun hierarki pohon.                                                                                                                                           |
+| `$option_tree_root_parent_value` | `""`                    | Item dengan string kosong di `parentAccount` dianggap sebagai node level akar.                                                                                                                                             |
+| `$option_tree_eager_load`        | `true`                  | **Catatan:** Ini diatur ke `true`, yang berarti backend membangun seluruh pohon yang difilter di memori. Untuk pohon yang sangat besar, ini mungkin lebih baik diatur ke `false` untuk mengaktifkan *lazy-loading* sejati. |
+
+#### **Analisis Endpoint Data (`postGetOptionTree`)**
+
+*   **Request:** Endpoint ini mengharapkan permintaan `POST` dengan body JSON opsional yang berisi:
+*   `search` (string): Kata kunci pencarian dari input di modal.
+*   `page` (integer): Nomor halaman yang diminta untuk paginasi.
+*   `limit` (integer): Jumlah item per halaman.
+*   `parentId` (string/int): ID dari node induk saat melakukan *lazy-loading* turunan.
+*   **Response:** Respons yang diberikan adalah objek JSON terpaginasi standar dari Laravel yang sudah dirancang untuk dipahami oleh komponen Vue.
+```json
+{
+  "current_page": 1,
+  "data": [
+    {
+      "id": "1101",
+      "name": "1101 - Cash on Hand",
+      "text": "1101 - Cash on Hand",
+      "parent": "",
+      "node": { ...objek_lengkap_chart_of_account... },
+      "children": [],
+      "_hasChildren": true,
+      "_selectable": true
+    }
+  ],
+  "total": 50,
+  "per_page": 20,
+  ...
+}
+```

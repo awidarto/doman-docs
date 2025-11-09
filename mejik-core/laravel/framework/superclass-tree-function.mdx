@@ -1,0 +1,255 @@
+---
+title: Superclass Methods for Tree Data Structure
+---
+
+## Documentation: Advanced Datatable Structures
+
+This document explains how to configure and use the advanced hierarchical data structures for the main datatable in your application. It builds upon the `AdminController` superclass to render flat lists, simple trees, and complex compound trees.
+
+---
+
+## **Part 1: Backend - Laravel `AdminController` Datatable Configuration**
+
+To enable tree structures in your datatable, you must extend `AdminController` and set specific `protected` properties in your child controller's `__construct()` method.
+
+### **Configuration Properties**
+
+These properties control the behavior and structure of the data returned by the `postIndex` endpoint.
+
+| Property                       | Type     | Default      | Description                                                                                                                                                                                                                                                                           |
+|--------------------------------|----------|--------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `table_structure_mode`         | `string` | `'flat'`     | **Required.** Defines the data structure. Options are: <br /> - `'flat'`: A standard paginated list. <br /> - `'simple_tree'`: A hierarchy from a single, self-referencing model. <br /> - `'compound_tree'`: A hierarchy from multiple, related models.                              |
+| `table_lazy_load`              | `string` | `'backend'`  | For tree modes, defines the loading strategy. <br /> - `'backend'`: The API constructs and returns a paginated tree. Simpler for the frontend. <br /> - `'frontend'`: The API only returns one level at a time. The frontend must make new API calls to load children. More scalable. |
+| `table_tree_parent_field`      | `string` | `'parentId'` | For `'simple_tree'` mode. The database column that stores the parent's ID.                                                                                                                                                                                                            |
+| `table_tree_root_parent_value` | `mixed`  | `null`       | For `'simple_tree'` mode. The value in the parent field that identifies a root-level node.                                                                                                                                                                                            |
+| `table_compound_tree_config`   | `array`  | `[]`         | For `'compound_tree'` mode. A detailed configuration array defining the multi-model hierarchy. The structure is identical to `option_compound_tree_config`.                                                                                                                           |
+
+### **Routes and API Interaction**
+
+-   **Endpoint:** All datatable interactions use the same endpoint: `POST {controller-base}/index`.
+-   **Lazy Loading (Frontend):** When `table_lazy_load` is set to `'frontend'`, your frontend datatable must make subsequent calls to this same endpoint to load children. The required payload depends on the `table_structure_mode`:
+-   **Simple Tree:** Send `{ "parentId": "ID_of_the_expanded_row" }`.
+-   **Compound Tree:** Send `{ "parentType": "type_of_the_row", "parentId": "prefixed_ID_of_the_row" }`.
+
+### **Usage Examples**
+
+#### **Scenario 1: Standard Flat Table (Default)**
+
+No special configuration is needed. This is the default behavior.
+
+```php
+// In YourController.php
+public function __construct()
+{
+    parent::__construct();
+    $this->model = new YourModel();
+    $this->table_structure_mode = 'flat'; // This is the default
+}
+```
+
+#### **Scenario 2: Simple Tree with Backend Lazy Loading**
+
+The API does all the work of building the tree. The frontend simply needs to render the nested `children` array. Best for small to medium-sized trees.
+
+-   **Controller (`CategoryController.php`)**
+```php
+public function __construct()
+{
+    parent::__construct();
+    $this->model = new Category();
+
+    $this->table_structure_mode = 'simple_tree';
+    $this->table_lazy_load = 'backend'; // API builds the paginated tree
+    $this->table_tree_parent_field = 'parent_id';
+    $this->table_tree_root_parent_value = null;
+}
+```
+-   **API Response:** The `data` array will contain only root-level items, but each item that has children will contain a `children` array with its descendants.
+
+#### **Scenario 3: Simple Tree with Frontend Lazy Loading**
+
+The most scalable and performant option for large, deep hierarchies.
+
+-   **Controller (`OrgChartController.php`)**
+
+```php
+public function __construct()
+{
+    parent::__construct();
+    $this->model = new Employee();
+
+    $this->table_structure_mode = 'simple_tree';
+    $this->table_lazy_load = 'frontend'; // Frontend is responsible for fetching children
+    $this->table_tree_parent_field = 'manager_id';
+}
+```
+-   **API Interaction:**
+1.  **Initial Load:** `POST /api/org-chart/index` with pagination params returns paginated root-level employees. Each will have a `_hasChildren: true` flag if they manage others.
+2.  **Expanding a Row:** When the user expands an employee with ID `123`, the frontend makes a new call: `POST /api/org-chart/index` with the body `{"parentId": "123"}`.
+3.  The API responds with a flat array of all employees who report directly to employee `123`.
+
+#### **Scenario 4: Compound Tree (Frontend Lazy Loading Only)**
+
+Used for complex hierarchies involving different models. Due to complexity, this mode **enforces** frontend lazy loading.
+
+-   **Controller (`DocumentBrowserController.php`)**
+
+```php
+public function __construct()
+{
+    parent::__construct();
+
+    $this->table_structure_mode = 'compound_tree';
+    // table_lazy_load is automatically 'frontend' for this mode.
+
+    $this->table_compound_tree_config = [
+        'group' => [
+            'model' => \App\Models\Dms\DocGroup::class,
+            'prefix' => 'group',
+            'parent_type' => null,
+            'primary_key' => 'id',
+            // ... other keys
+        ],
+        'section' => [
+            'model' => \App\Models\Dms\DocSection::class,
+            'prefix' => 'section',
+            'parent_type' => 'group',
+            'foreign_key' => 'groupId',
+            'primary_key' => 'id',
+            // ... other keys
+        ],
+    ];
+}
+```
+-   **API Interaction:**
+1.  **Initial Load:** `POST /api/doc-browser/index` returns paginated root nodes (e.g., `_type: 'group'`).
+2.  **Expanding a Row:** To expand a group with prefixed ID `group-45`, the frontend calls `POST /api/doc-browser/index` with the body `{"parentType": "group", "parentId": "group-45"}`.
+3.  The API responds with a flat array of all sections belonging to that group.
+
+---
+
+---
+
+## **Dokumentasi (Bahasa Indonesia)**
+
+## **Struktur Datatable Lanjutan**
+
+Dokumen ini menjelaskan cara mengkonfigurasi dan menggunakan struktur data hierarkis tingkat lanjut untuk datatable utama dalam aplikasi Anda. Fitur ini dibangun di atas *superclass* `AdminController` untuk me-render daftar datar (*flat list*), pohon sederhana (*simple tree*), dan pohon gabungan (*compound tree*) yang kompleks.
+
+---
+
+## **Bagian 1: Backend - Konfigurasi Datatable `AdminController`**
+
+Untuk mengaktifkan struktur pohon di datatable Anda, Anda harus `extend AdminController` dan mengatur properti `protected` tertentu di dalam metode `__construct()` pada *controller* turunan Anda.
+
+### **Properti Konfigurasi**
+
+Properti ini mengontrol perilaku dan struktur data yang dikembalikan oleh *endpoint* `postIndex`.
+
+| Properti                       | Tipe     | Default      | Deskripsi                                                                                                                                                                                                                                                                                                                                                     |
+|--------------------------------|----------|--------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `table_structure_mode`         | `string` | `'flat'`     | **Wajib.** Mendefinisikan struktur data. Pilihan: <br /> - `'flat'`: Daftar terpaginasi standar. <br /> - `'simple_tree'`: Hierarki dari satu model tunggal yang memiliki relasi ke dirinya sendiri. <br /> - `'compound_tree'`: Hierarki dari beberapa model yang saling berelasi.                                                                           |
+| `table_lazy_load`              | `string` | `'backend'`  | Untuk mode pohon, mendefinisikan strategi pemuatan data. <br /> - `'backend'`: API akan membangun dan mengembalikan pohon data yang terpaginasi. Lebih sederhana untuk frontend. <br /> - `'frontend'`: API hanya mengembalikan satu level data pada satu waktu. Frontend harus membuat panggilan API baru untuk memuat turunan (*children*). Lebih skalabel. |
+| `table_tree_parent_field`      | `string` | `'parentId'` | Untuk mode `'simple_tree'`. Kolom database yang menyimpan ID dari induk.                                                                                                                                                                                                                                                                                      |
+| `table_tree_root_parent_value` | `mixed`  | `null`       | Untuk mode `'simple_tree'`. Nilai di kolom induk yang mengidentifikasi *node* level akar.                                                                                                                                                                                                                                                                     |
+| `table_compound_tree_config`   | `array`  | `[]`         | Untuk mode `'compound_tree'`. Array konfigurasi detail yang mendefinisikan hierarki multi-model. Strukturnya identik dengan `option_compound_tree_config`.                                                                                                                                                                                                    |
+
+### **Routes dan Interaksi API**
+
+-   **Endpoint:** Semua interaksi datatable menggunakan *endpoint* yang sama: `POST {controller-base}/index`.
+-   **Lazy Loading (Frontend):** Ketika `table_lazy_load` diatur ke `'frontend'`, datatable di frontend Anda harus melakukan panggilan berikutnya ke *endpoint* yang sama untuk memuat turunan. *Payload* yang diperlukan tergantung pada `table_structure_mode`:
+-   **Simple Tree:** Kirim `{ "parentId": "ID_baris_yang_diekspansi" }`.
+-   **Compound Tree:** Kirim `{ "parentType": "tipe_baris", "parentId": "ID_dengan_prefix" }`.
+
+### **Contoh Penggunaan**
+
+#### **Skenario 1: Tabel Datar Standar (Default)**
+
+Tidak diperlukan konfigurasi khusus. Ini adalah perilaku default.
+
+```php
+// Di YourController.php
+public function __construct()
+{
+    parent::__construct();
+    $this->model = new YourModel();
+    $this->table_structure_mode = 'flat'; // Ini adalah default
+}
+```
+
+#### **Skenario 2: Pohon Sederhana dengan *Backend Lazy Loading***
+
+API akan melakukan semua pekerjaan untuk membangun pohon data. Frontend hanya perlu me-render array `children` yang bersarang. Paling baik untuk pohon data berukuran kecil hingga sedang.
+
+-   **Controller (`CategoryController.php`)**
+```php
+public function __construct()
+{
+    parent::__construct();
+    $this->model = new Category();
+
+    $this->table_structure_mode = 'simple_tree';
+    $this->table_lazy_load = 'backend'; // API membangun pohon terpaginasi
+    $this->table_tree_parent_field = 'parent_id';
+    $this->table_tree_root_parent_value = null;
+}
+```
+-   **Respon API:** Array `data` akan berisi item level akar saja, tetapi setiap item yang memiliki turunan akan berisi array `children` dengan data turunannya.
+
+#### **Skenario 3: Pohon Sederhana dengan *Frontend Lazy Loading***
+
+Opsi yang paling skalabel dan berkinerja tinggi untuk hierarki yang besar dan dalam.
+
+-   **Controller (`OrgChartController.php`)**
+```php
+public function __construct()
+{
+    parent::__construct();
+    $this->model = new Employee();
+
+    $this->table_structure_mode = 'simple_tree';
+    $this->table_lazy_load = 'frontend'; // Frontend bertanggung jawab mengambil data turunan
+    $this->table_tree_parent_field = 'manager_id';
+}
+```
+-   **Interaksi API:**
+1.  **Panggilan Awal:** `POST /api/org-chart/index` dengan parameter paginasi akan mengembalikan karyawan level akar yang terpaginasi. Masing-masing akan memiliki flag `_hasChildren: true` jika mereka memiliki bawahan.
+2.  **Mengekspansi Baris:** Saat pengguna mengekspansi seorang karyawan dengan ID `123`, frontend membuat panggilan baru: `POST /api/org-chart/index` dengan *body* `{"parentId": "123"}`.
+3.  API akan merespons dengan array datar dari semua karyawan yang melapor langsung ke karyawan `123`.
+
+#### **Skenario 4: Pohon Gabungan (*Frontend Lazy Loading Only*)**
+
+Digunakan untuk hierarki kompleks yang melibatkan model berbeda. Karena kompleksitasnya, mode ini **memaksakan** penggunaan *frontend lazy loading*.
+
+-   **Controller (`DocumentBrowserController.php`)**
+```php
+public function __construct()
+{
+    parent::__construct();
+
+    $this->table_structure_mode = 'compound_tree';
+    // table_lazy_load secara otomatis menjadi 'frontend' untuk mode ini.
+
+    $this->table_compound_tree_config = [
+    'group' => [
+    'model' => \App\Models\Dms\DocGroup::class,
+    'prefix' => 'group',
+    'parent_type' => null,
+    'primary_key' => 'id',
+    // ... key lainnya
+    ],
+    'section' => [
+    'model' => \App\Models\Dms\DocSection::class,
+    'prefix' => 'section',
+    'parent_type' => 'group',
+    'foreign_key' => 'groupId',
+    'primary_key' => 'id',
+    // ... key lainnya
+    ],
+    ];
+}
+```
+-   **Interaksi API:**
+1.  **Panggilan Awal:** `POST /api/doc-browser/index` mengembalikan *node* akar yang terpaginasi (misal, `_type: 'group'`).
+2.  **Mengekspansi Baris:** Untuk mengekspansi sebuah grup dengan ID ber-prefix `group-45`, frontend memanggil `POST /api/doc-browser/index` dengan *body* `{"parentType": "group", "parentId": "group-45"}`.
+3.  API merespons dengan array datar dari semua seksi yang dimiliki oleh grup tersebut.

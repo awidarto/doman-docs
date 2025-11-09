@@ -1,0 +1,397 @@
+---
+title: Data Display Format for Datatables and Timetables
+---
+
+## Backend Data Format Documentation (English)
+
+This document outlines the required JSON data structures that the Laravel backend must provide to the Vue frontend components (`MejikDatatable`, `SidebarTreeCalendar`, etc.).
+
+### 1. Paginated List Data (For Datatables)
+
+This is the standard response format for any endpoint that returns a list of items to be displayed in `MejikDatatable` or `SidebarTreeTable`. It is modeled directly on Laravel's pagination structure.
+
+-   **Used by:** `MejikDatatable`, `SidebarTreeTable`
+-   **Endpoint Example:** `/api/articles`, `/api/users`
+
+#### Structure
+
+The top-level response must be an object containing a `data` array and a `meta` object.
+
+```json
+{
+  "data": [
+    // Array of individual item objects
+    { "id": 1, "title": "...", ... },
+    { "id": 2, "title": "...", ... }
+  ],
+  "meta": {
+    "current_page": 1,
+    "last_page": 10,
+    "per_page": 15,
+    "total": 145
+  }
+}
+```
+
+-   **`data` (Array):** An array of the actual records for the current page. The structure of the objects inside this array is flexible and depends on what you define in the `columns` prop.
+-   **`meta` (Object):** An object containing pagination information.
+-   `current_page` (Number): The current page number.
+-   `last_page` (Number): The total number of pages.
+-   `per_page` (Number): The number of items per page.
+-   `total` (Number): The total number of records in the entire dataset.
+
+#### Example: `/api/users?page=1`
+
+```json
+{
+  "data": [
+    {
+      "id": 1,
+      "name": "John Doe",
+      "email": "john.doe@example.com",
+      "status": "active",
+      "created_at": "2023-10-27T10:00:00Z"
+    },
+    {
+      "id": 2,
+      "name": "Jane Smith",
+      "email": "jane.smith@example.com",
+      "status": "inactive",
+      "created_at": "2023-10-26T15:30:00Z"
+    }
+  ],
+  "meta": {
+    "current_page": 1,
+    "last_page": 5,
+    "per_page": 10,
+    "total": 48
+  }
+}
+```
+
+### 2. Tree Node Data
+
+This is the format for the sidebar's hierarchical data. The endpoint should return a flat array of root-level nodes. Nesting is achieved via a `children` property within each node.
+
+-   **Used by:** `SidebarTreeTable`, `SidebarTreeCalendar`
+-   **Endpoint Example:** `/api/projects/tree`, `/api/categories/tree`
+
+#### Structure
+
+A JSON array of node objects.
+
+-   **`id` (Number|String):** The unique identifier for the node.
+-   **`name` (String):** The text label to display for the node.
+-   **`children` (Array, optional):** An array of child node objects, following the same structure. This is what creates the hierarchy.
+-   **`_expanded` (Boolean, optional):** A hint from the server to tell the frontend if this node should be expanded by default.
+
+#### Example: `/api/categories/tree`
+
+```json
+[
+  {
+    "id": 1,
+    "name": "Technology",
+    "_expanded": true,
+    "children": [
+      {
+        "id": 2,
+        "name": "Programming",
+        "children": []
+      },
+      {
+        "id": 3,
+        "name": "Hardware",
+        "children": [
+          {
+            "id": 4,
+            "name": "CPUs",
+            "children": []
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": 5,
+    "name": "Business",
+    "children": []
+  }
+]
+```
+
+### 3. Unified Calendar Event Data
+
+This is the **consolidated and single source of truth** for what an event object looks like. This same structure is used whether fetching all events for the month view or fetching events associated with specific resources for the timeline view.
+
+-   **Used by:** `ResourceCalendarView`
+-   **Endpoint Examples:** `/api/events`, `/api/schedule/events`
+
+#### Structure
+
+A JSON object representing a single event.
+
+-   **`id` (Number|String):** Unique ID for the event.
+-   **`title` (String):** The text displayed on the event.
+-   **`start` (String):** The start date/time in **ISO 8601 format** (`YYYY-MM-DDTHH:mm:ss`). Time is optional for `allDay` events.
+-   **`end` (String):** The end date/time in **ISO 8601 format**.
+-   **`allDay` (Boolean):** `true` if this is an all-day event, otherwise `false`.
+-   **`resourceId` (Number|String|null):** The ID of the resource this event is assigned to (must match an `id` from the Resource Data). Set to `null` if the event is not tied to a specific resource.
+-   **_Any other custom data_:** You can include any other fields from your database (`notes`, `owner`, etc.) and access them in the frontend.
+
+#### Examples
+
+**Standard Timed Event (for Room A):**
+```json
+{
+  "id": 101,
+  "title": "Board Meeting",
+  "start": "2025-11-07T10:30:00",
+  "end": "2025-11-07T12:00:00",
+  "allDay": false,
+  "resourceId": "roomA"
+}
+```
+
+**All-Day Event:**
+```json
+{
+  "id": 102,
+  "title": "Company Offsite",
+  "start": "2025-11-10",
+  "end": "2025-11-11",
+  "allDay": true,
+  "resourceId": null
+}
+```
+
+### 4. Resource Data
+
+This format defines the items that appear as rows in the `ResourceTimelineView`.
+
+-   **Used by:** `ResourceCalendarView` (specifically for timeline view)
+-   **Endpoint Example:** This data is part of the response from `/api/paginated-resources`
+
+#### Structure
+
+A JSON object representing a single resource.
+
+-   **`id` (Number|String):** The unique identifier for the resource. This **must** correspond to the `resourceId` in the event data to link them.
+-   **`title` (String):** The display name of the resource (e.g., a room name, person's name).
+
+#### Example: (as part of the `data` array in the `/api/paginated-resources` response)
+
+```json
+[
+    {
+        "id": "roomA",
+        "title": "Conference Room A"
+    },
+    {
+        "id": "roomB",
+        "title": "Meeting Room B"
+    },
+    {
+        "id": 15,
+        "title": "John Doe (Developer)"
+    }
+]
+```
+---
+---
+
+## Dokumentasi Format Data Backend (Bahasa Indonesia)
+
+Dokumen ini menguraikan struktur data JSON yang wajib disediakan oleh backend Laravel ke komponen frontend Vue (`MejikDatatable`, `SidebarTreeCalendar`, dll.).
+
+### 1. Data Daftar Terpaginasi (Untuk Datatable)
+
+Ini adalah format respons standar untuk setiap endpoint yang mengembalikan daftar item untuk ditampilkan di `MejikDatatable` atau `SidebarTreeTable`. Format ini meniru langsung struktur paginasi Laravel.
+
+-   **Digunakan oleh:** `MejikDatatable`, `SidebarTreeTable`
+-   **Contoh Endpoint:** `/api/articles`, `/api/users`
+
+#### Struktur
+
+Respons tingkat atas harus berupa objek yang berisi array `data` dan objek `meta`.
+
+```json
+{
+  "data": [
+    // Array dari objek item individual
+    { "id": 1, "title": "...", ... },
+    { "id": 2, "title": "...", ... }
+  ],
+  "meta": {
+    "current_page": 1,
+    "last_page": 10,
+    "per_page": 15,
+    "total": 145
+  }
+}
+```
+
+-   **`data` (Array):** Sebuah array berisi data aktual untuk halaman saat ini. Struktur objek di dalam array ini fleksibel dan bergantung pada apa yang Anda definisikan di prop `columns`.
+-   **`meta` (Object):** Sebuah objek yang berisi informasi paginasi.
+-   `current_page` (Number): Nomor halaman saat ini.
+-   `last_page` (Number): Jumlah total halaman.
+-   `per_page` (Number): Jumlah item per halaman.
+-   `total` (Number): Jumlah total seluruh data.
+
+#### Contoh: `/api/users?page=1`
+
+```json
+{
+  "data": [
+    {
+      "id": 1,
+      "name": "Budi Santoso",
+      "email": "budi.s@example.com",
+      "status": "active",
+      "created_at": "2023-10-27T10:00:00Z"
+    },
+    {
+      "id": 2,
+      "name": "Citra Lestari",
+      "email": "citra.l@example.com",
+      "status": "inactive",
+      "created_at": "2023-10-26T15:30:00Z"
+    }
+  ],
+  "meta": {
+    "current_page": 1,
+    "last_page": 5,
+    "per_page": 10,
+    "total": 48
+  }
+}
+```
+
+### 2. Data Node Pohon (Tree Node)
+
+Ini adalah format untuk data hierarkis di sidebar. Endpoint harus mengembalikan array datar dari node tingkat atas. Susunan bersarang (nesting) dicapai melalui properti `children` di dalam setiap node.
+
+-   **Digunakan oleh:** `SidebarTreeTable`, `SidebarTreeCalendar`
+-   **Contoh Endpoint:** `/api/proyek/tree`, `/api/kategori/tree`
+
+#### Struktur
+
+Sebuah array JSON berisi objek-objek node.
+
+-   **`id` (Number|String):** Pengenal unik untuk node.
+-   **`name` (String):** Label teks yang akan ditampilkan untuk node.
+-   **`children` (Array, opsional):** Sebuah array berisi objek node anak, yang mengikuti struktur yang sama. Inilah yang menciptakan hierarki.
+-   **`_expanded` (Boolean, opsional):** Petunjuk dari server untuk memberitahu frontend jika node ini harus terbuka (expanded) secara default.
+
+#### Contoh: `/api/kategori/tree`
+
+```json
+[
+  {
+    "id": 1,
+    "name": "Teknologi",
+    "_expanded": true,
+    "children": [
+      {
+        "id": 2,
+        "name": "Pemrograman",
+        "children": []
+      },
+      {
+        "id": 3,
+        "name": "Perangkat Keras",
+        "children": [
+          {
+            "id": 4,
+            "name": "CPU",
+            "children": []
+          }
+        ]
+      }
+    ]
+  },
+  {
+    "id": 5,
+    "name": "Bisnis",
+    "children": []
+  }
+]
+```
+
+### 3. Data Event Kalender Terpadu
+
+Ini adalah **sumber kebenaran tunggal dan terkonsolidasi** untuk struktur sebuah objek event. Struktur yang sama ini digunakan baik saat mengambil semua event untuk tampilan bulan, maupun saat mengambil event yang terkait dengan resource tertentu untuk tampilan timeline.
+
+-   **Digunakan oleh:** `ResourceCalendarView`
+-   **Contoh Endpoint:** `/api/events`, `/api/jadwal/events`
+
+#### Struktur
+
+Sebuah objek JSON yang merepresentasikan satu event.
+
+-   **`id` (Number|String):** ID unik untuk event.
+-   **`title` (String):** Teks yang ditampilkan pada event.
+-   **`start` (String):** Tanggal/waktu mulai dalam **format ISO 8601** (`YYYY-MM-DDTHH:mm:ss`). Waktu bersifat opsional untuk event `allDay`.
+-   **`end` (String):** Tanggal/waktu selesai dalam **format ISO 8601**.
+-   **`allDay` (Boolean):** `true` jika ini adalah event seharian, jika tidak maka `false`.
+-   **`resourceId` (Number|String|null):** ID dari resource tempat event ini ditugaskan (harus cocok dengan `id` dari Data Resource). Atur ke `null` jika event tidak terikat pada resource tertentu.
+-   **_Data kustom lainnya_:** Anda dapat menyertakan field lain dari database Anda (`notes`, `owner`, dll.) dan mengaksesnya di frontend.
+
+#### Contoh
+
+**Event Berwaktu Standar (untuk Ruang A):**
+```json
+{
+  "id": 101,
+  "title": "Rapat Direksi",
+  "start": "2025-11-07T10:30:00",
+  "end": "2025-11-07T12:00:00",
+  "allDay": false,
+  "resourceId": "roomA"
+}
+```
+
+**Event Seharian:**
+```json
+{
+  "id": 102,
+  "title": "Acara Kantor di Luar Kota",
+  "start": "2025-11-10",
+  "end": "2025-11-11",
+  "allDay": true,
+  "resourceId": null
+}
+```
+
+### 4. Data Resource
+
+Format ini mendefinisikan item-item yang muncul sebagai baris di `ResourceTimelineView`.
+
+-   **Digunakan oleh:** `ResourceCalendarView` (khususnya untuk tampilan timeline)
+-   **Contoh Endpoint:** Data ini adalah bagian dari respons dari `/api/paginated-resources`
+
+#### Struktur
+
+Sebuah objek JSON yang merepresentasikan satu resource.
+
+-   **`id` (Number|String):** Pengenal unik untuk resource. Ini **wajib** sesuai dengan `resourceId` dalam data event untuk menghubungkan keduanya.
+-   **`title` (String):** Nama tampilan dari resource (misalnya, nama ruangan, nama orang).
+
+#### Contoh: (sebagai bagian dari array `data` dalam respons `/api/paginated-resources`)
+
+```json
+[
+    {
+        "id": "roomA",
+        "title": "Ruang Konferensi A"
+    },
+    {
+        "id": "roomB",
+        "title": "Ruang Rapat B"
+    },
+    {
+        "id": 15,
+        "title": "Budi Santoso (Developer)"
+    }
+]
+```

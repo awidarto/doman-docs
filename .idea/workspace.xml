@@ -7,6 +7,11 @@
     <list default="true" id="f5ee46ac-8460-424d-9b8a-dfe584e81db0" name="Changes" comment="">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/docs.json" beforeDir="false" afterPath="$PROJECT_DIR$/docs.json" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/mejik-core/vue/components/advanced-repeater-form.mdx" beforeDir="false" afterPath="$PROJECT_DIR$/mejik-core/vue/components/base/advanced-repeater-form.mdx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/mejik-core/vue/components/inlineediting.mdx" beforeDir="false" afterPath="$PROJECT_DIR$/mejik-core/vue/components/base/inlineediting.mdx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/mejik-core/vue/components/sse-notification-dropdown.mdx" beforeDir="false" afterPath="$PROJECT_DIR$/mejik-core/vue/components/base/sse-notification-dropdown.mdx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/mejik-core/vue/components/tiptap-quill-editor.mdx" beforeDir="false" afterPath="$PROJECT_DIR$/mejik-core/vue/components/base/tiptap-quill-editor.mdx" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/mejik-core/vue/components/tree-data-table.mdx" beforeDir="false" afterPath="$PROJECT_DIR$/mejik-core/vue/components/data-view/tree-data-table.mdx" afterDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -41,7 +46,7 @@
     &quot;dart.analysis.tool.window.visible&quot;: &quot;false&quot;,
     &quot;git-widget-placeholder&quot;: &quot;main&quot;,
     &quot;kotlin-language-version-configured&quot;: &quot;true&quot;,
-    &quot;last_opened_file_path&quot;: &quot;/Users/awidarto/WebProjects/MejikDocs/doman-docs/apps/fas&quot;,
+    &quot;last_opened_file_path&quot;: &quot;/Users/awidarto/WebProjects/MejikDocs/doman-docs/mejik-core/vue/components/data-view&quot;,
     &quot;node.js.detected.package.eslint&quot;: &quot;true&quot;,
     &quot;node.js.detected.package.tslint&quot;: &quot;true&quot;,
     &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
@@ -55,13 +60,16 @@
 }</component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
+      <recent name="$PROJECT_DIR$/mejik-core/vue/components/data-view" />
+      <recent name="$PROJECT_DIR$/mejik-core/vue/components" />
       <recent name="$PROJECT_DIR$/apps/fas" />
       <recent name="$PROJECT_DIR$/dev/dms" />
       <recent name="$PROJECT_DIR$/apps/dms-doc/user-manual/by-screen" />
-      <recent name="$PROJECT_DIR$/ai-dev/graph-rag" />
-      <recent name="$PROJECT_DIR$/mejik-core/laravel" />
     </key>
     <key name="MoveFile.RECENT_KEYS">
+      <recent name="$PROJECT_DIR$/mejik-core/vue/components/dataview" />
+      <recent name="$PROJECT_DIR$/mejik-core/vue/components/reference" />
+      <recent name="$PROJECT_DIR$/mejik-core/vue/components/base" />
       <recent name="$PROJECT_DIR$/mejik-core/laravel/framework" />
       <recent name="$PROJECT_DIR$/ai-dev" />
     </key>
@@ -125,7 +133,15 @@
       <workItem from="1759771105904" duration="719000" />
       <workItem from="1759828791655" duration="578000" />
       <workItem from="1759837757456" duration="597000" />
-      <workItem from="1761915534086" duration="2336000" />
+      <workItem from="1761915534086" duration="3637000" />
+      <workItem from="1762103280227" duration="2635000" />
+      <workItem from="1762236636656" duration="366000" />
+      <workItem from="1762250484812" duration="3459000" />
+      <workItem from="1762315302502" duration="450000" />
+      <workItem from="1762355195801" duration="5619000" />
+      <workItem from="1762511560236" duration="598000" />
+      <workItem from="1762516121805" duration="19938000" />
+      <workItem from="1762671186511" duration="424000" />
     </task>
     <servers />
   </component>

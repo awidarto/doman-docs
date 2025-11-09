@@ -1,0 +1,230 @@
+---
+title: Mejik Datatable - full featured data table
+---
+
+## Documentation: `MejikDatatable` Component (English)
+
+### 1. Overview
+
+`MejikDatatable` is a comprehensive, server-side data table component. It acts as a "controller" or "wrapper" that provides a rich user interface for pagination, searching, and row selection, while delegating the actual data fetching and table rendering to a parent component and a child `TreeDatatable` component, respectively.
+
+Its primary design principle is that it **does not manage data itself**. Instead, it captures user interactions (like changing a page, sorting, or searching) and **emits events** with structured parameters. The parent component is responsible for listening to these events, making an API call with the parameters, and then passing the new data back into the datatable via props.
+
+### 2. Features
+
+-   **Server-Side Driven:** Built from the ground up to work with server-side data, ensuring it can handle large datasets efficiently.
+-   **Integrated UI:** Provides out-of-the-box UI for global search, pagination (top and bottom), and per-page selection.
+-   **Row Selection:** Supports single and multi-row selection with checkboxes and a "selected rows" summary bar.
+-   **Loading State:** Displays a clean loading spinner overlay while the parent is fetching data.
+-   **Slot Passthrough:** All scoped slots are passed directly to the underlying `TreeDatatable`, allowing for complete customization of columns, cells, and rows.
+-   **Event-Based Communication:** Uses a clear, event-driven model for interacting with the parent component.
+
+### 3. Props
+
+#### Core Data & Display Props
+
+| Prop          | Type    | Required | Description                                                                                   |
+|:--------------|:--------|:---------|:----------------------------------------------------------------------------------------------|
+| `columns`     | Array   | Yes      | An array of column definition objects.                                                        |
+| `rows`        | Array   | Yes      | An array of data objects to be displayed in the current view. This is provided by the parent. |
+| `totalRows`   | Number  | No       | The total number of records on the server. Crucial for calculating pagination. Default: `0`.  |
+| `isLoading`   | Boolean | No       | When `true`, displays a loading overlay over the table. Default: `false`.                     |
+| `styleClass`  | String  | No       | CSS class for the table element. Default: `'vgt-table striped'`.                              |
+| `lineNumbers` | Boolean | No       | If `true`, a column with row numbers will be displayed. Default: `false`.                     |
+
+#### Feature Configuration Props
+
+| Prop                | Type   | Default             | Description                                                                                                                           |
+|:--------------------|:-------|:--------------------|:--------------------------------------------------------------------------------------------------------------------------------------|
+| `paginationOptions` | Object | `{ enabled: true }` | An object to configure pagination. Can include `perPage`, `currentPage`, `perPageDropdown`, `nextLabel`, `prevLabel`, `ofLabel`, etc. |
+| `searchOptions`     | Object | `{ enabled: true }` | An object to configure the global search bar. Can include `placeholder`.                                                              |
+| `selectOptions`     | Object | `{ enabled: true }` | An object to configure row selection. Can include `selectOnCheckboxOnly`.                                                             |
+| `sortBy`            | Array  | `[]`                | An array defining the initial sort order, e.g., `[{ field: 'name', type: 'asc' }]`.                                                   |
+| `sortMode`          | String | `'multi'`           | Defines the sort mode, typically `'single'` or `'multi'`.                                                                             |
+| `selectedRows`      | Array  | `[]`                | An array of the currently selected row objects. Use with `.sync` or listen to the `@on-selected-rows-change` event.                   |
+
+### 4. Emitted Events
+
+This is the primary way the component communicates with its parent.
+
+| Event                      | Payload                                   | Description                                                                                                                       |
+|:---------------------------|:------------------------------------------|:----------------------------------------------------------------------------------------------------------------------------------|
+| `@on-search`               | `{ searchTerm: String, trigger: String }` | Fired when the user types, presses Enter, or clicks reload in the search bar. `trigger` can be `'typing'`, `'enter'`, `'reload'`. |
+| `@on-page-change`          | `{ currentPage: Number }`                 | Fired when the user navigates to a different page.                                                                                |
+| `@on-per-page-change`      | `{ currentPerPage: Number }`              | Fired when the user changes the number of items to show per page.                                                                 |
+| `@on-sort-change`          | `(Array)`                                 | Fired when a column's sort order is changed. The payload is an array of sort objects, e.g., `[{ field: 'name', type: 'desc' }]`.  |
+| `@on-selected-rows-change` | `{ selectedRows: Array }`                 | Fired whenever the row selection changes. Used for `.sync`.                                                                       |
+| `@on-cell-click`           | `{ row, column, rowIndex, event }`        | Passed up from the inner table. Fired when a table cell is clicked.                                                               |
+| `@action`                  | `{ row, actionName }`                     | Passed up from the inner table. Typically used for action buttons within a row.                                                   |
+
+### 5. Scoped Slots
+
+`MejikDatatable` passes all scoped slots it receives directly to the `TreeDatatable` component inside it. This allows for powerful customization.
+
+**Common Slots:**
+-   `#table-row="{ row, formattedRow, index }"`: Customize an entire table row.
+-   `#table-cell-[field]="{ row, formattedRow, column, ... }"`: Customize a specific cell based on the column's `field` name.
+
+### 6. Usage Example
+
+```vue
+<!-- MyDataPage.vue -->
+<template>
+  <div>
+    <MejikDatatable
+      :columns="columns"
+      :rows="rows"
+      :total-rows="total"
+      :is-loading="loading"
+      :pagination-options="pagination"
+      :sort-by="sort"
+      :selected-rows.sync="selected"
+
+      @on-page-change="updateParamsAndReload"
+      @on-per-page-change="updateParamsAndReload"
+      @on-sort-change="updateParamsAndReload"
+      @on-search="updateParamsAndReload"
+    >
+      <!-- Example: Customizing the 'status' column -->
+      <template #table-cell-status="props">
+        <span :class="`badge badge-${props.row.status === 'active' ? 'success' : 'danger'}`">
+          {{ props.row.status }}
+        </span>
+      </template>
+    </MejikDatatable>
+  </div>
+</template>
+
+<script>
+import axios from 'axios';
+import MejikDatatable from './components/MejikDatatable.vue';
+
+export default {
+  components: { MejikDatatable },
+  data() {
+    return {
+      // Data from server
+      rows: [],
+      total: 0,
+      loading: true,
+      selected: [],
+
+      // Datatable parameters
+      pagination: { currentPage: 1, perPage: 10 },
+      sort: [{ field: 'created_at', type: 'desc' }],
+      searchTerm: '',
+
+      columns: [
+        { label: 'Name', field: 'name' },
+        { label: 'Email', field: 'email' },
+        { label: 'Status', field: 'status' },
+        { label: 'Created At', field: 'created_at', type: 'date' },
+      ],
+    };
+  },
+  mounted() {
+    this.loadData();
+  },
+  methods: {
+    // This method handles all updates from the datatable
+    updateParamsAndReload(newParams) {
+      // Merge new parameters into our state
+      if (newParams.currentPage) this.pagination.currentPage = newParams.currentPage;
+      if (newParams.currentPerPage) this.pagination.perPage = newParams.currentPerPage;
+      if (Array.isArray(newParams)) this.sort = newParams;
+      if (newParams.searchTerm !== undefined) this.searchTerm = newParams.searchTerm;
+
+      this.loadData();
+    },
+
+    async loadData() {
+      this.loading = true;
+      try {
+        const params = {
+          page: this.pagination.currentPage,
+          per_page: this.pagination.perPage,
+          sort_by: this.sort[0]?.field,
+          sort_dir: this.sort[0]?.type,
+          search: this.searchTerm,
+        };
+
+        const response = await axios.get('/api/users', { params });
+        this.rows = response.data.data;
+        this.total = response.data.meta.total;
+      } catch (e) {
+        console.error("Failed to load data", e);
+      } finally {
+        this.loading = false;
+      }
+    }
+  }
+}
+</script>
+```
+
+## Dokumentasi: Komponen `MejikDatatable` (Bahasa Indonesia)
+
+### 1. Gambaran Umum
+
+`MejikDatatable` adalah komponen tabel data sisi server (server-side) yang komprehensif. Komponen ini bertindak sebagai "pengontrol" atau "pembungkus" (wrapper) yang menyediakan antarmuka pengguna yang kaya untuk paginasi, pencarian, dan pemilihan baris, sambil mendelegasikan pengambilan data dan rendering tabel ke komponen induk dan komponen anak `TreeDatatable`.
+
+Prinsip desain utamanya adalah komponen ini **tidak mengelola data itu sendiri**. Sebaliknya, ia menangkap interaksi pengguna (seperti mengganti halaman, mengurutkan, atau mencari) dan **memancarkan event** dengan parameter terstruktur. Komponen induk bertanggung jawab untuk mendengarkan event ini, melakukan panggilan API dengan parameter tersebut, dan kemudian mengoper data baru kembali ke datatable melalui props.
+
+### 2. Fitur
+
+-   **Digerakkan oleh Server-Side:** Dibangun dari awal untuk bekerja dengan data sisi server, memastikannya dapat menangani dataset besar secara efisien.
+-   **UI Terintegrasi:** Menyediakan UI siap pakai untuk pencarian global, paginasi (atas dan bawah), dan pemilihan item per halaman.
+-   **Pemilihan Baris:** Mendukung pemilihan baris tunggal dan ganda dengan checkbox dan ringkasan "baris terpilih".
+-   **Status Loading:** Menampilkan overlay spinner saat komponen induk sedang mengambil data.
+-   **Penerusan Slot (Slot Passthrough):** Semua scoped slot diteruskan langsung ke `TreeDatatable` di dalamnya, memungkinkan kustomisasi penuh pada kolom, sel, dan baris.
+-   **Komunikasi Berbasis Event:** Menggunakan model berbasis event yang jelas untuk berinteraksi dengan komponen induk.
+
+### 3. Props
+
+#### Props Inti Data & Tampilan
+
+| Prop          | Tipe    | Wajib | Deskripsi                                                                              |
+|:--------------|:--------|:------|:---------------------------------------------------------------------------------------|
+| `columns`     | Array   | Ya    | Array berisi objek definisi kolom.                                                     |
+| `rows`        | Array   | Ya    | Array berisi objek data untuk ditampilkan di tampilan saat ini. Disediakan oleh induk. |
+| `totalRows`   | Number  | Tidak | Jumlah total data di server. Penting untuk menghitung paginasi. Default: `0`.          |
+| `isLoading`   | Boolean | Tidak | Jika `true`, menampilkan overlay loading di atas tabel. Default: `false`.              |
+| `styleClass`  | String  | Tidak | Kelas CSS untuk elemen tabel. Default: `'vgt-table striped'`.                          |
+| `lineNumbers` | Boolean | Tidak | Jika `true`, kolom dengan nomor baris akan ditampilkan. Default: `false`.              |
+
+#### Props Konfigurasi Fitur
+
+| Prop                | Tipe   | Default             | Deskripsi                                                                                                                                |
+|:--------------------|:-------|:--------------------|:-----------------------------------------------------------------------------------------------------------------------------------------|
+| `paginationOptions` | Object | `{ enabled: true }` | Objek untuk mengkonfigurasi paginasi. Bisa berisi `perPage`, `currentPage`, `perPageDropdown`, `nextLabel`, `prevLabel`, `ofLabel`, dll. |
+| `searchOptions`     | Object | `{ enabled: true }` | Objek untuk mengkonfigurasi bar pencarian global. Bisa berisi `placeholder`.                                                             |
+| `selectOptions`     | Object | `{ enabled: true }` | Objek untuk mengkonfigurasi pemilihan baris. Bisa berisi `selectOnCheckboxOnly`.                                                         |
+| `sortBy`            | Array  | `[]`                | Array yang mendefinisikan urutan pengurutan awal, misal, `[{ field: 'name', type: 'asc' }]`.                                             |
+| `sortMode`          | String | `'multi'`           | Mendefinisikan mode pengurutan, biasanya `'single'` atau `'multi'`.                                                                      |
+| `selectedRows`      | Array  | `[]`                | Array dari objek baris yang sedang dipilih. Gunakan dengan `.sync` atau dengarkan event `@on-selected-rows-change`.                      |
+
+### 4. Event yang Di-emit
+
+Ini adalah cara utama komponen berkomunikasi dengan induknya.
+
+| Event                      | Payload                                   | Deskripsi                                                                                                                                     |
+|:---------------------------|:------------------------------------------|:----------------------------------------------------------------------------------------------------------------------------------------------|
+| `@on-search`               | `{ searchTerm: String, trigger: String }` | Dipicu saat pengguna mengetik, menekan Enter, atau mengklik reload di bar pencarian. `trigger` bisa berupa `'typing'`, `'enter'`, `'reload'`. |
+| `@on-page-change`          | `{ currentPage: Number }`                 | Dipicu saat pengguna berpindah ke halaman lain.                                                                                               |
+| `@on-per-page-change`      | `{ currentPerPage: Number }`              | Dipicu saat pengguna mengubah jumlah item yang ditampilkan per halaman.                                                                       |
+| `@on-sort-change`          | `(Array)`                                 | Dipicu saat urutan pengurutan kolom diubah. Payload-nya adalah array objek sort, misal, `[{ field: 'name', type: 'desc' }]`.                  |
+| `@on-selected-rows-change` | `{ selectedRows: Array }`                 | Dipicu setiap kali pemilihan baris berubah. Digunakan untuk `.sync`.                                                                          |
+| `@on-cell-click`           | `{ row, column, rowIndex, event }`        | Diteruskan dari tabel di dalamnya. Dipicu saat sel tabel diklik.                                                                              |
+| `@action`                  | `{ row, actionName }`                     | Diteruskan dari tabel di dalamnya. Biasanya digunakan untuk tombol aksi di dalam baris.                                                       |
+
+### 5. Scoped Slots
+
+`MejikDatatable` meneruskan semua scoped slot yang diterimanya langsung ke komponen `TreeDatatable` di dalamnya. Ini memungkinkan kustomisasi yang sangat kuat.
+
+**Slot Umum:**
+-   `#table-row="{ row, formattedRow, index }"`: Kustomisasi seluruh baris tabel.
+-   `#table-cell-[field]="{ row, formattedRow, column, ... }"`: Kustomisasi sel spesifik berdasarkan nama `field` dari kolom.
+
+### 6. Contoh Penggunaan
+
+(Contoh kode sama seperti versi Bahasa Inggris, dengan komentar yang dapat diterjemahkan jika perlu. Kode itu sendiri bersifat universal.)

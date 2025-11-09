@@ -1,0 +1,201 @@
+---
+title: Advanced Asynchronous Select Option Data Structure
+---
+
+## Documentation: Reusable Advanced Selection System
+
+This document explains how to use the generic selection system, which consists of a powerful Laravel `AdminController` superclass and a flexible Vue.js `SelectAdvancedDialog` component. This system is designed to rapidly create complex, searchable, and hierarchical selection dialogs.
+
+---
+
+## **Part 1: Backend - Laravel `AdminController`**
+
+The `AdminController` provides three main endpoints for fetching data for selection dialogs. To use them, your controller must extend `AdminController` and configure specific class properties in its `__construct()` method.
+
+### **Method 1: `postGetOption()`**
+
+-   **Purpose:** Provides a simple, paginated, flat list of options. Ideal for selecting users, products, etc., without any hierarchy.
+-   **Endpoint:** `POST {controller-base}/get-option`
+-   **Configuration in Child Controller:**
+
+| Property                  | Type     | Description                                                                                               | Example                                   |
+|---------------------------|----------|-----------------------------------------------------------------------------------------------------------|-------------------------------------------|
+| `model`                   | `Model`  | **Required.** The Eloquent model class to query.                                                          | `new User()`                              |
+| `option_search_fields`    | `array`  | **Required.** Database columns to search against when a user types in the search box.                     | `['name', 'username', 'email']`           |
+| `option_text_fields`      | `array`  | **Required.** Columns used to build the display text for each option. They will be joined by a separator. | `['name', 'email']`                       |
+| `option_value_field`      | `string` | The column to use as the unique value/ID for the option.                                                  | `'id'` (default) or `'slug'`              |
+| `option_text_separator`   | `string` | The separator used to join the `option_text_fields`.                                                      | `' - '` (default)                         |
+| `additionalOptionQuery()` | `method` | An overridable method to add extra query constraints (e.g., `->where('status', 'active')`).               | `return $query->where('isActive', true);` |
+
+-   **Example: `UserController.php`**
+```php
+class UserController extends AdminController
+{
+    public function __construct()
+    {
+        parent::__construct();
+        $this->model = new \App\Models\Core\Mongo\User();
+        $this->controller_base = 'user';
+
+        // Configuration for postGetOption()
+        $this->option_search_fields = ['name', 'username', 'email'];
+        $this->option_text_fields = ['name', 'email'];
+        $this->option_value_field = 'id';
+    }
+}
+```
+
+### **Method 2: `postGetOptionTree()`**
+
+-   **Purpose:** Provides a hierarchical list of options from a **single model** that has a self-referencing parent-child relationship (e.g., categories with sub-categories). Supports both eager and lazy loading.
+-   **Endpoint:** `POST {controller-base}/get-option-tree`
+-   **Configuration in Child Controller:**
+
+| Property                        | Type     | Description                                                                                                                                                     | Example                                     |
+|---------------------------------|----------|-----------------------------------------------------------------------------------------------------------------------------------------------------------------|---------------------------------------------|
+| `model`, `option_*_fields`      | `mixed`  | All properties from `postGetOption()` are also used here.                                                                                                       | (Same as above)                             |
+| `option_tree_parent_field`      | `string` | **Required.** The database column that stores the ID of the parent record.                                                                                      | `'parent_id'`                               |
+| `option_tree_root_parent_value` | `mixed`  | The value in the parent field that identifies a root node.                                                                                                      | `null` (default) or `0`                     |
+| `option_tree_eager_load`        | `bool`   | `true`: Loads the entire filtered tree at once. Best for small trees. <br/> `false`: **(Recommended)** Lazy loads children on demand. Essential for large trees. | `false`                                     |
+| `option_tree_type_field`        | `string` | (Optional) A column to source the `_type` property from, used for custom icons/styling on the frontend.                                                         | `'category_type'`                           |
+| `additionalOptionQuery()`       | `method` | This hook is also available to filter the tree query.                                                                                                           | `return $query->where('status', 'active');` |
+
+-   **Example: `CategoryController.php`**
+```php
+class CategoryController extends AdminController
+{
+    public function __construct()
+    {
+        parent::__construct();
+        $this->model = new \App\Models\Product\Category();
+        $this->controller_base = 'product/category';
+
+        // Configuration for postGetOptionTree()
+        $this->option_search_fields = ['name', 'slug'];
+        $this->option_text_fields = ['name'];
+        $this->option_value_field = 'id';
+        $this->option_tree_parent_field = 'parent_id';
+        $this->option_tree_root_parent_value = null;
+        $this->option_tree_eager_load = false; // Enable lazy loading
+    }
+}
+```
+
+### **Method 3: `postGetOptionCompoundTree()`**
+
+-   **Purpose:** Provides a complex hierarchical list built from **multiple related models** (e.g., Groups -> Sections -> Categories). This method is designed exclusively for lazy loading.
+-   **Endpoint:** `POST {controller-base}/get-option-compound-tree`
+-   **Configuration in Child Controller:**
+This method is configured using a single, detailed array property.
+
+| Property                      | Type     | Description                                                                                                      |
+|-------------------------------|----------|------------------------------------------------------------------------------------------------------------------|
+| `option_compound_tree_config` | `array`  | **Required.** An associative array defining the entire hierarchy. See the example below for the structure.       |
+| `additionalOptionQuery()`     | `method` | This hook applies to every query made by this method, allowing for global filters across all models in the tree. |
+
+-   **Structure of `option_compound_tree_config`:**
+The array key (e.g., `'group'`) becomes the `_type` of the node. Each entry is an array with these keys:
+-   `model`: The Eloquent model class.
+-   `prefix`: A unique string prefix for the node's ID to prevent collisions (e.g., `'group'`).
+-   `parent_type`: The `_type` of the parent model, or `null` if it's a root node.
+-   `foreign_key`: The column on this model's table that links to the parent's primary key.
+-   `primary_key`: The primary key column of this model.
+-   `text_fields`: Array of columns for the display name.
+-   `search_fields`: Array of columns to search against.
+-   `self_referencing_key`: (Optional) If this model can have its own children (like categories and sub-categories), specify the parent ID column here.
+
+-   **Example: `DocumentStructureController.php`**
+```php
+class DocumentStructureController extends AdminController
+{
+    public function __construct()
+    {
+        parent::__construct();
+        $this->controller_base = 'dms/structure';
+
+        $this->option_compound_tree_config = [
+            'group' => [
+                'model' => \App\Models\Dms\DocGroup::class,
+                'prefix' => 'group',
+                'parent_type' => null, // This is the root
+                'primary_key' => 'id',
+                'text_fields' => ['groupName'],
+                'search_fields' => ['groupName'],
+            ],
+            'section' => [
+                'model' => \App\Models\Dms\DocSection::class,
+                'prefix' => 'section',
+                'parent_type' => 'group',
+                'foreign_key' => 'groupId',
+                'primary_key' => 'id',
+                'text_fields' => ['sectionName'],
+                'search_fields' => ['sectionName'],
+            ],
+            'category' => [
+                'model' => \App\Models\Dms\DocCategory::class,
+                'prefix' => 'cat',
+                'parent_type' => 'section',
+                'foreign_key' => 'sectionId',
+                'primary_key' => 'id',
+                'text_fields' => ['categoryName'],
+                'search_fields' => ['categoryName'],
+                'self_referencing_key' => 'parentId', // Categories can have sub-categories
+            ],
+        ];
+    }
+}
+```
+
+---
+
+## **Part 2: Frontend - Vue.js Components**
+
+The system uses one primary component, `SelectAdvancedDialog.vue`, which internally uses a recursive `SelectItemNode.vue` to render the list. You will only ever need to use `SelectAdvancedDialog.vue` in your pages.
+
+### **Component: `SelectAdvancedDialog.vue`**
+
+#### **Props**
+
+| Prop            | Type           | Default    | Description                                                                                                                                                                   |
+|-----------------|----------------|------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `value`         | `String,Array` | `null`     | The selected value(s). Use with `v-model`. For `single` mode, it's the ID. For `multi` mode, it's an array of IDs.                                                            |
+| `selectedItems` | `Array`        | `[]`       | An array of the full selected item objects. Use with the `.sync` modifier (`:selected-items.sync="..."`) to get the complete data of the selected nodes.                      |
+| `mode`          | `String`       | `'single'` | Selection mode. Can be `'single'` (radio buttons) or `'multi'` (checkboxes).                                                                                                  |
+| `url`           | `String`       | **(req)**  | The full URL to the backend API endpoint (e.g., `/api/user/get-option`).                                                                                                      |
+| `lazyLoad`      | `Boolean`      | `false`    | Set to `true` to enable lazy loading for tree structures. The backend endpoint must support this (`postGetOptionTree` or `postGetOptionCompoundTree`).                        |
+| `treeMode`      | `String`       | `'simple'` | Specifies the payload for lazy loading. `'simple'` for `postGetOptionTree` (sends `parentId`). `'compound'` for `postGetOptionCompoundTree` (sends `parentId`, `parentType`). |
+
+#### **Events**
+
+-   **`@input`**: Emitted when the selection is confirmed. Used by `v-model`.
+-   **`@update:selectedItems`**: Emitted when the selection is confirmed. Used by the `.sync` modifier.
+
+### **Usage Examples**
+
+#### **1. Flat List (using `postGetOption`)**
+
+Select a single user from a simple list.
+
+```html
+<template>
+    <div>
+        <SelectAdvancedDialog
+            v-model="selectedUserId"
+            :selected-items.sync="selectedUserObjects"
+            url="/api/user/get-option"
+            mode="single"
+        />
+    </div>
+</template>
+
+<script>
+export default {
+    data() {
+        return {
+            selectedUserId: null,
+            selectedUserObjects: [],
+        };
+    },
+};
+</script>
+```

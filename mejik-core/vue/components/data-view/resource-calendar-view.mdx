@@ -1,0 +1,314 @@
+---
+title: Calendar Resource View ( reusable wrapper for calendar & resource view )
+---
+
+### 1. Wrapper Component (`ResourceCalendarView.vue`)
+
+This is the key change. We use `inheritAttrs: false` and `v-bind="$attrs"`.
+
+```vue
+<!-- ResourceCalendarView.vue -->
+<template>
+  <div class="resource-calendar-wrapper">
+    <!-- ... (view switcher, loading indicator) ... -->
+    <div v-else>
+      <!-- Calendar View -->
+      <calendar-view v-if="activeView === 'calendar'"
+        :month-data="calendarMonthData"
+        :month-name="currentMonthName"
+        :year="currentYear"
+        @navigate-prev="handlePrevMonth"
+        @navigate-next="handleNextMonth"
+        @navigate-today="handleGoToToday"
+        @event-click="handleEventClick"
+        v-bind="$attrs"
+      />
+
+      <!-- Timeline View with Pagination -->
+      <div v-if="activeView === 'timeline'">
+        <resource-timeline-view
+          :events="timelineVisibleEvents"
+          :resources="resources"
+          :current-date="currentDate"
+          @navigate-prev="handlePrevDay"
+          @navigate-next="handleNextDay"
+          @navigate-today="handleGoToToday"
+          @event-click="handleEventClick"
+          v-bind="$attrs"
+        />
+        <!-- ... (pagination controls) ... -->
+      </div>
+    </div>
+  </div>
+</template>
+
+<script>
+// ... (imports) ...
+export default {
+  name: 'ResourceCalendarView',
+  // IMPORTANT: Prevents pass-through attributes from being applied to this component's root element.
+  inheritAttrs: false,
+  // ... (components, props, data, watch, mounted, computed) ...
+  // All other logic from the previous version remains exactly the same.
+  // ...
+};
+</script>
+```
+
+---
+
+### 3. Updated Documentation & Usage Example
+
+Here is the final documentation reflecting these changes.
+
+---
+---
+
+## Documentation: `ResourceCalendarView` Component (English)
+
+### 1. Overview
+
+`ResourceCalendarView` is a "batteries-included" wrapper component that provides a complete, interactive calendar and resource timeline experience. It encapsulates all complex logic, including view switching, on-demand data fetching from your API, and pagination.
+
+### 2. Features
+
+-   **Dual Views:** Switch between a monthly calendar grid and a daily resource timeline.
+-   **On-Demand Loading:** Fetches data efficiently from your backend only for the visible date range.
+-   **Resource Pagination:** Automatically handles pagination for the resource list.
+-   **Highly Configurable:** Key props are defined on the wrapper, and additional presentational props are passed directly to the child components.
+-   **Event-Driven:** Communicates user actions to the parent component via emitted events.
+
+### 3. Props
+
+| Prop                | Type   | Required | Default                    | Description                                                                |
+|:--------------------|:-------|:---------|:---------------------------|:---------------------------------------------------------------------------|
+| `eventsEndpoint`    | String | Yes      | `/api/events`              | The API endpoint to fetch event data for the monthly calendar view.        |
+| `resourcesEndpoint` | String | Yes      | `/api/paginated-resources` | The API endpoint to fetch paginated resources and their associated events. |
+
+### 4. Pass-Through Props
+
+This component automatically passes any unrecognized props down to the active child component (`CalendarView` or `ResourceTimelineView`). This allows you to customize the appearance of the child components without modifying the wrapper.
+
+**Examples of available pass-through props:**
+
+-   **For `CalendarView`:**
+-   `dayLabels` (Array): An array of strings for the day-of-the-week headers.
+-   *Default:* `['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']`
+-   **For `ResourceTimelineView`:**
+-   `rowHeight` (Number): The height in pixels for each resource row.
+-   *Default:* `50`
+
+### 5. Emitted Events
+
+| Event          | Payload          | Description                                                                                          |
+|:---------------|:-----------------|:-----------------------------------------------------------------------------------------------------|
+| `@event-click` | `(eventObject)`  | Fired when a user clicks on an event. The parent can handle this to show details, open a modal, etc. |
+| `@fetch-error` | `(errorPayload)` | Fired if an API call fails. Payload is `{ view: 'calendar'\|'timeline', error: Error }`.             |
+
+### 6. Usage Example
+
+This example shows how to configure the endpoints and customize the child components using pass-through props.
+
+```vue
+<!-- MyPage.vue -->
+<template>
+  <div>
+    <h1>My Custom Calendar</h1>
+    <resource-calendar-view
+      :events-endpoint="'/api/my-events'"
+      :resources-endpoint="'/api/my-resources'"
+      @event-click="showEventDetails"
+
+      <!-- Pass-through props for child components -->
+      :day-labels="['S', 'M', 'T', 'W', 'T', 'F', 'S']"
+      :row-height="65"
+    />
+  </div>
+</template>
+
+<script>
+import ResourceCalendarView from './components/ResourceCalendarView.vue';
+
+export default {
+  components: { ResourceCalendarView },
+  methods: {
+    showEventDetails(event) {
+      alert(`You clicked on: ${event.title}`);
+    }
+  }
+}
+</script>
+```
+
+---
+---
+
+## Dokumentasi: Komponen `ResourceCalendarView` (Bahasa Indonesia)
+
+### 1. Gambaran Umum
+
+`ResourceCalendarView` adalah komponen pembungkus (wrapper) "siap pakai" yang menyediakan pengalaman kalender dan timeline resource yang lengkap dan interaktif. Komponen ini mengenkapsulasi semua logika kompleks, termasuk pergantian tampilan, pengambilan data on-demand dari API, dan paginasi.
+
+### 2. Fitur
+
+-   **Tampilan Ganda:** Beralih antara tampilan grid kalender bulanan dan timeline resource harian.
+-   **Pemuatan On-Demand:** Mengambil data secara efisien dari backend hanya untuk rentang tanggal yang terlihat.
+-   **Paginasi Resource:** Secara otomatis menangani paginasi untuk daftar resource.
+-   **Sangat Mudah Dikonfigurasi:** Props utama didefinisikan di wrapper, dan props presentasi tambahan dapat dioper langsung ke komponen anak.
+-   **Berbasis Event:** Mengkomunikasikan aksi pengguna ke komponen induk melalui event yang di-emit.
+
+### 3. Props
+
+| Prop                | Tipe   | Wajib | Default                    | Deskripsi                                                                            |
+|:--------------------|:-------|:------|:---------------------------|:-------------------------------------------------------------------------------------|
+| `eventsEndpoint`    | String | Ya    | `/api/events`              | Endpoint API untuk mengambil data event untuk tampilan kalender bulanan.             |
+| `resourcesEndpoint` | String | Ya    | `/api/paginated-resources` | Endpoint API untuk mengambil data resource yang dipaginasi beserta event terkaitnya. |
+
+### 4. Props Penerus (Pass-Through Props)
+
+Komponen ini secara otomatis meneruskan props apa pun yang tidak dikenali ke komponen anak yang sedang aktif (`CalendarView` atau `ResourceTimelineView`). Hal ini memungkinkan Anda untuk menyesuaikan tampilan komponen anak tanpa mengubah kode wrapper.
+
+**Contoh props penerus yang tersedia:**
+
+-   **Untuk `CalendarView`:**
+-   `dayLabels` (Array): Sebuah array berisi string untuk header nama hari dalam seminggu.
+-   *Default:* `['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']`
+-   **Untuk `ResourceTimelineView`:**
+-   `rowHeight` (Number): Tinggi dalam piksel untuk setiap baris resource.
+-   *Default:* `50`
+
+### 5. Event yang Di-emit
+
+| Event          | Payload          | Deskripsi                                                                                                                    |
+|:---------------|:-----------------|:-----------------------------------------------------------------------------------------------------------------------------|
+| `@event-click` | `(eventObject)`  | Dipicu saat pengguna mengklik sebuah event. Komponen induk dapat menangani ini untuk menampilkan detail, membuka modal, dll. |
+| `@fetch-error` | `(errorPayload)` | Dipicu jika panggilan API gagal. Payload-nya adalah `{ view: 'calendar'\|'timeline', error: Error }`.                        |
+
+### 6. Contoh Penggunaan
+
+Contoh ini menunjukkan cara mengkonfigurasi endpoint dan menyesuaikan komponen anak menggunakan props penerus.
+
+```vue
+<!-- HalamanSaya.vue -->
+<template>
+  <div>
+    <h1>Kalender Kustom Saya</h1>
+    <resource-calendar-view
+      :events-endpoint="'/api/acara-saya'"
+      :resources-endpoint="'/api/resource-saya'"
+      @event-click="tampilkanDetailEvent"
+
+      <!-- Props penerus untuk komponen anak -->
+      :day-labels="['M', 'S', 'S', 'R', 'K', 'J', 'S']"
+      :row-height="65"
+    />
+  </div>
+</template>
+
+<script>
+import ResourceCalendarView from './components/ResourceCalendarView.vue';
+
+export default {
+  components: { ResourceCalendarView },
+  methods: {
+    tampilkanDetailEvent(event) {
+      alert(`Anda mengklik: ${event.title}`);
+    }
+  }
+}
+</script>
+```
+
+That's an excellent question, and it gets to the heart of why the pass-through props pattern is so powerful.
+
+The short answer is: **No, their fundamental usage and required props have not changed at all.** They are still "dumb" components that receive data.
+
+However, their **capabilities have been enhanced** with new, optional props for customization. Here is a detailed breakdown.
+
+---
+
+## Summary of Changes
+
+The core props required to make the components function are exactly the same:
+
+*   **`CalendarView` still requires:** `monthData`, `monthName`, `year`.
+*   **`ResourceTimelineView` still requires:** `events`, `resources`, `currentDate`.
+
+The only change is the addition of **new, optional props with default values**. This means your existing code would continue to work perfectly without any changes. The new props simply give you *more options* for customization if you choose to use them.
+
+---
+
+### 1. `CalendarView` Props
+
+#### Before:
+The component had no props for visual customization. The day labels (`'Sun'`, `'Mon'`, etc.) were hard-coded inside its `data()`.
+
+#### After (Now):
+A new **optional** prop has been added:
+
+| Prop        | Type  | Default                                             | Description                                   |
+|:------------|:------|:----------------------------------------------------|:----------------------------------------------|
+| `dayLabels` | Array | `['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']` | Allows you to customize the week day headers. |
+
+**How this affects usage:**
+
+*   **If you do nothing:** The calendar will look and behave exactly as before, using the default English day labels.
+*   **To customize:** You can now pass a new array through the `ResourceCalendarView` wrapper to change the labels, for example, to single letters or another language.
+
+**Example:**
+
+```vue
+<!-- Uses the default ['Sun', 'Mon', ...] -->
+<ResourceCalendarView ... />
+
+<!-- Customizes the day labels to be single letters -->
+<ResourceCalendarView ... :day-labels="['S', 'M', 'T', 'W', 'T', 'F', 'S']" />
+
+<!-- Customizes for Bahasa Indonesia -->
+<ResourceCalendarView ... :day-labels="['Min', 'Sen', 'Sel', 'Rab', 'Kam', 'Jum', 'Sab']" />
+```
+
+---
+
+### 2. `ResourceTimelineView` Props
+
+#### Before:
+The height of each resource row was hard-coded in the component's CSS to `50px`.
+
+#### After (Now):
+A new **optional** prop has been added:
+
+| Prop        | Type   | Default | Description                                 |
+|:------------|:-------|:--------|:--------------------------------------------|
+| `rowHeight` | Number | `50`    | The height in pixels for each resource row. |
+
+**How this affects usage:**
+
+*   **If you do nothing:** The timeline rows will still be 50px tall, looking exactly as before.
+*   **To customize:** You can now pass a number to make the rows taller (for more text) or shorter (to see more resources on the screen).
+
+**Example:**
+
+```vue
+<!-- Uses the default 50px row height -->
+<ResourceCalendarView ... />
+
+<!-- Makes the rows taller for better readability -->
+<ResourceCalendarView ... :row-height="75" />
+
+<!-- Makes the rows shorter for a more compact view -->
+<ResourceCalendarView ... :row-height="35" />
+```
+
+### The "Magic" of `v-bind="$attrs"`
+
+The reason you don't need to declare `dayLabels` or `rowHeight` on the `ResourceCalendarView` wrapper itself is because of `v-bind="$attrs"`.
+
+When you write `<ResourceCalendarView :day-labels="['M','S']" />`:
+
+1.  `ResourceCalendarView` looks at its own `props` list. It doesn't see `day-labels`.
+2.  Because it's not a declared prop, Vue puts `day-labels` into a special object called `$attrs`.
+3.  Inside the wrapper's template, `v-bind="$attrs"` on `<calendar-view ... />` effectively expands to `<calendar-view ... day-labels="['M','S']" />`.
+4.  The `CalendarView` component *does* have `dayLabels` as a prop, so it accepts it and uses it.
+
+This keeps your wrapper component clean and ensures it can adapt to future customizations of the child components without needing any code changes.

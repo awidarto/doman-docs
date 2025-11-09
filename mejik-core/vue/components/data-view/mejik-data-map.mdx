@@ -1,0 +1,85 @@
+---
+title: Mejik Data Map - full featured geo data mapview
+---
+
+## Documentation: `MejikDataMap` Component (English)
+
+### 1. Overview
+
+`MejikDataMap` is a controller component that combines the user interface of a server-side datatable (search, pagination) with an interactive `LeafletMap` display. It is designed to be the central view for exploring paginated and searchable geospatial data.
+
+Like `MejikDatatable`, it operates on an event-driven model. It captures user interactions from its UI controls (search, pagination) and from the map itself (pan, zoom) and emits structured events for a parent component to handle data fetching.
+
+### 2. Features
+
+-   **Combined UI:** Provides a unified interface with a global search bar and pagination controls for a map view.
+-   **Server-Side Driven:** Built to work with paginated and filtered API endpoints.
+-   **Event Aggregation:** Captures user input from multiple sources (search, pagination, map movement) and emits distinct events.
+-   **Selection Indicator:** Includes a summary bar to show how many map features are currently selected.
+-   **Pass-Through Power:** All advanced props (`selectionMode`, `visibleLayers`, etc.) and slots for `LeafletMap` are passed through automatically.
+
+### 3. Props
+
+| Prop                | Type   | Default                                                           | Description                                                                                |
+|:--------------------|:-------|:------------------------------------------------------------------|:-------------------------------------------------------------------------------------------|
+| `geoJsonFeatures`   | Array  | **Required.** An array of GeoJSON features to display on the map. |
+| `totalRows`         | Number | `0`                                                               | The total number of records on the server for pagination controls.                         |
+| `isLoading`         | Bool   | `false`                                                           | When `true`, displays a loading overlay over the map.                                      |
+| `paginationOptions` | Object | `{ enabled: true, ... }`                                          | Configuration for the pagination controls. Can be used with `.sync`.                       |
+| `searchOptions`     | Object | `{ enabled: true }`                                               | Configuration for the global search bar.                                                   |
+| `selectedFeatures`  | Array  | `[]`                                                              | An array of the currently selected GeoJSON feature objects. **Use with `.sync` modifier**. |
+
+### 4. Emitted Events
+
+| Event             | Payload                                | Description                                                                                          |
+|:------------------|:---------------------------------------|:-----------------------------------------------------------------------------------------------------|
+| `@on-view-change` | `{ bounds: { sw, ne }, zoom: Number }` | Fired when the map's viewport changes (pan/zoom).                                                    |
+| `@on-search`      | `{ searchTerm: String }`               | Fired when the user searches.                                                                        |
+| `@on-page-change` | `{ currentPage: Number }`              | Fired when the user changes the page using pagination controls.                                      |
+| _...other events_ |                                        | All other events from the underlying `LeafletMap` (like `@more-info-click`) are also passed through. |
+
+### 5. Pass-Through Props & Slots
+
+All props not listed above (e.g., `selectionMode`, `visibleLayers`) are passed directly to `LeafletMap`. Similarly, all scoped slots (like `#popup-content`) are also passed through, allowing full customization of the map from the parent.
+
+---
+
+## Documentation: `MejikDataMap` (Bahasa Indonesia)
+
+### 1. Gambaran Umum
+
+`MejikDataMap` adalah komponen pengontrol yang menggabungkan antarmuka pengguna dari datatable sisi server (pencarian, paginasi) dengan tampilan `LeafletMap` yang interaktif. Komponen ini dirancang untuk menjadi tampilan utama dalam menjelajahi data geospasial yang dapat dipaginasi dan dicari.
+
+Seperti `MejikDatatable`, komponen ini beroperasi dengan model berbasis event. Ia menangkap interaksi pengguna dari kontrol UI-nya (pencarian, paginasi) dan dari peta itu sendiri (geser, zoom) lalu memancarkan event terstruktur agar komponen induk dapat menangani pengambilan data.
+
+### 2. Fitur
+
+-   **UI Gabungan:** Menyediakan antarmuka terpadu dengan bar pencarian global dan kontrol paginasi untuk tampilan peta.
+-   **Digerakkan Sisi Server:** Dibuat untuk bekerja dengan endpoint API yang dipaginasi dan difilter.
+-   **Agregasi Event:** Menangkap input pengguna dari berbagai sumber (pencarian, paginasi, pergerakan peta) dan memancarkan event yang jelas.
+-   **Indikator Seleksi:** Menyertakan bar ringkasan untuk menunjukkan berapa banyak fitur peta yang sedang dipilih.
+-   **Kekuatan Penerusan (Pass-Through):** Semua props tingkat lanjut (`selectionMode`, `visibleLayers`, dll.) dan slot untuk `LeafletMap` diteruskan secara otomatis.
+
+### 3. Props
+
+| Prop                | Tipe   | Default                                                   | Deskripsi                                                                                |
+|:--------------------|:-------|:----------------------------------------------------------|:-----------------------------------------------------------------------------------------|
+| `geoJsonFeatures`   | Array  | **Wajib.** Array fitur GeoJSON untuk ditampilkan di peta. |
+| `totalRows`         | Number | `0`                                                       | Jumlah total data di server untuk kontrol paginasi.                                      |
+| `isLoading`         | Bool   | `false`                                                   | Jika `true`, menampilkan overlay loading di atas peta.                                   |
+| `paginationOptions` | Object | `{ enabled: true, ... }`                                  | Konfigurasi untuk kontrol paginasi. Dapat digunakan dengan `.sync`.                      |
+| `searchOptions`     | Object | `{ enabled: true }`                                       | Konfigurasi untuk bar pencarian global.                                                  |
+| `selectedFeatures`  | Array  | `[]`                                                      | Array dari objek fitur GeoJSON yang sedang dipilih. **Gunakan dengan modifier `.sync`**. |
+
+### 4. Event yang Di-emit
+
+| Event              | Payload                                | Deskripsi                                                                                                 |
+|:-------------------|:---------------------------------------|:----------------------------------------------------------------------------------------------------------|
+| `@on-view-change`  | `{ bounds: { sw, ne }, zoom: Number }` | Dipicu saat viewport peta berubah (geser/zoom).                                                           |
+| `@on-search`       | `{ searchTerm: String }`               | Dipicu saat pengguna melakukan pencarian.                                                                 |
+| `@on-page-change`  | `{ currentPage: Number }`              | Dipicu saat pengguna mengganti halaman menggunakan kontrol paginasi.                                      |
+| _...event lainnya_ |                                        | Semua event lain dari `LeafletMap` di dalamnya (seperti `@more-info-click`) juga akan diteruskan ke atas. |
+
+### 5. Props & Slot Penerus
+
+Semua props yang tidak tercantum di atas (misalnya, `selectionMode`, `visibleLayers`) diteruskan langsung ke `LeafletMap`. Demikian pula, semua scoped slot (seperti `#popup-content`) juga diteruskan, memungkinkan kustomisasi penuh pada peta dari komponen induk.

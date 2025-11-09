@@ -1,0 +1,350 @@
+---
+title: Sidebar Tree Table
+---
+
+## Documentation: `SidebarTreeTable` Component (English)
+
+### 1. Overview
+
+`SidebarTreeTable` is a flexible layout component that combines a hierarchical tree sidebar (`TreeGroupEditor`) with a powerful data table (`MejikDatatable`). It is designed for managing and displaying items that belong to structured categories. The primary use case is filtering the data table's content based on the selected category in the tree.
+
+This component follows an "inversion of control" pattern for data loading. It manages all the parameters for pagination, sorting, and filtering, but it delegates the actual API call to a `loader` function provided by the parent component.
+
+### 2. Features
+
+-   **Combined View:** Integrates a collapsible tree-based navigation with a feature-rich data table.
+-   **Parent-Controlled Data Loading:** Provides maximum flexibility by letting the parent component handle the actual data fetching logic via a `loader` function prop.
+-   **State Management:** Internally manages all datatable parameters (pagination, sorting, filtering) and passes them to the parent's loader.
+-   **Mirrored Datatable Functionality:** Exposes most of `MejikDatatable`'s props and events, acting as a powerful and convenient wrapper.
+-   **Slot Passthrough:** Any scoped slots provided to `SidebarTreeTable` are passed directly to `MejikDatatable`, allowing for full customization of table cells and rows.
+-   **CRUD Events:** Emits events for tree management (add, edit, delete), allowing the parent page to handle the logic.
+
+### 3. Props
+
+#### Component & Tree Configuration
+
+| Prop               | Type   | Required | Default        | Description                                                                      |
+|:-------------------|:-------|:---------|:---------------|:---------------------------------------------------------------------------------|
+| `nodesUrl`         | String | Yes      | -              | The API endpoint (POST) for fetching the tree structure data for the sidebar.    |
+| `sidebarTitle`     | String | No       | `'Categories'` | The title displayed at the top of the sidebar.                                   |
+| `treeServerSearch` | Bool   | No       | `false`        | If `true`, the search term is sent to `nodesUrl` for server-side searching.      |
+| `contentTitle`     | String | No       | `'Items in'`   | The prefix for the main content area's title (e.g., "Items in [Category Name]"). |
+
+#### Data Loading & State
+
+| Prop        | Type     | Required | Default | Description                                                                                                                                        |
+|:------------|:---------|:---------|:--------|:---------------------------------------------------------------------------------------------------------------------------------------------------|
+| `loader`    | Function | Yes      | -       | **The most important prop.** A function in the parent component that performs the data fetch. It receives an object with all datatable parameters. |
+| `rows`      | Array    | No       | `[]`    | An array of data objects to display in the table. This should be provided by the parent.                                                           |
+| `totalRows` | Number   | No       | `0`     | The total number of rows available on the server for the current filter set. Used for pagination.                                                  |
+| `isLoading` | Boolean  | No       | `false` | A boolean to show/hide the datatable's loading state. Can be used with the `.sync` modifier.                                                       |
+
+#### Mirrored `MejikDatatable` Props
+
+These props are passed directly to the underlying `MejikDatatable` component.
+
+| Prop                | Type    | Default/Description                                                |
+|:--------------------|:--------|:-------------------------------------------------------------------|
+| `styleClass`        | String  | CSS class for the table. Default: `'vgt-table striped'`            |
+| `columns`           | Array   | **Required.** The column definitions for the data table.           |
+| `lineNumbers`       | Boolean | Show row numbers. Default: `false`                                 |
+| `paginationOptions` | Object  | Configuration for pagination. Can be used with `.sync`.            |
+| `searchOptions`     | Object  | Configuration for the global search.                               |
+| `selectOptions`     | Object  | Configuration for row selection (checkboxes).                      |
+| `selectedRows`      | Array   | An array of the currently selected rows. Can be used with `.sync`. |
+| `sortOptions`       | Object  | Configuration for sorting. Can be used with `.sync`.               |
+
+### 4. The `loader` Function Contract
+
+The parent component **must** provide a `loader` function. This function will be called automatically by `SidebarTreeTable` whenever the data needs to be refreshed (e.g., on page change, sort, or node selection).
+
+The function will receive one argument: a `params` object with the following structure:
+```javascript
+{
+  pagination: { currentPage: 1, perPage: 10 },
+  sort: { field: 'id', type: 'asc' },
+  search: 'searchTerm',
+  columnFilters: { name: 'filterValue' },
+  filters: { categoryId: 123 } // Contains the selected node's ID
+}
+```
+The parent's function should use these params to make an API call and then update its own `rows`, `totalRows`, and `isLoading` data properties.
+
+### 5. Pass-Through Slots
+
+Any scoped slots passed to `<SidebarTreeTable>` will be automatically forwarded to the underlying `<MejikDatatable>`. This allows you to customize the rendering of table cells.
+
+```vue
+<SidebarTreeTable ...>
+  <template #table-row="props">
+    <!-- Custom row rendering -->
+  </template>
+  <template #table-cell-status="props">
+    <!-- Custom rendering for the 'status' column -->
+    <span class="badge">{{ props.formattedRow[props.column.field] }}</span>
+  </template>
+</SidebarTreeTable>
+```
+
+### 6. Emitted Events
+
+The component emits events from both the tree and the datatable. Tree events are for management, while datatable events are for informational purposes or advanced state management in the parent.
+
+-   **Tree Events:** `@node-selected`, `@add-node`, `@edit-node`, `@delete-node`
+-   **Datatable Events:** `@on-page-change`, `@on-per-page-change`, `@on-sort-change`, `@on-search`, `@on-column-filter`, `@on-selected-rows-change`, `@on-cell-click`, `@action`
+-   **.sync Events:** `update:isLoading`, `update:selectedRows`, `update:paginationOptions`, `update:sortOptions`
+
+### 7. Usage Example
+
+```vue
+<!-- MyArticlePage.vue -->
+<template>
+  <div class="container-fluid mt-4">
+    <SidebarTreeTable
+      sidebar-title="Article Categories"
+      nodes-url="/api/categories/tree"
+
+      content-title="Articles in Category:"
+      :columns="columns"
+      :loader="loadArticles"
+      :rows="rows"
+      :total-rows="totalRows"
+      :is-loading.sync="isLoading"
+
+      @edit-node="openCategoryEditor"
+      @delete-node="deleteCategory"
+    >
+      <!-- Example of a pass-through slot for a custom status column -->
+      <template #table-cell-status="props">
+        <span v-if="props.row.status === 'published'" class="badge badge-success">Published</span>
+        <span v-else class="badge badge-secondary">Draft</span>
+      </template>
+    </SidebarTreeTable>
+  </div>
+</template>
+
+<script>
+import axios from 'axios';
+import SidebarTreeTable from './components/SidebarTreeTable.vue';
+
+export default {
+  components: { SidebarTreeTable },
+  data() {
+    return {
+      // Data properties that the loader will update
+      rows: [],
+      totalRows: 0,
+      isLoading: true,
+
+      // Datatable column definition
+      columns: [
+        { label: 'Title', field: 'title' },
+        { label: 'Author', field: 'author.name' },
+        { label: 'Status', field: 'status' },
+        { label: 'Published On', field: 'published_at', type: 'date' },
+      ],
+    };
+  },
+  methods: {
+    // The required loader function
+    async loadArticles(params) {
+      this.isLoading = true;
+      try {
+        // Use the params provided by SidebarTreeTable to make the API call
+        const response = await axios.get('/api/articles', { params });
+
+        this.rows = response.data.data;
+        this.totalRows = response.data.meta.total;
+      } catch (error) {
+        console.error("Failed to load articles:", error);
+        // Handle error (e.g., show a toast notification)
+      } finally {
+        this.isLoading = false;
+      }
+    },
+
+    openCategoryEditor(node) {
+      console.log('Open modal to edit category:', node);
+    },
+
+    async deleteCategory(node) {
+      console.log('Deleting category:', node);
+      // await axios.delete(`/api/categories/${node.id}`);
+      // After deleting, you might want to refresh the tree
+    }
+  }
+}
+</script>
+```
+
+---
+---
+
+## Dokumentasi: Komponen `SidebarTreeTable` (Bahasa Indonesia)
+
+### 1. Gambaran Umum
+
+`SidebarTreeTable` adalah komponen tata letak (layout) fleksibel yang menggabungkan sidebar pohon hierarkis (`TreeGroupEditor`) dengan tabel data yang kuat (`MejikDatatable`). Komponen ini dirancang untuk mengelola dan menampilkan item yang termasuk dalam kategori terstruktur. Kasus penggunaan utamanya adalah untuk memfilter konten tabel data berdasarkan kategori yang dipilih di pohon.
+
+Komponen ini mengikuti pola "inversion of control" untuk pemuatan data. Ia mengelola semua parameter untuk paginasi, pengurutan, dan pemfilteran, tetapi mendelegasikan panggilan API sebenarnya ke sebuah fungsi `loader` yang disediakan oleh komponen induk.
+
+### 2. Fitur
+
+-   **Tampilan Gabungan:** Mengintegrasikan navigasi berbasis pohon yang dapat dilipat dengan tabel data yang kaya fitur.
+-   **Pemuatan Data Dikontrol Induk:** Memberikan fleksibilitas maksimum dengan membiarkan komponen induk menangani logika pengambilan data melalui prop fungsi `loader`.
+-   **Manajemen State:** Secara internal mengelola semua parameter datatable (paginasi, pengurutan, filter) dan meneruskannya ke loader milik induk.
+-   **Fungsionalitas Datatable Cerminan:** Mengekspos sebagian besar props dan event dari `MejikDatatable`, berfungsi sebagai pembungkus (wrapper) yang kuat dan nyaman.
+-   **Penerusan Slot (Slot Passthrough):** Setiap scoped slot yang diberikan ke `SidebarTreeTable` diteruskan langsung ke `MejikDatatable`, memungkinkan kustomisasi penuh pada sel dan baris tabel.
+-   **Event CRUD:** Memancarkan event untuk manajemen pohon (tambah, edit, hapus), memungkinkan halaman induk menangani logikanya.
+
+### 3. Props
+
+#### Konfigurasi Komponen & Pohon
+
+| Prop               | Tipe   | Wajib | Default        | Deskripsi                                                                       |
+|:-------------------|:-------|:------|:---------------|:--------------------------------------------------------------------------------|
+| `nodesUrl`         | String | Ya    | -              | Endpoint API (POST) untuk mengambil data struktur pohon untuk sidebar.          |
+| `sidebarTitle`     | String | Tidak | `'Categories'` | Judul yang ditampilkan di bagian atas sidebar.                                  |
+| `treeServerSearch` | Bool   | Tidak | `false`        | Jika `true`, istilah pencarian dikirim ke `nodesUrl` untuk pencarian di server. |
+| `contentTitle`     | String | Tidak | `'Items in'`   | Awalan untuk judul area konten utama (misalnya, "Item di [Nama Kategori]").     |
+
+#### Pemuatan Data & State
+
+| Prop        | Tipe     | Wajib | Default | Deskripsi                                                                                                                                         |
+|:------------|:---------|:------|:--------|:--------------------------------------------------------------------------------------------------------------------------------------------------|
+| `loader`    | Function | Ya    | -       | **Prop terpenting.** Sebuah fungsi di komponen induk yang melakukan pengambilan data. Fungsi ini menerima objek dengan semua parameter datatable. |
+| `rows`      | Array    | Tidak | `[]`    | Array objek data untuk ditampilkan di tabel. Ini harus disediakan oleh induk.                                                                     |
+| `totalRows` | Number   | Tidak | `0`     | Jumlah total baris yang tersedia di server untuk set filter saat ini. Digunakan untuk paginasi.                                                   |
+| `isLoading` | Boolean  | Tidak | `false` | Boolean untuk menampilkan/menyembunyikan status loading datatable. Dapat digunakan dengan modifier `.sync`.                                       |
+
+#### Props Cerminan `MejikDatatable`
+
+Props ini diteruskan langsung ke komponen `MejikDatatable` di dalamnya.
+
+| Prop              | Tipe    | Default/Deskripsi                                             |
+| :---------------- | :------ | :------------------------------------------------------------ |
+| `styleClass`      | String  | Kelas CSS untuk tabel. Default: `'vgt-table striped'`         |
+| `columns`         | Array   | **Wajib.** Definisi kolom untuk tabel data.                   |
+| `lineNumbers`     | Boolean | Tampilkan nomor baris. Default: `false`                       |
+| `paginationOptions` | Object  | Konfigurasi untuk paginasi. Dapat digunakan dengan `.sync`.   |
+| `searchOptions`   | Object  | Konfigurasi untuk pencarian global.                           |
+| `selectOptions`   | Object  | Konfigurasi untuk pemilihan baris (checkbox).                 |
+| `selectedRows`    | Array   | Array dari baris yang sedang dipilih. Dapat digunakan dengan `.sync`. |
+| `sortOptions`     | Object  | Konfigurasi untuk pengurutan. Dapat digunakan dengan `.sync`.   |
+
+### 4. Kontrak Fungsi `loader`
+
+Komponen induk **wajib** menyediakan fungsi `loader`. Fungsi ini akan dipanggil secara otomatis oleh `SidebarTreeTable` setiap kali data perlu diperbarui (misalnya, saat ganti halaman, mengurutkan, atau memilih node).
+
+Fungsi ini akan menerima satu argumen: sebuah objek `params` dengan struktur berikut:
+```javascript
+{
+  pagination: { currentPage: 1, perPage: 10 },
+  sort: { field: 'id', type: 'asc' },
+  search: 'istilahCari',
+  columnFilters: { name: 'nilaiFilter' },
+  filters: { categoryId: 123 } // Berisi ID node yang dipilih
+}
+```
+Fungsi di komponen induk harus menggunakan parameter ini untuk melakukan panggilan API dan kemudian memperbarui properti data miliknya sendiri yaitu `rows`, `totalRows`, dan `isLoading`.
+
+### 5. Penerusan Slot (Pass-Through Slots)
+
+Setiap scoped slot yang diteruskan ke `<SidebarTreeTable>` akan secara otomatis diteruskan ke `<MejikDatatable>` di dalamnya. Hal ini memungkinkan Anda untuk menyesuaikan rendering sel tabel.
+
+```vue
+<SidebarTreeTable ...>
+  <template #table-cell-status="props">
+    <!-- Kustomisasi rendering untuk kolom 'status' -->
+    <span class="badge">{{ props.formattedRow[props.column.field] }}</span>
+  </template>
+</SidebarTreeTable>
+```
+
+### 6. Event yang Di-emit
+
+Komponen ini memancarkan event dari pohon dan datatable. Event pohon adalah untuk manajemen, sedangkan event datatable adalah untuk tujuan informasi atau manajemen state lanjutan di komponen induk.
+
+-   **Event Pohon:** `@node-selected`, `@add-node`, `@edit-node`, `@delete-node`
+-   **Event Datatable:** `@on-page-change`, `@on-per-page-change`, `@on-sort-change`, `@on-search`, `@on-column-filter`, `@on-selected-rows-change`, `@on-cell-click`, `@action`
+-   **Event .sync:** `update:isLoading`, `update:selectedRows`, `update:paginationOptions`, `update:sortOptions`
+
+### 7. Contoh Penggunaan
+
+```vue
+<!-- HalamanArtikelSaya.vue -->
+<template>
+  <div class="container-fluid mt-4">
+    <SidebarTreeTable
+      sidebar-title="Kategori Artikel"
+      nodes-url="/api/kategori/tree"
+
+      content-title="Artikel dalam Kategori:"
+      :columns="columns"
+      :loader="loadArticles"
+      :rows="rows"
+      :total-rows="totalRows"
+      :is-loading.sync="isLoading"
+
+      @edit-node="bukaEditorKategori"
+      @delete-node="hapusKategori"
+    >
+      <!-- Contoh slot penerusan untuk kolom status kustom -->
+      <template #table-cell-status="props">
+        <span v-if="props.row.status === 'published'" class="badge badge-success">Terbit</span>
+        <span v-else class="badge badge-secondary">Draf</span>
+      </template>
+    </SidebarTreeTable>
+  </div>
+</template>
+
+<script>
+import axios from 'axios';
+import SidebarTreeTable from './components/SidebarTreeTable.vue';
+
+export default {
+  components: { SidebarTreeTable },
+  data() {
+    return {
+      // Properti data yang akan diperbarui oleh loader
+      rows: [],
+      totalRows: 0,
+      isLoading: true,
+
+      // Definisi kolom Datatable
+      columns: [
+        { label: 'Judul', field: 'title' },
+        { label: 'Penulis', field: 'author.name' },
+        { label: 'Status', field: 'status' },
+        { label: 'Tanggal Terbit', field: 'published_at', type: 'date' },
+      ],
+    };
+  },
+  methods: {
+    // Fungsi loader yang wajib ada
+    async loadArticles(params) {
+      this.isLoading = true;
+      try {
+        // Gunakan params yang disediakan oleh SidebarTreeTable untuk melakukan panggilan API
+        const response = await axios.get('/api/articles', { params });
+
+        this.rows = response.data.data;
+        this.totalRows = response.data.meta.total;
+      } catch (error) {
+        console.error("Gagal memuat artikel:", error);
+      } finally {
+        this.isLoading = false;
+      }
+    },
+
+    bukaEditorKategori(node) {
+      console.log('Buka modal untuk edit kategori:', node);
+    },
+
+    async hapusKategori(node) {
+      console.log('Menghapus kategori:', node);
+    }
+  }
+}
+</script>
+```

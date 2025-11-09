@@ -1,0 +1,565 @@
+---
+title: Mejik Modal Form - reusable modal form
+---
+
+### 1. The Reusable `MejikModalForm.vue` Component
+
+This component will handle all the logic related to the modal, data fetching, saving, and state management.
+
+```vue
+<!-- MejikModalForm.vue -->
+<template>
+  <!-- We don't render anything directly. The b-modal is the component's entire visible structure. -->
+  <b-modal
+    :id="modalId"
+    :title="title"
+    v-bind="$attrs"
+    no-close-on-backdrop
+    @show="handleShow"
+    @hidden="handleHidden"
+    v-on="$listeners"
+  >
+    <!-- Loading Overlay -->
+    <b-overlay :show="isLoading" rounded="sm">
+      <!-- Scoped Slot for the form layout -->
+      <slot
+        name="form"
+        :form-object="formObject"
+        :form-mode="currentMode"
+        :save-item="saveItem"
+        :form-params="internalParams"
+        :reset-form="resetForm"
+      ></slot>
+    </b-overlay>
+
+    <!-- Custom Footer for dynamic actions -->
+    <template #modal-footer>
+      <button class="btn btn-secondary" @click="hide">Cancel</button>
+
+      <!-- Show "Edit" button in 'view' mode if canEdit is true -->
+      <button
+        v-if="currentMode === 'view' && canEdit"
+        class="btn btn-info"
+        @click="switchToEditMode"
+      >
+        <i class="las la-pencil-alt"></i> Edit
+      </button>
+
+      <!-- Show "Save" button in 'add' or 'edit' mode -->
+      <button
+        v-if="(currentMode === 'add' && canAdd) || (currentMode === 'edit' && canEdit)"
+        class="btn btn-primary"
+        :disabled="isLoading"
+        @click="saveItem"
+      >
+        <b-spinner v-if="isLoading" small></b-spinner>
+        <i v-else class="las la-save"></i>
+        Save
+      </button>
+    </template>
+  </b-modal>
+</template>
+
+<script>
+import _ from 'lodash';
+
+export default {
+  name: "MejikModalForm",
+  // Inherit attributes like 'size', 'centered', etc., and pass them to b-modal
+  inheritAttrs: false,
+  props: {
+    // --- Behavior & Mode ---
+    mode: {
+      type: String,
+      default: 'add',
+      validator: (value) => ['add', 'edit', 'view'].includes(value),
+    },
+    // --- Data & Defaults ---
+    objectDefault: {
+      type: Object,
+      default: () => ({}),
+    },
+    // --- ACL ---
+    canAdd: { type: Boolean, default: true },
+    canEdit: { type: Boolean, default: true },
+    canView: { type: Boolean, default: true },
+    // canUpload prop is not directly used here but kept for consistency if needed later
+    canUpload: { type: Boolean, default: false },
+    // --- Validation ---
+    validator: {
+      type: Function,
+      default: null, // Should be an async function: async () => boolean
+    },
+    // --- Parameters ---
+    params: {
+      type: [Object, Array],
+      default: () => ({}),
+    },
+    // --- API URLs ---
+    urls: {
+      type: Object,
+      default: () => ({
+        add: '',
+        edit: '', // Should be the base URL, e.g., '/api/items'
+        view: '', // Should be the base URL, e.g., '/api/items'
+        param: '',
+      }),
+    },
+    // --- Customization ---
+    titlePrefix: {
+      type: String,
+      default: 'Item'
+    },
+    // Key to get the unique ID from the data object
+    uniqueKey: {
+        type: String,
+        default: 'id'
+    }
+  },
+  data() {
+    return {
+      modalId: `mejik-modal-form-${this._uid}`,
+      isLoading: false,
+      currentMode: 'add',
+      currentId: null,
+      formObject: {},
+      initialFormObject: {}, // For reset functionality
+      internalParams: {},
+    };
+  },
+  computed: {
+    title() {
+      // Creates a dynamic title like "Add New Item", "Edit Item", "View Item Details"
+      const modeText = {
+        add: 'Add New',
+        edit: 'Edit',
+        view: 'View Details of'
+      }[this.currentMode];
+      return `${modeText} ${this.titlePrefix}`;
+    },
+  },
+  methods: {
+    // --- Public Methods (to be called via $refs) ---
+
+    /**
+     * Public method to open the modal.
+     * @param {object} options - Configuration for the modal opening.
+     * @param {string} options.mode - 'add', 'edit', or 'view'.
+     * @param {any} [options.id=null] - The ID of the item for 'edit' or 'view' mode.
+     */
+    show({ mode, id = null }) {
+      if (!this.canView && (mode === 'edit' || mode === 'view')) {
+          console.warn("MejikModalForm: Insufficient permissions to view or edit.");
+          return;
+      }
+      if (!this.canAdd && mode === 'add') {
+          console.warn("MejikModalForm: Insufficient permissions to add.");
+          return;
+      }
+
+      this.currentMode = mode;
+      this.currentId = id;
+      this.$bvModal.show(this.modalId);
+    },
+
+    hide() {
+      this.$bvModal.hide(this.modalId);
+    },
+
+    // --- Internal Event Handlers ---
+
+    // Fired when the modal begins to show. Good place to load data.
+    async handleShow() {
+      this.isLoading = true;
+      try {
+        // 1. Load additional parameters if URL is provided
+        if (this.urls.param) {
+          const res = await window.axios.get(this.urls.param);
+          this.internalParams = res.data;
+        } else {
+          this.internalParams = _.cloneDeep(this.params);
+        }
+
+        // 2. Load main form object based on mode
+        if (this.currentMode === 'add') {
+          this.formObject = _.cloneDeep(this.objectDefault);
+        } else if (this.currentId && (this.currentMode === 'edit' || this.currentMode === 'view')) {
+          if (!this.urls.view) {
+             console.error("MejikModalForm: `urls.view` prop is required for 'edit' or 'view' mode.");
+             this.hide();
+             return;
+          }
+          const res = await window.axios.get(`${this.urls.view}/${this.currentId}`);
+          this.formObject = res.data;
+        }
+
+        // Store the initial state for the reset functionality
+        this.initialFormObject = _.cloneDeep(this.formObject);
+
+      } catch (error) {
+        console.error("MejikModalForm: Error loading data.", error);
+        this.$emit('error', { type: 'load', error });
+        this.hide(); // Close modal on data load failure
+      } finally {
+        this.isLoading = false;
+      }
+    },
+
+    // Fired when the modal is completely hidden. Good place for cleanup.
+    handleHidden() {
+      this.formObject = {};
+      this.initialFormObject = {};
+      this.currentId = null;
+      this.isLoading = false;
+      this.internalParams = {};
+    },
+
+    // --- Form Actions (passed to slot) ---
+
+    async saveItem() {
+      // 1. External Validation
+      if (this.validator) {
+        const isValid = await this.validator(this.formObject);
+        if (!isValid) {
+          this.$emit('validation-failed');
+          return;
+        }
+      }
+
+      this.isLoading = true;
+      try {
+        let response;
+        if (this.currentMode === 'add') {
+          if (!this.urls.add) throw new Error("`urls.add` prop is not defined.");
+          response = await window.axios.post(this.urls.add, this.formObject);
+        } else { // 'edit' mode
+          const editUrl = this.urls.edit || this.urls.add; // Fallback to add url
+          if (!editUrl) throw new Error("`urls.edit` or `urls.add` prop is not defined for editing.");
+          const id = this.currentId || this.formObject[this.uniqueKey];
+          response = await window.axios.put(`${editUrl}/${id}`, this.formObject);
+        }
+
+        this.$emit('saved', { mode: this.currentMode, data: response.data });
+        this.hide();
+
+      } catch (error) {
+        console.error("MejikModalForm: Error saving data.", error);
+        this.$emit('error', { type: 'save', error });
+      } finally {
+        this.isLoading = false;
+      }
+    },
+
+    resetForm() {
+      this.formObject = _.cloneDeep(this.initialFormObject);
+    },
+
+    // --- Mode Switching ---
+    switchToEditMode() {
+        if (this.canEdit) {
+            this.currentMode = 'edit';
+        }
+    }
+  },
+};
+</script>
+```
+
+---
+
+### 2. How it Works & Key Features
+
+*   **Reusable & Decoupled:** It has no knowledge of the `AdvancedRepeaterForm` or any parent. It only knows how to be a modal form.
+*   **Props-Driven Configuration:** You configure its behavior (URLs, default data, permissions) entirely through props, making it highly adaptable.
+*   **Public `show()` Method:** You don't toggle a `v-if` or `v-model`. Instead, you get a reference to the component (`this.$refs.myModal`) and call `.show({ mode: 'edit', id: 123 })`. This is a robust pattern for controlling components programmatically.
+*   **Pass-Thru Attributes (`v-bind="$attrs"`)**: Any attribute you add to `<MejikModalForm>` that isn't a defined prop (like `size="xl"`, `centered`, `scrollable`) will be passed directly to the underlying `<b-modal>`.
+*   **Pass-Thru Events (`v-on="$listeners"`)**: Any native `b-modal` event you listen for (like `@shown` or `@hide`) will work directly on `<MejikModalForm>`.
+*   **Scoped Slot (`<slot name="form">`)**: This is the core of its flexibility. The parent component defines the *entire* form layout inside the slot. The modal provides the necessary data (`formObject`) and methods (`saveItem`, `resetForm`) back to the parent through slot props.
+*   **Built-in State Management:** It handles its own `isLoading` state, fetches its own data on `show`, and cleans up its state on `hidden`.
+*   **Dynamic Footer:** The footer buttons automatically change based on the `currentMode` (`add`, `edit`, `view`) and the ACL props (`canAdd`, `canEdit`).
+
+---
+
+### 3. Example Usage in a Parent Component
+
+Here’s how you would use `MejikModalForm` in a new parent component (e.g., a page for managing users).
+
+```vue
+<!-- UserManagementPage.vue -->
+<template>
+  <div>
+    <h3>User Management</h3>
+    <button class="btn btn-primary mb-3" @click="openAddUserModal">
+      <i class="las la-plus"></i> Add New User
+    </button>
+
+    <!-- User List Table -->
+    <table class="table">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Name</th>
+          <th>Email</th>
+          <th>Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr v-for="user in users" :key="user.id">
+          <td>{{ user.id }}</td>
+          <td>{{ user.name }}</td>
+          <td>{{ user.email }}</td>
+          <td>
+            <button class="btn btn-sm btn-icon" @click="openViewUserModal(user.id)" title="View">
+              <i class="las la-eye"></i>
+            </button>
+            <button class="btn btn-sm btn-icon" @click="openEditUserModal(user.id)" title="Edit">
+              <i class="las la-pencil-alt"></i>
+            </button>
+          </td>
+        </tr>
+      </tbody>
+    </table>
+
+    <!-- The MejikModalForm Component Instance -->
+    <MejikModalForm
+      ref="userModal"
+      :urls="userApiUrls"
+      :object-default="defaultUser"
+      :params="formParams"
+      :validator="validateForm"
+      title-prefix="User"
+      size="lg"
+      @saved="onUserSaved"
+    >
+      <!-- Define the actual form layout using the scoped slot -->
+      <template #form="{ formObject }">
+        <div class="form-group">
+          <label for="userName">Name</label>
+          <input type="text" id="userName" v-model="formObject.name" class="form-control" />
+        </div>
+        <div class="form-group">
+          <label for="userEmail">Email</label>
+          <input type="email" id="userEmail" v-model="formObject.email" class="form-control" />
+        </div>
+        <div class="form-group">
+          <label for="userRole">Role</label>
+          <select id="userRole" v-model="formObject.roleId" class="form-control">
+             <!-- `formParams` comes from the slot and was loaded via `paramUrl` -->
+            <option v-for="role in formParams.roles" :key="role.id" :value="role.id">
+              {{ role.name }}
+            </option>
+          </select>
+        </div>
+      </template>
+    </MejikModalForm>
+  </div>
+</template>
+
+<script>
+import MejikModalForm from './MejikModalForm.vue';
+
+export default {
+  components: { MejikModalForm },
+  data() {
+    return {
+      users: [
+        // This would typically be loaded from an API
+        { id: 1, name: 'John Doe', email: 'john.doe@example.com', roleId: 1 },
+        { id: 2, name: 'Jane Smith', email: 'jane.smith@example.com', roleId: 2 },
+      ],
+      // Configuration for the modal
+      userApiUrls: {
+        add: '/api/users',
+        edit: '/api/users', // Base URL for PUT /api/users/{id}
+        view: '/api/users', // Base URL for GET /api/users/{id}
+        param: '/api/form-params/user-roles', // URL to fetch roles
+      },
+      defaultUser: {
+        name: '',
+        email: '',
+        roleId: null,
+      },
+    };
+  },
+  computed: {
+    // This is just for the example to show params being passed.
+    // In a real app, the modal fetches this itself via `paramUrl`.
+    formParams() {
+        return {
+            roles: [
+                { id: 1, name: 'Admin' },
+                { id: 2, name: 'Editor' },
+                { id: 3, name: 'Viewer' },
+            ]
+        }
+    }
+  },
+  methods: {
+    // --- Modal Triggers ---
+    openAddUserModal() {
+      this.$refs.userModal.show({ mode: 'add' });
+    },
+    openEditUserModal(userId) {
+      this.$refs.userModal.show({ mode: 'edit', id: userId });
+    },
+    openViewUserModal(userId) {
+      this.$refs.userModal.show({ mode: 'view', id: userId });
+    },
+
+    // --- Event Handler ---
+    onUserSaved({ mode, data }) {
+      console.log(`User was ${mode === 'add' ? 'added' : 'updated'}!`, data);
+      // Here you would refresh your user list
+      this.fetchUsers();
+    },
+
+    // --- Validation (Example) ---
+    async validateForm(formObject) {
+      // This is a placeholder for a real validation library like VeeValidate or Vuelidate
+      if (!formObject.name || !formObject.email) {
+        alert('Name and Email are required!');
+        return false;
+      }
+      return true;
+    },
+
+    fetchUsers() {
+        console.log("Refreshing user list...");
+        // axios.get('/api/users').then(res => this.users = res.data);
+    }
+  },
+};
+</script>
+```
+
+Excellent. Integrating a powerful validation library like VeeValidate is a critical requirement for a reusable form component. The methodology you've outlined is the correct and standard Vue pattern for this kind of parent-child interaction.
+
+The good news is that the `MejikModalForm` component I provided is already built to support this perfectly. The `validator` prop is designed to accept an `async` function that returns a boolean, which is exactly what `observer.validate()` does.
+
+No changes are needed to the `MejikModalForm` component itself. The key is to document the correct usage pattern in the parent component.
+
+Here is the updated documentation explaining how to integrate VeeValidate, followed by a complete, practical example.
+
+---
+
+### Updated Documentation: `MejikModalForm` with VeeValidate
+
+#### **Overview**
+
+`MejikModalForm` is designed to be validation-agnostic. It doesn't know or care *how* the form is validated; it only needs to be given a function that it can call to get a `true` (valid) or `false` (invalid) result. This makes it easy to integrate with any validation library, including VeeValidate.
+
+The pattern is as follows:
+1.  The **Parent Component** defines the form layout within the `MejikModalForm`'s slot. This includes the `ValidationObserver` and `ValidationProvider` components from VeeValidate.
+2.  The parent gives the `<ValidationObserver>` a `ref` (e.g., `ref="formObserver"`).
+3.  The parent creates a method (e.g., `validateForm`) that uses the `ref` to call the observer's `.validate()` method.
+4.  The parent passes this method **as a function** to the `MejikModalForm`'s `:validator` prop.
+5.  When the user clicks "Save" inside the modal, `MejikModalForm` calls the provided `validator` function and awaits its boolean result before proceeding with the API call.
+
+---
+
+### Step-by-Step Integration Guide
+
+#### 1. In Your Parent Component (e.g., `JournalPage.vue`)
+
+Wrap your form layout inside the `<template #form>` slot with a `<validation-observer>`. **Crucially, add a `ref` to it.**
+
+```html
+<!-- ParentComponent.vue -->
+<MejikModalForm
+  ref="journalModal"
+  :urls="apiUrls"
+  :validator="validateEntryDetailForm"  <!-- Pass the method here -->
+  @saved="refreshData"
+>
+  <template #form="{ formObject, formParams }">
+    <!-- 1. Add the observer with a ref -->
+    <validation-observer ref="journalEntryDetailsFormObserver">
+
+      <!-- Your form fields go here, wrapped in ValidationProviders -->
+      <div class="form-group">
+        <label>Account</label>
+        <validation-provider name="Account" rules="required" v-slot="{ errors }">
+          <select-advanced-dialog
+            v-model="formObject.accountNumber"
+            url="/api/accounts/option"
+          ></select-advanced-dialog>
+          <small class="text-danger">{{ errors[0] }}</small>
+        </validation-provider>
+      </div>
+
+      <div class="form-group">
+        <label>Amount</label>
+        <validation-provider name="Amount" rules="required|min_value:1" v-slot="{ errors }">
+          <currency-input
+              class="form-control"
+              v-model="formObject.totalCost"
+          />
+          <small class="text-danger">{{ errors[0] }}</small>
+        </validation-provider>
+      </div>
+
+       <div class="form-group">
+        <label>DR/CR</label>
+        <validation-provider name="DR/CR" rules="required" v-slot="{ errors }">
+            <b-form-select
+                v-model="formObject.drcr"
+                :options="formParams.drcr"
+            ></b-form-select>
+            <small class="text-danger">{{ errors[0] }}</small>
+        </validation-provider>
+      </div>
+
+    </validation-observer>
+  </template>
+</MejikModalForm>
+```
+
+#### 2. In Your Parent Component's `<script>` section
+
+Define the validation method that you passed to the `:validator` prop. This method will access the observer via its `ref`.
+
+```javascript
+// ParentComponent.vue -> <script>
+import MejikModalForm from './MejikModalForm.vue';
+// Make sure you have VeeValidate components registered globally or locally
+import { ValidationObserver, ValidationProvider } from 'vee-validate';
+
+export default {
+  components: {
+    MejikModalForm,
+    ValidationObserver,
+    ValidationProvider
+  },
+  methods: {
+    // 2. Define the validator method
+    async validateEntryDetailForm() {
+      // The ref only exists when the modal is open and its slot is rendered.
+      // This check prevents errors if the method is ever called at the wrong time.
+      if (this.$refs.journalEntryDetailsFormObserver) {
+        // observer.validate() returns a promise that resolves to a boolean
+        return this.$refs.journalEntryDetailsFormObserver.validate();
+      }
+      // If for some reason the observer isn't there, we can't validate.
+      // Returning false is the safest default to prevent invalid submissions.
+      return false;
+    },
+
+    openAddModal() {
+      // Use the ref on the MejikModalForm itself to call its public show() method
+      this.$refs.journalModal.show({ mode: 'add' });
+    },
+
+    refreshData(){
+        console.log('Form was saved, now refreshing my data grid...');
+    }
+  }
+}
+```
+
+### Why This Works
+
+*   **Passing Functions as Props:** Vue allows you to pass methods from a parent to a child via props. When you write `:validator="validateEntryDetailForm"`, you are not passing the *string* `"validateEntryDetailForm"`, you are passing a *reference to the function itself*.
+*   **Execution Context (`this`)**: When `MejikModalForm` calls `this.validator()`, it executes the function that was passed to it. That function was defined in the parent, so its `this` context correctly refers to the parent component instance. This is how it can access `this.$refs.journalEntryDetailsFormObserver`.
+*   **Asynchronous Validation**: The `await` keyword in `MejikModalForm`'s `saveItem` method correctly waits for the `Promise` returned by `observer.validate()` to resolve before continuing.
+
+This approach is powerful, clean, and maintains a clear separation of concerns. The `MejikModalForm` handles the modal logic, and the parent component handles the specific form layout and validation rules.

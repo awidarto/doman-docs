@@ -1,0 +1,231 @@
+---
+title: Advanced Tree Data Table
+---
+
+## **Documentation: Advanced Datatable with Tree Structures**
+
+This document provides a comprehensive guide to implementing hierarchical datatables using the `AdminController` backend and the `TreeDatatable.vue` frontend component.
+
+---
+
+### **Part 1: Datatable Data Format**
+
+The backend generates a standardized JSON object for each row (or "node") in the datatable. Understanding this structure is key to leveraging all the component's features.
+
+#### **Anatomy of a Row Object**
+
+```json
+{
+  // --- Core Data from your Model ---
+  "id": "1101",
+  "accountCode": "1101",
+  "accountName": "Cash & Bank",
+  "parentId": null,
+
+  // --- Hierarchy Control Fields (from Backend) ---
+  "children": [
+    {
+      "id": "110101",
+      "accountCode": "110101",
+      "accountName": "Petty Cash",
+      "parentId": "1101",
+      "children": [],
+      "_expanded": false,
+      "_selectable": true,
+      "_selected": false
+    }
+  ],
+
+  // --- UI State & Behavior Fields (from Backend) ---
+  "_expanded": true,
+  "_selectable": false,
+  "_selected": true,
+  "_hasChildren": true,
+  "_type": "account-group"
+}
+```
+
+#### **Property Breakdown**
+
+Properties starting with an underscore `_` are metadata used to control the UI.
+
+| Property       | Type      | Source  | Description                                                                                                                                                                                                    |
+|:---------------|:----------|:--------|:---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Core Data**  | `mixed`   | Model   | All the original fields from your Eloquent model (e.g., `id`, `accountCode`, `accountName`).                                                                                                                   |
+| `children`     | `Array`   | Backend | An array containing child row objects. In `backend` lazy-load mode, this is populated by the server. In `frontend` lazy-load mode, it's initially empty. The component renames this to `_children` internally. |
+| `_expanded`    | `Boolean` | Backend | **Server's Suggestion.** If `true`, the frontend will render this node as expanded on initial load or when `table_tree_expand_all` is enabled. The user's interaction can override this.                       |
+| `_selectable`  | `Boolean` | Backend | If `false`, the checkbox or radio button for this row will be disabled, and the row will be styled as non-selectable. Controlled by `table_tree_leaf_only_select` or `table_tree_selectable_checker`.          |
+| `_selected`    | `Boolean` | Backend | If `true`, the frontend component will automatically add this row to its selection state upon loading data. Controlled by `table_pre_selected_ids`.                                                            |
+| `_hasChildren` | `Boolean` | Backend | **Crucial for Frontend Lazy Loading.** Indicates if a node has children, even if the `children` array is empty. The UI uses this to show/hide the expander icon.                                               |
+| `_type`        | `String`  | Backend | (Optional) A type identifier (e.g., `'group'`, `'employee'`) used for custom styling or logic on the frontend.                                                                                                 |
+
+---
+
+### **Part 2: Backend - `AdminController` Setup**
+
+To serve tree data, configure these `protected` properties in your controller that extends `AdminController`.
+
+#### **Configuration Properties**
+
+| Property                        | Type      | Description                                                                                                                                                                 |
+|:--------------------------------|:----------|:----------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `table_structure_mode`          | `string`  | **(Required)** Set to `'simple_tree'` or `'compound_tree'`.                                                                                                                 |
+| `table_lazy_load`               | `string`  | Set to `'frontend'` for the most scalable performance. The frontend will fetch children on demand. Set to `'backend'` for the API to build the tree (simpler for frontend). |
+| `table_tree_parent_field`       | `string`  | For `'simple_tree'` mode. The column in your model that holds the parent's ID.                                                                                              |
+| `table_pre_expanded_ids`        | `array`   | Populated automatically from the frontend request (`expandedIds` payload). Contains IDs of rows the user has open. This takes priority over `table_tree_expand_all`.        |
+| `table_tree_expand_all`         | `bool`    | If `true` and `expandedIds` is not sent from the frontend, all nodes will be sent as expanded. Useful for initial view.                                                     |
+| `table_tree_leaf_only_select`   | `bool`    | If `true`, only rows with no children will be selectable.                                                                                                                   |
+| `table_tree_selectable_checker` | `Closure` | A function that receives the row data (as an array) and returns `true` or `false` to determine selectability. e.g., `fn($row) => $row['status'] === 'active'`               |
+| `table_pre_selected_ids`        | `array`   | An array of IDs you provide on the backend to force certain rows to be pre-selected on load.                                                                                |
+| `table_compound_tree_config`    | `array`   | For `'compound_tree'` mode. A detailed configuration array defining the multi-model hierarchy.                                                                              |
+
+#### **Example Controller (`ChartOfAccountController.php`)**
+
+This example sets up a lazy-loaded, single-model tree where only "active" accounts can be selected.
+
+```php
+<?php
+
+namespace App\Http\Controllers\Finance;
+
+use App\Http\Controllers\Core\AdminController;
+use App\Models\Finance\ChartOfAccount;
+
+class ChartOfAccountController extends AdminController
+{
+    public function __construct()
+    {
+        parent::__construct();
+
+        $this->model = new ChartOfAccount();
+        $this->controller_base = 'finance/coa';
+
+        // --- Datatable Tree Configuration ---
+        $this->table_structure_mode = 'simple_tree';
+        $this->table_lazy_load = 'frontend'; // Recommended for performance
+        $this->table_tree_parent_field = 'parentAccountCode';
+
+        // Example: Only allow accounts with status 'active' to be selected
+        $this->table_tree_selectable_checker = fn($row) => $row['status'] === 'active';
+
+        // Pre-select a specific account for the user, perhaps from their settings
+        $this->table_pre_selected_ids = ['110101']; // e.g., Petty Cash
+    }
+}
+```
+
+---
+
+### **Part 3: Frontend - `TreeDatatable.vue` Usage**
+
+The `TreeDatatable` component is highly configurable via its props.
+
+#### **Key Props**
+
+| Prop            | Type     | Description                                                                                                                                                |
+|:----------------|:---------|:-----------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `rows`          | `Array`  | The array of data from the backend.                                                                                                                        |
+| `columns`       | `Array`  | The column definitions. One column should have `{ isTreeColumn: true }` to render the indented tree view.                                                  |
+| `selectOptions` | `Object` | Configures selection behavior: `{ enabled: Boolean, mode: String }`. `mode` can be `'single'` or `'multi'`.                                                |
+| `selectedRows`  | `Array`  | An array of the currently selected row objects. Use with `.sync` modifier or manage with events.                                                           |
+| `expandedRows`  | `Array`  | **(For State Preservation)** An array of the IDs of currently expanded rows. Use with `.sync` modifier to enable state preservation across data refreshes. |
+
+#### **Key Events**
+
+| Event                  | Payload                   | Description                                                                                                                                           |
+|:-----------------------|:--------------------------|:------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `@update:sortBy`       | `Array`                   | Emitted when the user changes the sort order. The parent should re-fetch data with the new sort parameters.                                           |
+| `@update:expandedRows` | `Array`                   | Emitted whenever the user expands or collapses a row. The parent should store this array of IDs and send it back on the next data fetch.              |
+| `@select-toggle`       | `Object` (the row)        | Emitted when a single row's selection state is toggled.                                                                                               |
+| `@select-bulk`         | `Array` (of rows)         | Emitted on initial load if the server sent `_selected: true` flags, allowing the parent to add these to its selection without removing existing ones. |
+| `@load-children`       | `Object` (the parent row) | Emitted in `frontend` lazy-load mode when an un-loaded node is expanded. The parent must fetch its children and update the `rows` prop.               |
+
+#### **Example Parent Component Implementation**
+
+This shows how a page would use `TreeDatatable` to manage all its state.
+
+```html
+<template>
+  <div class="my-page-container">
+    <!-- The component is bound to the parent's data using props and .sync -->
+    <TreeDatatable
+      :columns="columns"
+      :rows="tableRows"
+      :select-options="{ enabled: true, mode: 'multi' }"
+      :selected-rows.sync="selectedItems"
+      :expanded-rows.sync="expandedItemIds"
+      @update:sortBy="handleSortChange"
+      @load-children="handleLoadChildren"
+    />
+  </div>
+</template>
+
+<script>
+import TreeDatatable from '@/components/TreeDatatable.vue';
+import axios from 'axios';
+
+export default {
+    components: { TreeDatatable },
+    data() {
+        return {
+            columns: [
+                { label: 'Account', field: 'accountName', isTreeColumn: true, sortable: true },
+                { label: 'Code', field: 'accountCode', sortable: true },
+                { label: 'Status', field: 'status' }
+            ],
+            tableRows: [],
+            selectedItems: [],
+            expandedItemIds: [], // State for preserving expanded rows
+            sortBy: [{ field: 'accountCode', type: 'asc' }],
+            // ... other pagination data
+        };
+    },
+    methods: {
+        async fetchData() {
+            // Include sort, pagination, and expanded state in the payload
+            const payload = {
+                sort: this.sortBy,
+                expandedIds: this.expandedItemIds, // Send the current expanded state to the server
+                // ... pagination params
+            };
+
+            const response = await axios.post('/api/finance/coa/index', payload);
+            this.tableRows = response.data.data;
+        },
+
+        handleSortChange(newSort) {
+            this.sortBy = newSort;
+            this.fetchData(); // Re-fetch data with new sort, preserving expansion
+        },
+
+        async handleLoadChildren(parentRow) {
+            // This is for frontend lazy loading
+            const payload = { parentId: parentRow.id };
+            const response = await axios.post('/api/finance/coa/index', payload);
+
+            // Find the parent in the existing data and assign its children
+            // (A helper function is recommended for deep searching)
+            const parentInTree = this.findNodeById(this.tableRows, parentRow.id);
+            if (parentInTree) {
+                parentInTree.children = response.data.data;
+            }
+        },
+
+        // Helper to find a node in a tree structure
+        findNodeById(nodes, id) {
+            for (const node of nodes) {
+                if (node.id === id) return node;
+                if (node.children) {
+                    const found = this.findNodeById(node.children, id);
+                    if (found) return found;
+                }
+            }
+            return null;
+        }
+    },
+    mounted() {
+        this.fetchData();
+    }
+}
+</script>
+```

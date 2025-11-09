@@ -1,0 +1,451 @@
+---
+title: Leaflet Map View
+---
+
+## Project Dependencies & Setup (English)
+
+To use the `MejikDatatable`, `SidebarTreeCalendar`, and `LeafletMap` components, your Vue 2 project must have the following dependencies installed and configured.
+
+### 1. Core Dependencies (for All Components)
+
+These libraries are used across multiple components for API calls, styling, and UI elements.
+
+-   **Axios:** For making API calls to your Laravel backend.
+```bash
+npm install axios
+    ```
+
+-   **Bootstrap & BootstrapVue:** Bootstrap provides the CSS styling, and BootstrapVue provides pre-made Vue components like the pagination controls used in `MejikDatatable`.
+```bash
+npm install bootstrap bootstrap-vue
+    ```
+
+-   **Line Awesome:** A free icon toolkit used for the icons in the `SidebarTree...` components.
+```bash
+npm install line-awesome
+    ```
+
+### 2. Map-Specific Dependencies
+
+These are required **only** if you are using the `LeafletMap` component.
+
+-   **Leaflet:** The core interactive map library.
+```bash
+npm install leaflet
+    ```
+
+-   **Leaflet.markercluster:** For clustering point markers at lower zoom levels.
+```bash
+npm install leaflet.markercluster
+    ```
+
+-   **Leaflet-draw:** For the "select by drawing a rectangle" feature.
+```bash
+npm install leaflet-draw
+    ```
+
+### 3. Setup in `main.js`
+
+You must import the necessary CSS files and install the Vue plugins in your project's entry point, typically `src/main.js`.
+
+```javascript
+// src/main.js
+
+import Vue from 'vue'
+import App from './App.vue'
+
+// 1. Import BootstrapVue and Bootstrap CSS
+import { BootstrapVue, IconsPlugin } from 'bootstrap-vue'
+import 'bootstrap/dist/css/bootstrap.css'
+import 'bootstrap-vue/dist/bootstrap-vue.css'
+
+// 2. Import Line Awesome Icons CSS
+import 'line-awesome/dist/line-awesome/css/line-awesome.min.css'
+
+// 3. Install BootstrapVue plugins
+Vue.use(BootstrapVue)
+Vue.use(IconsPlugin) // Optional, but recommended
+
+Vue.config.productionTip = false
+
+new Vue({
+  render: h => h(App),
+}).$mount('#app')
+```
+
+## Documentation: `LeafletMap` Component (English)
+
+### 1. Overview
+
+`LeafletMap` is a highly interactive, data-driven map component built on Vue 2 and Leaflet. It's designed for displaying and interacting with complex GeoJSON data from a backend. It supports dynamic data loading based on the map's viewport, feature clustering, multi-layer management, and advanced feature selection via clicking or drawing.
+
+### 2. Features
+
+-   **GeoJSON Native:** Renders any standard GeoJSON geometry (`Point`, `LineString`, `Polygon`).
+-   **Viewport-Based Loading:** Emits events (`@update-view`) when the map is panned or zoomed, allowing the parent to fetch only the necessary data.
+-   **Layer Management:** Supports toggling the visibility of different types of features (e.g., live points vs. historical tracks) via a prop.
+-   **Marker Clustering:** Automatically clusters point features at lower zoom levels for better performance and readability, using `leaflet.markercluster`.
+-   **Advanced Selection:**
+-   Supports `none`, `single`, and `multi`-select modes.
+-   Allows selection by clicking individual features.
+-   Allows multi-selection by drawing a bounding box (rectangle) on the map, using `leaflet-draw`.
+-   **Custom Popups:** Provides a scoped slot (`#popup-content`) to render fully custom Vue components inside map popups.
+-   **State Syncing:** Uses the `.sync` modifier for `selectedFeatures` to maintain a two-way binding with the parent component.
+
+### 3. Props
+
+| Prop               | Type   | Default                  | Description                                                                                                                                         |
+|:-------------------|:-------|:-------------------------|:----------------------------------------------------------------------------------------------------------------------------------------------------|
+| `geoJsonFeatures`  | Array  | `[]`                     | An array of GeoJSON `Feature` objects to be displayed on the map.                                                                                   |
+| `center`           | Array  | `[-6.2088, 106.8456]`    | The initial center of the map as `[latitude, longitude]`.                                                                                           |
+| `zoom`             | Number | `13`                     | The initial zoom level of the map.                                                                                                                  |
+| `visibleLayers`    | Array  | `['live-position', ...]` | An array of strings. Each string should match the `type` property of the GeoJSON features you want to be visible. Controls layer visibility.        |
+| `selectionMode`    | String | `'none'`                 | Sets the user interaction mode. Can be `'none'` (view only), `'single'` (can only select one feature), or `'multi'` (can select multiple features). |
+| `selectedFeatures` | Array  | `[]`                     | An array of the currently selected GeoJSON `Feature` objects. **Use with the `.sync` modifier** (`:selected-features.sync="mySelectionArray"`).     |
+
+### 4. Emitted Events
+
+| Event                      | Payload                                              | Description                                                                                                                              |
+|:---------------------------|:-----------------------------------------------------|:-----------------------------------------------------------------------------------------------------------------------------------------|
+| `@update-view`             | `{ bounds: { southWest, northEast }, zoom: Number }` | Fired when the map's viewport changes (after panning or zooming). Used to trigger new API calls for data within the new bounds.          |
+| `@update:selectedFeatures` | `(Array)`                                            | Fired whenever the selection changes. This is the event used by the `.sync` modifier. The payload is the new array of selected features. |
+| `@more-info-click`         | `(featureObject)`                                    | Fired from the custom popup slot when the `showDetails` method is called. Signals the parent to open a detailed view (modal/sidebar).    |
+
+### 5. Scoped Slots
+
+| Slot Name        | Scope Properties                             | Description                                                                                                                                                                                                     |
+|:-----------------|:---------------------------------------------|:----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `#popup-content` | `{ feature: Object, showDetails: Function }` | Allows for completely custom Vue component-based content inside a feature's popup. The `feature` object contains the GeoJSON data. Calling the `showDetails()` function will emit the `@more-info-click` event. |
+
+### 6. Backend Data & Laravel Controller Example
+
+#### Data Format (GeoJSON)
+The backend must provide a GeoJSON `FeatureCollection`. The `properties.type` field is crucial as it determines which layer the feature belongs to (e.g., `'live-position'`, `'movement-track'`).
+
+#### Laravel Controller with Configurable Transformer
+This example shows a controller for fetching live personnel data. It uses a reusable trait to handle the GeoJSON conversion, making the controller clean and declarative.
+
+```php
+// In app/Http/Controllers/PersonnelController.php
+
+namespace App\Http\Controllers;
+
+use App\Http\Traits\TransformsToGeoJson; // The trait from the previous answer
+use App\Models\Personnel;
+use Illuminate\Http\Request;
+
+class PersonnelController extends Controller
+{
+    // 1. Use the reusable Trait
+    use TransformsToGeoJson;
+
+    // 2. Configure the database field names
+    protected string $latitudeField = 'current_lat';
+    protected string $longitudeField = 'current_lng';
+
+    public function getLivePositions(Request $request)
+    {
+        // ... (Your logic to query MongoDB using the bbox from $request) ...
+        $personnelInView = Personnel::query()->get(); // Replace with your actual filtered query
+
+        // 3. The trait handles the complex transformation
+        $geoJson = $this->transformToGeoJsonCollection($personnelInView);
+
+        return response()->json($geoJson);
+    }
+
+    // --- TRAIT CONTRACT IMPLEMENTATION ---
+
+    /**
+     * Defines how to build the 'geometry' object for a single model.
+     */
+    protected function getGeometryForModel($model): array
+    {
+        return [
+            'type' => 'Point',
+            'coordinates' => [
+                (float) $model->{$this->longitudeField},
+                (float) $model->{$this->latitudeField},
+            ]
+        ];
+    }
+
+    /**
+     * Defines how to build the 'properties' object for a single model.
+     */
+    protected function getPropertiesForModel($model): array
+    {
+        return [
+            'title' => $model->name,
+            'type' => 'live-position', // This determines the layer in the frontend
+            'resourceId' => $model->team_id,
+            'node' => [
+                'status' => $model->status,
+                'last_update' => $model->last_seen_at->toIso801String(),
+                'phone' => $model->phone_number,
+            ]
+        ];
+    }
+}
+```
+
+### 7. Usage Example
+
+This parent component provides UI controls for all the map's features.
+
+```vue
+<!-- MapPage.vue -->
+<template>
+    <div class="container-fluid mt-4">
+        <!-- CONTROLS ROW -->
+        <div class="row mb-3 p-2 bg-light border rounded align-items-center">
+            <!-- Layer Toggles -->
+            <div class="col-md-4">
+                <strong>Visible Layers:</strong>
+                <div class="form-check form-check-inline ml-2">
+                    <input class="form-check-input" type="checkbox" id="liveCheck" value="live-position" v-model="visibleLayers">
+                    <label class="form-check-label" for="liveCheck">Live Positions</label>
+                </div>
+                <div class="form-check form-check-inline">
+                    <input class="form-check-input" type="checkbox" id="trackCheck" value="movement-track" v-model="visibleLayers">
+                    <label class="form-check-label" for="trackCheck">Movement Tracks</label>
+                </div>
+            </div>
+
+            <!-- Selection Mode -->
+            <div class="col-md-4">
+                <strong>Selection Mode:</strong>
+                <div class="btn-group btn-group-sm ml-2" role="group">
+                    <button type="button" class="btn" :class="selectionMode === 'none' ? 'btn-primary' : 'btn-outline-secondary'" @click="selectionMode = 'none'">None</button>
+                    <button type="button" class="btn" :class="selectionMode === 'single' ? 'btn-primary' : 'btn-outline-secondary'" @click="selectionMode = 'single'">Single</button>
+                    <button type="button" class="btn" :class="selectionMode === 'multi' ? 'btn-primary' : 'btn-outline-secondary'" @click="selectionMode = 'multi'">Multi</button>
+                </div>
+            </div>
+
+            <!-- Selection Indicator -->
+            <div class="col-md-4 text-md-right">
+                <span v-if="selected.length > 0" class="font-weight-bold text-primary mr-2">
+                    {{ selected.length }} item(s) selected
+                </span>
+                <button v-if="selected.length > 0" class="btn btn-sm btn-outline-danger" @click="selected = []">Clear Selection</button>
+            </div>
+        </div>
+
+        <LeafletMap
+            :geo-json-features="mapFeatures"
+            :visible-layers="visibleLayers"
+            :selection-mode="selectionMode"
+            :selected-features.sync="selected"
+            @update-view="loadMapData"
+            @more-info-click="showFullDetails"
+        >
+            <template #popup-content="{ feature, showDetails }">
+                <div class="custom-popup">
+                    <h6 class="mb-1">{{ feature.properties.title }}</h6>
+                    <hr class="my-1">
+                    <p class="mb-1" v-if="feature.properties.node && feature.properties.node.status">
+                        <strong>Status:</strong> {{ feature.properties.node.status }}
+                    </p>
+                    <button class="btn btn-sm btn-outline-primary mt-2 w-100" @click="showDetails">
+                        More Details
+                    </button>
+                </div>
+            </template>
+        </LeafletMap>
+    </div>
+</template>
+
+<script>
+import axios from 'axios';
+import LeafletMap from './LeafletMap.vue';
+
+export default {
+    name: "MapPage",
+    components: { LeafletMap },
+    data() {
+        return {
+            mapFeatures: [],
+            isLoading: false,
+            visibleLayers: ['live-position', 'movement-track'],
+            selectionMode: 'none',
+            selected: [],
+        };
+    },
+    methods: {
+        async loadMapData(viewPayload) {
+            // Your logic to call the API using viewPayload (bbox, zoom)
+            // and populate `this.mapFeatures`
+        },
+        showFullDetails(feature) {
+            // Your logic to open a modal or sidebar with the full feature details
+            alert(`Showing more details for: ${feature.properties.title}`);
+        },
+    }
+}
+</script>
+```
+
+## Dependensi & Pengaturan Proyek (Bahasa Indonesia)
+
+Untuk menggunakan komponen `MejikDatatable`, `SidebarTreeCalendar`, dan `LeafletMap`, proyek Vue 2 Anda harus memiliki dependensi berikut terinstal dan terkonfigurasi.
+
+### 1. Dependensi Inti (untuk Semua Komponen)
+
+Library ini digunakan di banyak komponen untuk panggilan API, styling, dan elemen UI.
+
+-   **Axios:** Untuk melakukan panggilan API ke backend Laravel Anda.
+```bash
+npm install axios
+    ```
+
+-   **Bootstrap & BootstrapVue:** Bootstrap menyediakan styling CSS, dan BootstrapVue menyediakan komponen Vue siap pakai seperti kontrol paginasi yang digunakan di `MejikDatatable`.
+```bash
+npm install bootstrap bootstrap-vue
+    ```
+
+-   **Line Awesome:** Pustaka ikon gratis yang digunakan untuk ikon-ikon di komponen `SidebarTree...`.
+```bash
+npm install line-awesome
+    ```
+
+### 2. Dependensi Khusus Peta (Map)
+
+Dependensi ini **hanya** dibutuhkan jika Anda menggunakan komponen `LeafletMap`.
+
+-   **Leaflet:** Library inti untuk peta interaktif.
+```bash
+npm install leaflet
+    ```
+
+-   **Leaflet.markercluster:** Untuk mengelompokkan (clustering) penanda titik pada level zoom rendah.
+```bash
+npm install leaflet.markercluster
+    ```
+
+-   **Leaflet-draw:** Untuk fitur "pilih dengan menggambar persegi panjang".
+```bash
+npm install leaflet-draw
+    ```
+
+### 3. Pengaturan di `main.js`
+
+Anda wajib mengimpor file CSS yang diperlukan dan menginstal plugin Vue di file entri proyek Anda, biasanya di `src/main.js`.
+
+```javascript
+// src/main.js
+
+import Vue from 'vue'
+import App from './App.vue'
+
+// 1. Impor BootstrapVue dan CSS Bootstrap
+import { BootstrapVue, IconsPlugin } from 'bootstrap-vue'
+import 'bootstrap/dist/css/bootstrap.css'
+import 'bootstrap-vue/dist/bootstrap-vue.css'
+
+// 2. Impor CSS Ikon Line Awesome
+import 'line-awesome/dist/line-awesome/css/line-awesome.min.css'
+
+// 3. Instal plugin BootstrapVue
+Vue.use(BootstrapVue)
+Vue.use(IconsPlugin) // Opsional, tetapi direkomendasikan
+
+Vue.config.productionTip = false
+
+new Vue({
+  render: h => h(App),
+}).$mount('#app')
+```
+
+
+
+## Dokumentasi: Komponen `LeafletMap` (Bahasa Indonesia)
+
+### 1. Gambaran Umum
+
+`LeafletMap` adalah komponen peta berbasis data yang sangat interaktif, dibangun di atas Vue 2 dan Leaflet. Komponen ini dirancang untuk menampilkan dan berinteraksi dengan data GeoJSON yang kompleks dari backend. Mendukung pemuatan data dinamis berdasarkan viewport peta, pengelompokan (clustering) fitur, manajemen multi-layer, dan seleksi fitur tingkat lanjut melalui klik atau gambar.
+
+### 2. Fitur
+
+-   **Natif GeoJSON:** Merender semua jenis geometri standar GeoJSON (`Point`, `LineString`, `Polygon`).
+-   **Pemuatan Berbasis Viewport:** Memancarkan event (`@update-view`) saat peta digeser atau di-zoom, memungkinkan komponen induk untuk mengambil data yang hanya diperlukan.
+-   **Manajemen Layer:** Mendukung pengalihan visibilitas berbagai jenis fitur (mis., titik live vs. jejak historis) melalui sebuah prop.
+-   **Marker Clustering:** Secara otomatis mengelompokkan fitur titik pada tingkat zoom rendah untuk performa dan keterbacaan yang lebih baik, menggunakan `leaflet.markercluster`.
+-   **Seleksi Tingkat Lanjut:**
+-   Mendukung mode seleksi `none`, `single`, dan `multi`.
+-   Memungkinkan pemilihan dengan mengklik fitur individual.
+-   Memungkinkan multi-seleksi dengan menggambar kotak pembatas (bounding box) di peta, menggunakan `leaflet-draw`.
+-   **Popup Kustom:** Menyediakan scoped slot (`#popup-content`) untuk merender komponen Vue kustom di dalam popup peta.
+-   **Sinkronisasi State:** Menggunakan modifier `.sync` untuk `selectedFeatures` untuk menjaga binding dua arah dengan komponen induk.
+
+### 3. Props
+
+| Prop               | Tipe   | Default                  | Deskripsi                                                                                                                                                     |
+|:-------------------|:-------|:-------------------------|:--------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `geoJsonFeatures`  | Array  | `[]`                     | Sebuah array dari objek `Feature` GeoJSON untuk ditampilkan di peta.                                                                                          |
+| `center`           | Array  | `[-6.2088, 106.8456]`    | Pusat awal peta dalam format `[latitude, longitude]`.                                                                                                         |
+| `zoom`             | Number | `13`                     | Tingkat zoom awal peta.                                                                                                                                       |
+| `visibleLayers`    | Array  | `['live-position', ...]` | Sebuah array string. Setiap string harus cocok dengan properti `type` dari fitur GeoJSON yang ingin Anda tampilkan. Mengontrol visibilitas layer.             |
+| `selectionMode`    | String | `'none'`                 | Mengatur mode interaksi pengguna. Bisa berupa `'none'` (hanya lihat), `'single'` (hanya bisa memilih satu fitur), atau `'multi'` (bisa memilih banyak fitur). |
+| `selectedFeatures` | Array  | `[]`                     | Sebuah array dari objek `Feature` GeoJSON yang sedang dipilih. **Gunakan dengan modifier `.sync`** (`:selected-features.sync="arraySeleksiSaya"`).            |
+
+### 4. Event yang Di-emit
+
+| Event                      | Payload                                              | Deskripsi                                                                                                                                         |
+|:---------------------------|:-----------------------------------------------------|:--------------------------------------------------------------------------------------------------------------------------------------------------|
+| `@update-view`             | `{ bounds: { southWest, northEast }, zoom: Number }` | Dipicu saat viewport peta berubah (setelah digeser atau zoom). Digunakan untuk memicu panggilan API baru untuk data di dalam batas baru.          |
+| `@update:selectedFeatures` | `(Array)`                                            | Dipicu setiap kali seleksi berubah. Ini adalah event yang digunakan oleh modifier `.sync`. Payload-nya adalah array baru dari fitur yang dipilih. |
+| `@more-info-click`         | `(featureObject)`                                    | Dipicu dari slot popup kustom saat metode `showDetails` dipanggil. Memberi sinyal ke induk untuk membuka tampilan detail (modal/sidebar).         |
+
+### 5. Scoped Slots
+
+| Nama Slot        | Properti Scope                               | Deskripsi                                                                                                                                                                                                      |
+|:-----------------|:---------------------------------------------|:---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `#popup-content` | `{ feature: Object, showDetails: Function }` | Memungkinkan konten berbasis komponen Vue yang sepenuhnya kustom di dalam popup sebuah fitur. Objek `feature` berisi data GeoJSON. Memanggil fungsi `showDetails()` akan memancarkan event `@more-info-click`. |
+
+### 6. Data Backend & Contoh Controller Laravel
+
+#### Format Data (GeoJSON)
+Backend harus menyediakan `FeatureCollection` GeoJSON. Field `properties.type` sangat penting karena menentukan ke layer mana fitur tersebut akan dimasukkan (mis., `'live-position'`, `'movement-track'`).
+
+#### Controller Laravel dengan Transformer
+Contoh ini menunjukkan controller untuk mengambil data personel live. Ia menggunakan `trait` yang dapat digunakan kembali untuk menangani konversi GeoJSON, membuat controller menjadi bersih dan deklaratif.
+
+```php
+// Di app/Http/Controllers/PersonnelController.php
+namespace App\Http\Controllers;
+
+use App\Http\Traits\TransformsToGeoJson; // Trait dari jawaban sebelumnya
+use App\Models\Personnel;
+use Illuminate\Http\Request;
+
+class PersonnelController extends Controller
+{
+    // 1. Gunakan Trait yang bisa dipakai ulang
+    use TransformsToGeoJson;
+
+    // 2. Konfigurasi nama field dari database
+    protected string $latitudeField = 'current_lat';
+    protected string $longitudeField = 'current_lng';
+
+    public function getLivePositions(Request $request)
+    {
+        // ... (Logika Anda untuk query ke MongoDB menggunakan bbox dari $request) ...
+        $personnelInView = Personnel::query()->get(); // Ganti dengan query Anda yang sebenarnya
+
+        // 3. Trait akan menangani transformasi yang kompleks
+        $geoJson = $this->transformToGeoJsonCollection($personnelInView);
+
+        return response()->json($geoJson);
+    }
+
+    // --- IMPLEMENTASI KONTRAK DARI TRAIT ---
+    protected function getGeometryForModel($model): array { /* ... implementasi seperti contoh Inggris ... */ }
+    protected function getPropertiesForModel($model): array { /* ... implementasi seperti contoh Inggris ... */ }
+}
+```
+
+### 7. Contoh Penggunaan
+
+Komponen induk ini menyediakan kontrol UI untuk semua fitur peta.
+
+(Kode untuk `MapPage.vue` sama seperti versi Bahasa Inggris, Anda hanya perlu menerjemahkan teks UI seperti "Visible Layers" menjadi "Layer yang Terlihat", dll.)

@@ -1,0 +1,362 @@
+---
+title: Use Case for Compound Tree Data Table
+---
+
+## **Documentation: Advanced Use Cases for Compound Tree Datatables**
+
+This document provides practical examples of how to implement complex, multi-level hierarchical datatables using the `'compound_tree'` mode. These use cases demonstrate how to handle hierarchies from both a single, multi-purpose model and multiple distinct models.
+
+---
+
+### **Use Case 1: Document Storage Hierarchy**
+
+**Scenario:** A physical document storage system is modeled as `Location -> Warehouse -> Rack -> Box -> Document`. The first four levels (`Location`, `Warehouse`, `Rack`, `Box`) are all stored in a single `Storage` model, distinguished by a `type` column. The final level, `Document`, is a separate model.
+
+**Objective:**
+- Display the full hierarchy in a single datatable.
+- Only allow the final leaf nodes (`Document`) to be selected.
+- Use frontend lazy loading for performance.
+
+#### **Backend Setup (`StorageBrowserController.php`)**
+
+The key to this setup is using the `additionalQuery` hook to filter the `Storage` model by its `type` for each level of the hierarchy.
+
+```php
+<?php
+namespace App.Http.Controllers.Dms;
+
+use App\Http.Controllers\Core\AdminController;
+use App\Models\Storage;
+use App\Models\Document;
+use Illuminate\Http\Request;
+
+class StorageBrowserController extends AdminController
+{
+    public function __construct()
+    {
+        parent::__construct();
+        $this->controller_base = 'dms/storage-browser';
+        $this->table_structure_mode = 'compound_tree';
+
+        // --- Global Selection Rule ---
+        // Only allow nodes of type 'document' to be selected.
+        $this->table_tree_selectable_checker = fn($row) => $row['_type'] === 'document';
+
+        $this->table_compound_tree_config = [
+            'location' => [
+                'model' => Storage::class,
+                'prefix' => 'loc',
+                'parent_type' => null, // Root level
+                'primary_key' => 'id',
+            ],
+            'warehouse' => [
+                'model' => Storage::class,
+                'prefix' => 'wh',
+                'parent_type' => 'location',
+                'foreign_key' => 'parentId', // FK to another Storage record
+                'primary_key' => 'id',
+            ],
+            'rack' => [
+                'model' => Storage::class,
+                'prefix' => 'rack',
+                'parent_type' => 'warehouse',
+                'foreign_key' => 'parentId',
+                'primary_key' => 'id',
+            ],
+            'box' => [
+                'model' => Storage::class,
+                'prefix' => 'box',
+                'parent_type' => 'rack',
+                'foreign_key' => 'parentId',
+                'primary_key' => 'id',
+            ],
+            'document' => [
+                'model' => Document::class,
+                'prefix' => 'doc',
+                'parent_type' => 'box',
+                'foreign_key' => 'boxId', // FK on the `documents` table
+                'primary_key' => 'id',
+            ],
+        ];
+    }
+
+    /**
+     * This hook is essential for filtering the multi-purpose Storage model.
+     */
+    public function additionalQuery(Request $request, $query)
+    {
+        // When fetching children, determine the required 'storage_type' for the next level.
+        if ($request->has('parentType')) {
+            $childStorageType = match($request->parentType) {
+                'location' => 'warehouse',
+                'warehouse' => 'rack',
+                'rack' => 'box',
+                default => null
+            };
+
+            // Apply the filter only if the query is for the Storage model.
+            if ($childStorageType && $query->getModel() instanceof Storage) {
+                $query->where('storage_type', $childStorageType);
+            }
+        } else {
+            // Initial load: get only the root-level items (locations).
+            if ($query->getModel() instanceof Storage) {
+                $query->where('storage_type', 'location');
+            }
+        }
+        return $query;
+    }
+}
+```
+
+#### **Frontend Parent Component**
+
+The frontend implementation is standard. The `@load-children` handler will send the `parentType` (e.g., `'location'`), and the backend's `additionalQuery` will use this information to correctly filter for the children (e.g., `storage_type` = `'warehouse'`).
+
+---
+
+### **Use Case 2: CMS Content Hierarchy**
+
+**Scenario:** A classic Content Management System with a structure of `Group -> Section -> Category -> Article`. Each is a distinct model. Additionally, `Category` can have sub-categories (a self-referencing hierarchy).
+
+**Objective:**
+- Display the complete content structure.
+- Prevent selection of organizational containers (`Group`, `Section`).
+- Allow selection of `Category` and `Article` nodes.
+- Categories are only selectable if they have a status of `'published'`.
+
+#### **Backend Setup (`CmsContentController.php`)**
+
+This example showcases defining `selectable_checker` closures at different levels for granular control.
+
+```php
+<?php
+namespace App\Http.Controllers\Cms;
+
+use App\Http\Controllers\Core\AdminController;
+use App\Models\Cms\{Group, Section, Category, Article};
+
+class CmsContentController extends AdminController
+{
+    public function __construct()
+    {
+        parent::__construct();
+        $this->controller_base = 'cms/content';
+        $this->table_structure_mode = 'compound_tree';
+
+        $this->table_compound_tree_config = [
+            'group' => [
+                'model' => Group::class,
+                'prefix' => 'group',
+                'parent_type' => null,
+                'primary_key' => 'id',
+                'selectable_checker' => fn($row) => false, // Groups are never selectable
+            ],
+            'section' => [
+                'model' => Section::class,
+                'prefix' => 'sec',
+                'parent_type' => 'group',
+                'foreign_key' => 'groupId',
+                'primary_key' => 'id',
+                'selectable_checker' => fn($row) => false, // Sections are never selectable
+            ],
+            'category' => [
+                'model' => Category::class,
+                'prefix' => 'cat',
+                'parent_type' => 'section',
+                'foreign_key' => 'sectionId',
+                'primary_key' => 'id',
+                'self_referencing_key' => 'parentId', // Categories have sub-categories
+                'selectable_checker' => fn($row) => $row['status'] === 'published', // Only published categories are selectable
+            ],
+            'article' => [
+                'model' => Article::class,
+                'prefix' => 'art',
+                'parent_type' => 'category',
+                'foreign_key' => 'categoryId',
+                'primary_key' => 'id',
+                'selectable_checker' => fn($row) => true, // All articles are always selectable
+            ],
+        ];
+    }
+}
+```
+
+#### **Frontend Parent Component**
+
+The frontend implementation is straightforward. It makes an initial call to the endpoint and then uses the `@load-children` handler to lazy-load the different levels. The backend's configuration automatically handles the relationships and selectability rules. The frontend just needs to render the `_selectable` state provided in the data.
+
+
+## **Dokumentasi (Bahasa Indonesia)**
+
+## **Studi Kasus Lanjutan untuk Datatable Pohon Gabungan (Compound Tree)**
+
+Dokumen ini memberikan contoh praktis tentang cara mengimplementasikan datatable hierarkis yang kompleks dan multi-level menggunakan mode `'compound_tree'`. Studi kasus ini menunjukkan cara menangani hierarki yang berasal dari satu model serbaguna dan dari beberapa model yang berbeda.
+
+---
+
+### **Studi Kasus 1: Hierarki Penyimpanan Dokumen**
+
+**Skenario:** Sebuah sistem penyimpanan dokumen fisik dimodelkan sebagai `Lokasi -> Gudang -> Rak -> Boks -> Dokumen`. Empat level pertama (`Lokasi`, `Gudang`, `Rak`, `Boks`) semuanya disimpan dalam satu model `Storage`, yang dibedakan oleh kolom `type`. Level terakhir, `Dokumen`, adalah model terpisah.
+
+**Tujuan:**
+- Menampilkan hierarki lengkap dalam satu datatable.
+- Hanya mengizinkan *leaf node* terakhir (`Dokumen`) yang dapat dipilih.
+- Menggunakan *frontend lazy loading* untuk performa.
+
+#### **Pengaturan Backend (`StorageBrowserController.php`)**
+
+Kunci dari pengaturan ini adalah menggunakan *hook* `additionalQuery` untuk memfilter model `Storage` berdasarkan kolom `type`-nya untuk setiap level hierarki.
+
+```php
+<?php
+namespace App.Http.Controllers.Dms;
+
+use App\Http\Controllers\Core\AdminController;
+use App\Models\Storage;
+use App\Models\Document;
+use Illuminate\Http\Request;
+
+class StorageBrowserController extends AdminController
+{
+    public function __construct()
+{
+    parent::__construct();
+    $this->controller_base = 'dms/storage-browser';
+    $this->table_structure_mode = 'compound_tree';
+
+    // --- Aturan Seleksi Global ---
+    // Hanya izinkan node dengan tipe 'document' yang bisa dipilih.
+    $this->table_tree_selectable_checker = fn($row) => $row['_type'] === 'document';
+
+    $this->table_compound_tree_config = [
+    'location' => [
+    'model' => Storage::class,
+    'prefix' => 'loc',
+    'parent_type' => null, // Level akar
+    'primary_key' => 'id',
+    ],
+    'warehouse' => [
+    'model' => Storage::class,
+    'prefix' => 'wh',
+    'parent_type' => 'location',
+    'foreign_key' => 'parentId', // FK ke record Storage lain
+    'primary_key' => 'id',
+    ],
+    'rack' => [ 'model' => Storage::class, 'prefix' => 'rack', /* ... */ ],
+    'box' => [ 'model' => Storage::class, 'prefix' => 'box', /* ... */ ],
+    'document' => [
+    'model' => Document::class,
+    'prefix' => 'doc',
+    'parent_type' => 'box',
+    'foreign_key' => 'boxId', // FK di tabel `documents`
+    'primary_key' => 'id',
+    ],
+    ];
+}
+
+    /**
+     * Hook ini sangat penting untuk memfilter model Storage yang serbaguna.
+     */
+    public function additionalQuery(Request $request, $query)
+    {
+        // Saat mengambil data turunan, tentukan 'storage_type' yang dibutuhkan untuk level berikutnya.
+        if ($request->has('parentType')) {
+            $childStorageType = match($request->parentType) {
+                'location' => 'warehouse',
+                'warehouse' => 'rack',
+                'rack' => 'box',
+                default => null
+            };
+
+                // Terapkan filter hanya jika query menargetkan model Storage.
+            if ($childStorageType && $query->getModel() instanceof Storage) {
+                    $query->where('storage_type', $childStorageType);
+                }
+            } else {
+                // Panggilan awal: hanya ambil item level akar (lokasi).
+                if ($query->getModel() instanceof Storage) {
+                $query->where('storage_type', 'location');
+            }
+        }
+        return $query;
+    }
+}
+```
+
+#### **Komponen Induk Frontend**
+
+Implementasi di frontend bersifat standar. *Handler* `@load-children` akan mengirim `parentType` (misalnya, `'location'`), dan `additionalQuery` di backend akan menggunakan informasi ini untuk memfilter anak-anaknya dengan benar (misalnya, `storage_type` = `'warehouse'`).
+
+---
+
+### **Studi Kasus 2: Hierarki Konten CMS**
+
+**Skenario:** Sebuah *Content Management System* klasik dengan struktur `Grup -> Seksi -> Kategori -> Artikel`. Masing-masing adalah model yang berbeda. Selain itu, `Kategori` dapat memiliki sub-kategori (hierarki *self-referencing*).
+
+**Tujuan:**
+- Menampilkan struktur konten lengkap.
+- Mencegah pemilihan kontainer organisasional (`Grup`, `Seksi`).
+- Mengizinkan pemilihan `Kategori` dan `Artikel`.
+- Kategori hanya dapat dipilih jika statusnya `'published'`.
+
+#### **Pengaturan Backend (`CmsContentController.php`)**
+
+Contoh ini menonjolkan pendefinisian *closure* `selectable_checker` di level yang berbeda untuk kontrol yang lebih terperinci.
+
+```php
+<?php
+namespace App\Http\Controllers\Cms;
+
+use App\Http\Controllers\Core\AdminController;
+use App\Models\Cms\{Group, Section, Category, Article};
+
+class CmsContentController extends AdminController
+{
+    public function __construct()
+    {
+        parent::__construct();
+        $this->controller_base = 'cms/content';
+        $this->table_structure_mode = 'compound_tree';
+
+        $this->table_compound_tree_config = [
+                'group' => [
+                'model' => Group::class,
+                'prefix' => 'group',
+                'parent_type' => null,
+                'primary_key' => 'id',
+                'selectable_checker' => fn($row) => false, // Grup tidak pernah bisa dipilih
+            ],
+            'section' => [
+                'model' => Section::class,
+                'prefix' => 'sec',
+                'parent_type' => 'group',
+                'foreign_key' => 'groupId',
+                'primary_key' => 'id',
+                'selectable_checker' => fn($row) => false, // Seksi tidak pernah bisa dipilih
+            ],
+            'category' => [
+                'model' => Category::class,
+                'prefix' => 'cat',
+                'parent_type' => 'section',
+                'foreign_key' => 'sectionId',
+                'primary_key' => 'id',
+                'self_referencing_key' => 'parentId', // Kategori punya sub-kategori
+                'selectable_checker' => fn($row) => $row['status'] === 'published', // Hanya kategori yang terbit yang bisa dipilih
+            ],
+            'article' => [
+                'model' => Article::class,
+                'prefix' => 'art',
+                'parent_type' => 'category',
+                'foreign_key' => 'categoryId',
+                'primary_key' => 'id',
+                'selectable_checker' => fn($row) => true, // Semua artikel selalu bisa dipilih
+            ],
+        ];
+    }
+}
+```
+
+#### **Komponen Induk Frontend**
+
+Implementasi di frontend sangat lugas. Ia melakukan panggilan awal ke *endpoint* dan kemudian menggunakan *handler* `@load-children` untuk memuat level-level yang berbeda secara *lazy-load*. Konfigurasi di backend secara otomatis menangani relasi dan aturan seleksi. Frontend hanya perlu me-render status `_selectable` yang disediakan dalam data.

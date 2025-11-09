@@ -186,6 +186,8 @@
           {
             "group": "Framework",
             "pages": [
+              "mejik-core/laravel/framework/option-tree-endpoint",
+              "mejik-core/laravel/framework/superclass-tree-function",
               "mejik-core/laravel/framework/queue-events",
               "mejik-core/laravel/framework/sse-notification"
             ]
@@ -194,6 +196,13 @@
             "group": "Use Case",
             "pages": [
               "mejik-core/laravel/commands/converter/case/invoice-generator-with-template.mdx"
+            ]
+          },
+          {
+            "group": "Batch Processing",
+            "pages": [
+              "mejik-core/laravel/commands/batch/stamp-watermark-thumbnail",
+              "mejik-core/laravel/commands/batch/bus-vs-pipeline"
             ]
           },
           {
@@ -272,13 +281,38 @@
         "tab": "Mejik Vue",
         "groups": [
           {
-            "group": "Vue",
+            "group": "Data View",
             "pages": [
-              "mejik-core/vue/components/sse-notification-dropdown",
-              "mejik-core/vue/components/advanced-repeater-form",
-              "mejik-core/vue/components/tiptap-quill-editor",
-              "mejik-core/vue/components/inlineediting",
-              "mejik-core/vue/components/treedatatable"
+              "mejik-core/vue/components/data-view/sidebar-tree-table",
+              "mejik-core/vue/components/data-view/sidebar-tree-map",
+              "mejik-core/vue/components/data-view/sidebar-tree-calendar",
+              "mejik-core/vue/components/data-view/mejik-data-table",
+              "mejik-core/vue/components/data-view/mejik-data-map",
+              "mejik-core/vue/components/data-view/calendar-resource-timeline",
+              "mejik-core/vue/components/data-view/resource-calendar-view",
+              "mejik-core/vue/components/data-view/advanced-tree-datatable",
+              "mejik-core/vue/components/data-view/leaflet-map-view",
+              "mejik-core/vue/components/data-view/tree-data-table"
+            ]
+          },
+          {
+            "group": "Base Functions",
+            "pages": [
+              "mejik-core/vue/components/base/select-dialog-advanced",
+              "mejik-core/vue/components/base/mejik-modal-form",
+              "mejik-core/vue/components/base/sse-notification-dropdown",
+              "mejik-core/vue/components/base/advanced-repeater-form",
+              "mejik-core/vue/components/base/tiptap-quill-editor",
+              "mejik-core/vue/components/base/inlineediting"
+            ]
+          },
+          {
+            "group": "References",
+            "pages": [
+              "mejik-core/vue/components/reference/advanced-tree-data-format",
+              "mejik-core/vue/components/data-view/usecase-compound-tree-datatable",
+              "mejik-core/vue/components/data-view/usecase-sidebar-tree-datatable",
+              "mejik-core/vue/components/reference/data-display-format"
             ]
           }
         ]

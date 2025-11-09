@@ -1,0 +1,57 @@
+---
+title: Bus::chain() vs. Pipeline
+---
+
+### **Appendix A: Architectural Decision - `Bus::chain()` vs. `Pipeline`**
+
+A key decision in this system's architecture was the choice of `Bus::chain()` with Jobs over Laravel's `Pipeline` pattern for executing sequential tasks. While both can run operations in order, they are designed for different purposes. This section clarifies why the Job Chain was chosen.
+
+#### **Core Concepts**
+
+- **`Bus::chain()` with Jobs (The Project Manager):** This pattern is designed for orchestrating a series of **discrete, self-contained actions**. Each "Job" is a complete task. The system ensures one job finishes before the next begins. It is ideal for long-running or heavy processes like file manipulation.
+- **Analogy**: A construction project where the foundation must be built (`StampDocumentJob`) before the walls are erected (`GenerateThumbnailJob`).
+
+- **`app(Pipeline::class)` with Pipes (The Assembly Line):** This pattern is designed for **transforming a single piece of data** through a series of steps or "Pipes". The same data object is passed from one step to the next, being modified along the way.
+- **Analogy**: A car chassis moving down an assembly line, where each station adds a new part to the same object.
+
+#### **Comparison and Justification**
+
+| Feature              | **Bus::chain()** with Jobs                                                                                                              | **app(Pipeline::class)** with Pipes                                                                        | Why We Chose **Bus::chain()**                                                                                                                                                                                                                                                   |
+|:---------------------|:--------------------------------------------------------------------------------------------------------------------------------------|:---------------------------------------------------------------------------------------------------------|:------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Execution**        | **Asynchronous-first**. Can run in the background (with **database**/**redis** drivers) or immediately (**sync** driver).                   | **Strictly Synchronous**. Always runs immediately.                                                       | This provides **future flexibility**. If the tasks become too slow, we can switch to a background queue without changing any application code—only an **.env** variable.                                                                                                        |
+| **State**            | **Stateless between jobs**. Each job is independent and should fetch its required state from a persistent source (like the database). | **Stateful**. The same object is passed from pipe to pipe.                                               | Our tasks are independent actions. **GenerateThumbnailJob** only needs to know that **StampDocumentJob** is _finished_, not receive data directly from it. It fetches the updated model state (**$model->refresh()**). This is a cleaner, more robust approach for I/O-heavy tasks. |
+| **Failure Handling** | **Robust**. Integrates with Laravel's queue system for retries, timeouts, and dedicated **failed()** job handlers.                      | **Basic**. Throws an exception that must be handled with a **try/catch** block around the entire pipeline. | File processing can fail for many reasons (corrupt files, server issues). The advanced error handling of the queue system is far superior for this use case.                                                                                                                  |
+| **Purpose**          | Orchestrating **actions**.                                                                                                            | Transforming **data**.                                                                                   | Stamping a PDF and generating a thumbnail are heavy **actions**, not simple data transformations. The Job pattern is the semantically correct choice.                                                                                                                         |
+
+#### **Conclusion**
+
+For processing documents—which involves external system calls, file I/O, and potentially long execution times—`Bus::chain()` is the superior and more conventional Laravel pattern. It provides the necessary robustness, state separation, and crucial flexibility to scale from synchronous to asynchronous processing in the future.
+
+---
+
+### **Addendum Dokumentasi Bahasa Indonesia**
+
+### **Lampiran A: Keputusan Arsitektur - `Bus::chain()` vs. `Pipeline`**
+
+Sebuah keputusan kunci dalam arsitektur sistem ini adalah pemilihan `Bus::chain()` dengan Jobs dibandingkan dengan pattern `Pipeline` dari Laravel untuk mengeksekusi tugas sekuensial. Meskipun keduanya dapat menjalankan operasi secara berurutan, mereka dirancang untuk tujuan yang berbeda. Bagian ini menjelaskan mengapa Job Chain dipilih.
+
+#### **Konsep Inti**
+
+- **`Bus::chain()` dengan Jobs (Manajer Proyek):** Pattern ini dirancang untuk mengorkestrasi serangkaian **aksi yang terpisah dan mandiri**. Setiap "Job" adalah sebuah tugas yang utuh. Sistem memastikan satu job selesai sebelum job berikutnya dimulai. Ini ideal untuk proses yang berat atau berjalan lama seperti manipulasi file.
+- **Analogi**: Proyek konstruksi di mana fondasi harus dibangun (`StampDocumentJob`) sebelum dinding didirikan (`GenerateThumbnailJob`).
+
+- **`app(Pipeline::class)` dengan Pipes (Lini Perakitan):** Pattern ini dirancang untuk **mengubah (transformasi) sebuah data** melalui serangkaian langkah atau "Pipes". Objek data yang sama diteruskan dari satu langkah ke langkah berikutnya, dan dimodifikasi di sepanjang jalan.
+- **Analogi**: Sasis mobil yang bergerak di lini perakitan, di mana setiap stasiun menambahkan bagian baru ke objek yang sama.
+
+#### **Perbandingan dan Justifikasi**
+
+| Fitur                    | `Bus::chain()` dengan Jobs                                                                                                                                        | `app(Pipeline::class)` dengan Pipes                                                                             | Alasan Memilih `Bus::chain()`                                                                                                                                                                                                                                                                     |
+|:-------------------------|:------------------------------------------------------------------------------------------------------------------------------------------------------------------|:----------------------------------------------------------------------------------------------------------------|:--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Eksekusi**             | **Asinkron-first**. Dapat berjalan di latar belakang (dengan driver `database`/`redis`) atau secara langsung (`sync` driver).                                     | **Hanya Sinkron**. Selalu berjalan secara langsung.                                                             | Ini memberikan **fleksibilitas di masa depan**. Jika tugas menjadi terlalu lambat, kita dapat beralih ke antrian latar belakang tanpa mengubah kode aplikasi sama sekali—hanya variabel di `.env`.                                                                                                |
+| **State**                | **Stateless (tanpa state) antar job**. Setiap job bersifat independen dan harus mengambil state yang dibutuhkannya dari sumber yang persisten (seperti database). | **Stateful (dengan state)**. Objek yang sama diteruskan dari satu pipe ke pipe berikutnya.                      | Tugas kita adalah aksi independen. `GenerateThumbnailJob` hanya perlu tahu bahwa `StampDocumentJob` telah _selesai_, bukan menerima data langsung darinya. Ia mengambil state model yang terbaru (`$model->refresh()`). Ini adalah pendekatan yang lebih bersih dan kuat untuk tugas-tugas berat. |
+| **Penanganan Kegagalan** | **Kuat**. Terintegrasi dengan sistem antrian Laravel untuk fitur coba-ulang (retry), timeout, dan handler `failed()` khusus untuk job.                            | **Dasar**. Melemparkan exception yang harus ditangani dengan blok `try/catch` yang membungkus seluruh pipeline. | Pemrosesan file bisa gagal karena banyak alasan (file korup, masalah server). Penanganan error canggih dari sistem antrian jauh lebih unggul untuk skenario ini.                                                                                                                                  |
+| **Tujuan**               | Mengorkestrasi **aksi**.                                                                                                                                          | Mentransformasi **data**.                                                                                       | Memberi stempel pada PDF dan membuat thumbnail adalah **aksi** yang berat, bukan transformasi data sederhana. Pattern Job adalah pilihan yang paling tepat secara semantik.                                                                                                                       |
+
+#### **Kesimpulan**
+
+Untuk memproses dokumen—yang melibatkan panggilan sistem eksternal, I/O file, dan waktu eksekusi yang berpotensi lama—`Bus::chain()` adalah pattern Laravel yang lebih unggul dan konvensional. Pattern ini menyediakan kekokohan, pemisahan state, dan fleksibilitas krusial untuk beralih dari pemrosesan sinkron ke asinkron di kemudian hari.

@@ -1,0 +1,194 @@
+---
+title: Sidebar Tree Calendar Resource View
+---
+
+## Documentation: `SidebarTreeCalendar` Component (English)
+
+### 1. Overview
+
+`SidebarTreeCalendar` is a powerful layout component that combines a hierarchical tree-based sidebar with the `ResourceCalendarView`. It is designed for scenarios where you need to filter calendar or timeline events based on a structured category, such as projects, departments, locations, or any other hierarchical data.
+
+When a user selects an item in the tree, the component automatically re-fetches the calendar data, applying the selected item's ID as a filter.
+
+### 2. Features
+
+-   **Dynamic Filtering:** The calendar view is dynamically updated based on the selected node in the sidebar tree.
+-   **Collapsible Sidebar:** The sidebar can be toggled to maximize the calendar viewing area.
+-   **Searchable Tree:** Includes a search input to quickly find nodes within the tree.
+-   **Inherited Power:** Leverages all the features of `ResourceCalendarView`, including its dual views, on-demand loading, and resource pagination.
+-   **Highly Configurable:** All API endpoints, titles, and filter keys are customizable via props.
+-   **CRUD Events:** Emits events for tree management (add, edit, delete), allowing the parent page to handle the logic (e.g., by opening modals).
+
+### 3. Props
+
+| Prop                | Type   | Required | Default            | Description                                                                                               |
+| :------------------ | :----- | :------- | :----------------- | :-------------------------------------------------------------------------------------------------------- |
+| `nodesUrl`          | String | Yes      | -                  | The API endpoint (POST) for fetching the tree structure data for the sidebar.                             |
+| `sidebarTitle`      | String | No       | `'Categories'`     | The title displayed at the top of the sidebar.                                                            |
+| `treeServerSearch`  | Bool   | No       | `false`            | If `true`, the search term is sent to the `nodesUrl` endpoint for server-side searching.                  |
+| `contentTitle`      | String | No       | `'Schedule for'`   | The prefix for the main content area's title (e.g., "Schedule for [Selected Node Name]").                 |
+| `eventsEndpoint`    | String | Yes      | -                  | The API endpoint for fetching calendar events. This is passed down to `ResourceCalendarView`.             |
+| `resourcesEndpoint` | String | Yes      | -                  | The API endpoint for fetching timeline resources. This is passed down to `ResourceCalendarView`.          |
+| `filterKey`         | String | No       | `'categoryId'`     | The **query parameter key** to use when filtering. E.g., if set to `'projectId'`, the API call will be `...?projectId=123`. |
+
+### 4. Pass-Through Props
+
+This component automatically passes any unrecognized props (like `dayLabels` or `rowHeight`) directly down to the underlying `ResourceCalendarView` component. This allows you to customize the calendar's appearance from the parent page.
+
+### 5. Emitted Events
+
+| Event             | Payload                                   | Description                                                                                              |
+| :---------------- | :---------------------------------------- | :------------------------------------------------------------------------------------------------------- |
+| `@event-click`    | `(eventObject)`                           | Passed up from `ResourceCalendarView`. Fired when a calendar event is clicked.                           |
+| `@fetch-error`    | `(errorPayload)`                          | Passed up from `ResourceCalendarView`. Fired if an API call fails.                                       |
+| `@node-selected`  | `(nodeObject)`                            | Fired when a user selects a node in the sidebar tree.                                                    |
+| `@add-node`       | `{ parentId, parentNode }`                | Fired when the user clicks an "add" button in the tree, signaling the parent to open a creation form/modal. |
+| `@edit-node`      | `(nodeObject)`                            | Fired when the user clicks the "edit" icon on a tree node.                                               |
+| `@delete-node`    | `(nodeObject)`                            | Fired after confirmation when the user clicks the "delete" icon on a tree node.                          |
+
+### 6. Backend API Requirements
+
+1.  **Tree API (`nodesUrl`):**
+-   Must be a `POST` endpoint that can accept a `search` term.
+-   Should return an array of node objects, each with at least `id`, `name`, and an optional `children` array for nesting.
+2.  **Calendar/Resource APIs (`eventsEndpoint`, `resourcesEndpoint`):**
+-   Must be able to handle an additional query parameter based on the `filterKey` prop. For example, if `filterKey` is `'categoryId'`, your Laravel controller should check for `request('categoryId')` and add a `where` clause to the query.
+
+### 7. Usage Example
+
+```vue
+<!-- MySchedulePage.vue -->
+<template>
+  <div class="container-fluid mt-4">
+    <SidebarTreeCalendar
+      sidebar-title="Projects"
+      content-title="Schedule for Project:"
+      nodes-url="/api/projects/tree"
+      events-endpoint="/api/schedule/events"
+      resources-endpoint="/api/schedule/resources"
+      filter-key="projectId"
+
+      @event-click="openEventModal"
+      @edit-node="openProjectEditor"
+
+      <!-- Pass-through prop for ResourceTimelineView -->
+      :row-height="60"
+    />
+  </div>
+</template>
+
+<script>
+import SidebarTreeCalendar from './components/SidebarTreeCalendar.vue';
+
+export default {
+  components: { SidebarTreeCalendar },
+  methods: {
+    openEventModal(event) {
+      // Logic to open a modal with the event's details
+      console.log('Opening details for event:', event.title);
+    },
+    openProjectEditor(node) {
+      // Logic to open a form/modal to edit the selected project
+      console.log('Editing project:', node.name);
+    }
+  }
+}
+</script>
+```
+
+---
+---
+
+## Dokumentasi: Komponen `SidebarTreeCalendar` (Bahasa Indonesia)
+
+### 1. Gambaran Umum
+
+`SidebarTreeCalendar` adalah komponen tata letak (layout) yang menggabungkan sidebar berbasis pohon hierarkis dengan `ResourceCalendarView`. Komponen ini dirancang untuk skenario di mana Anda perlu menyaring (filter) event di kalender atau timeline berdasarkan kategori terstruktur, seperti proyek, departemen, lokasi, atau data hierarkis lainnya.
+
+Ketika pengguna memilih sebuah item di pohon, komponen akan secara otomatis mengambil ulang data kalender, dengan menerapkan ID item yang dipilih sebagai filter.
+
+### 2. Fitur
+
+-   **Filter Dinamis:** Tampilan kalender diperbarui secara dinamis berdasarkan node yang dipilih di sidebar.
+-   **Sidebar Lipat:** Sidebar dapat disembunyikan untuk memaksimalkan area tampilan kalender.
+-   **Pohon yang Dapat Dicari:** Menyertakan input pencarian untuk menemukan node di dalam pohon dengan cepat.
+-   **Mewarisi Kekuatan `ResourceCalendarView`:** Memanfaatkan semua fitur dari `ResourceCalendarView`, termasuk tampilan ganda, pemuatan on-demand, dan paginasi resource.
+-   **Sangat Mudah Dikonfigurasi:** Semua endpoint API, judul, dan kunci filter dapat disesuaikan melalui props.
+-   **Event CRUD:** Memancarkan event untuk manajemen pohon (tambah, edit, hapus), memungkinkan halaman induk untuk menangani logika (misalnya, dengan membuka modal).
+
+### 3. Props
+
+| Prop                | Tipe   | Wajib | Default            | Deskripsi                                                                                                     |
+| :------------------ | :----- | :---- | :----------------- | :------------------------------------------------------------------------------------------------------------ |
+| `nodesUrl`          | String | Ya    | -                  | Endpoint API (POST) untuk mengambil data struktur pohon untuk sidebar.                                        |
+| `sidebarTitle`      | String | Tidak | `'Categories'`     | Judul yang ditampilkan di bagian atas sidebar.                                                                |
+| `treeServerSearch`  | Bool   | Tidak | `false`            | Jika `true`, istilah pencarian akan dikirim ke endpoint `nodesUrl` untuk pencarian di sisi server.            |
+| `contentTitle`      | String | Tidak | `'Schedule for'`   | Awalan untuk judul area konten utama (misalnya, "Jadwal untuk [Nama Node Terpilih]").                         |
+| `eventsEndpoint`    | String | Ya    | -                  | Endpoint API untuk mengambil event kalender. Prop ini akan diteruskan ke `ResourceCalendarView`.              |
+| `resourcesEndpoint` | String | Ya    | -                  | Endpoint API untuk mengambil resource timeline. Prop ini akan diteruskan ke `ResourceCalendarView`.           |
+| `filterKey`         | String | Tidak | `'categoryId'`     | **Kunci parameter query** yang akan digunakan saat memfilter. Misal, jika diatur ke `'projectId'`, panggilan API akan menjadi `...?projectId=123`. |
+
+### 4. Props Penerus (Pass-Through Props)
+
+Komponen ini secara otomatis meneruskan props yang tidak dikenali (seperti `dayLabels` atau `rowHeight`) langsung ke komponen `ResourceCalendarView` di dalamnya. Ini memungkinkan Anda untuk menyesuaikan tampilan kalender dari halaman induk.
+
+### 5. Event yang Di-emit
+
+| Event             | Payload                                   | Deskripsi                                                                                                |
+| :---------------- | :---------------------------------------- | :------------------------------------------------------------------------------------------------------- |
+| `@event-click`    | `(eventObject)`                           | Diteruskan dari `ResourceCalendarView`. Dipicu saat sebuah event di kalender diklik.                     |
+| `@fetch-error`    | `(errorPayload)`                          | Diteruskan dari `ResourceCalendarView`. Dipicu jika panggilan API gagal.                                 |
+| `@node-selected`  | `(nodeObject)`                            | Dipicu saat pengguna memilih sebuah node di sidebar.                                                     |
+| `@add-node`       | `{ parentId, parentNode }`                | Dipicu saat pengguna mengklik tombol "tambah" di pohon, memberi sinyal ke induk untuk membuka form/modal. |
+| `@edit-node`      | `(nodeObject)`                            | Dipicu saat pengguna mengklik ikon "edit" pada sebuah node pohon.                                        |
+| `@delete-node`    | `(nodeObject)`                            | Dipicu setelah konfirmasi saat pengguna mengklik ikon "hapus" pada sebuah node pohon.                    |
+
+### 6. Kebutuhan API Backend
+
+1.  **API Pohon (`nodesUrl`):**
+-   Harus berupa endpoint `POST` yang dapat menerima istilah `search`.
+-   Harus mengembalikan sebuah array objek node, masing-masing dengan setidaknya `id`, `name`, dan array `children` (opsional) untuk data bersarang.
+2.  **API Kalender/Resource (`eventsEndpoint`, `resourcesEndpoint`):**
+-   Harus dapat menangani parameter query tambahan berdasarkan prop `filterKey`. Contohnya, jika `filterKey` adalah `'categoryId'`, controller Laravel Anda harus memeriksa `request('categoryId')` dan menambahkan klausa `where` pada query.
+
+### 7. Contoh Penggunaan
+
+```vue
+<!-- HalamanJadwalSaya.vue -->
+<template>
+  <div class="container-fluid mt-4">
+    <SidebarTreeCalendar
+      sidebar-title="Proyek"
+      content-title="Jadwal untuk Proyek:"
+      nodes-url="/api/proyek/tree"
+      events-endpoint="/api/jadwal/events"
+      resources-endpoint="/api/jadwal/resources"
+      filter-key="projectId"
+
+      @event-click="bukaModalEvent"
+      @edit-node="bukaEditorProyek"
+
+      <!-- Prop penerus untuk ResourceTimelineView -->
+      :row-height="60"
+    />
+  </div>
+</template>
+
+<script>
+import SidebarTreeCalendar from './components/SidebarTreeCalendar.vue';
+
+export default {
+  components: { SidebarTreeCalendar },
+  methods: {
+    bukaModalEvent(event) {
+      // Logika untuk membuka modal dengan detail event
+      console.log('Membuka detail untuk event:', event.title);
+    },
+    bukaEditorProyek(node) {
+      // Logika untuk membuka form/modal untuk mengedit proyek yang dipilih
+      console.log('Mengedit proyek:', node.name);
+    }
+  }
+}
+</script>
+```
