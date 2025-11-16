@@ -1,0 +1,171 @@
+---
+title: MMS Environment Configuration
+---
+
+## English Version
+
+This appendix provides a comprehensive list of all environment variables (`.env`) used by the Multi-Messaging System (MMS). These variables are read by the configuration files (`config/mms.php` and `config/services.php`) to correctly set up the drivers for each channel.
+
+### General MMS Configuration
+
+These variables control which driver is used by default for a given channel.
+
+| Variable              | Description                                                                                      | Example   |
+|:----------------------|:-------------------------------------------------------------------------------------------------|:----------|
+| `MMS_EMAIL_DRIVER`    | Sets the default driver for the `email` channel. Must match a driver key in `config/mms.php`.    | `mailgun` |
+| `MMS_WHATSAPP_DRIVER` | Sets the default driver for the `whatsapp` channel. Must match a driver key in `config/mms.php`. | `waha`    |
+
+---
+#### WhatsApp Drivers
+
+##### WAHA Driver Configuration
+| Variable           | Description                                                                     | Example                  |
+|:-------------------|:--------------------------------------------------------------------------------|:-------------------------|
+| `WAHA_API_URL`     | The full base URL of your running WAHA (WhatsApp HTTP API) server instance.     | `http://localhost:3000`  |
+| `WAHA_API_SESSION` | The session name you are using within your WAHA instance.                       | `default`                |
+| `WAHA_API_TOKEN`   | (Optional) The secret API token (`X-Api-Key`) if your WAHA instance is secured. | `your-secret-waha-token` |
+
+##### WatZap Driver Configuration
+| Variable            | Description                                                                        | Example                                 |
+|:--------------------|:-----------------------------------------------------------------------------------|:----------------------------------------|
+| `WATZAP_API_URL`    | The endpoint URL provided by the WatZap service.                                   | `https://api.watzap.id/v1/send_message` |
+| `WATZAP_API_KEY`    | The API key for your WatZap account.                                               | `wz_key_xxxxxxxxxxxx`                   |
+| `WATZAP_NUMBER_KEY` | The specific number key associated with the sending number in your WatZap account. | `wz_num_yyyyyyyyyyyy`                   |
+
+---
+#### Email Drivers
+
+##### Shared Email Variables
+These variables are used by multiple email drivers to set the sender's identity.
+
+| Variable            | Description                                                                               | Example                  |
+|:--------------------|:------------------------------------------------------------------------------------------|:-------------------------|
+| `MAIL_FROM_ADDRESS` | The email address that messages will be sent from. Should be verified with your provider. | `noreply@yourdomain.com` |
+| `MAIL_FROM_NAME`    | The "From" name that appears in the recipient's email client.                             | `"Your App Name"`        |
+
+##### Mailtrap API Driver
+| Variable | Description | Example |
+| :--- | :--- | :--- |
+| `MAILTRAP_API_TOKEN`| Your API Token from the Mailtrap Sending dashboard for a specific domain. | `1a2b3c4d5e6f7g8h9i0j` |
+
+##### Mailgun API Driver
+| Variable         | Description                                                                    | Example                    |
+|:-----------------|:-------------------------------------------------------------------------------|:---------------------------|
+| `MAILGUN_DOMAIN` | Your configured sending domain from your Mailgun account.                      | `mg.yourdomain.com`        |
+| `MAILGUN_SECRET` | Your "Private API Key" from the Mailgun dashboard. Usually starts with `key-`. | `key-a1b2c3d4e5f6g7h8i9j0` |
+
+---
+#### Telegram Bot Configuration
+
+This configuration is used by the `laravel-notification-channels/telegram` package.
+
+| Variable             | Description                                                                                                                     | Example                                         |
+|:---------------------|:--------------------------------------------------------------------------------------------------------------------------------|:------------------------------------------------|
+| `TELEGRAM_BOT_TOKEN` | The unique authentication token for your bot, obtained from BotFather on Telegram. This is configured in `config/services.php`. | `1234567890:ABC-DEF1234ghIkl-zyx57W2v1u123ew11` |
+
+---
+#### FCM (Firebase) Configuration
+
+FCM uses a service account credentials file, not a simple key.
+
+| Variable               | Description                                                                                                                                                                  | Example                                           |
+|:-----------------------|:-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:--------------------------------------------------|
+| `FIREBASE_CREDENTIALS` | The **absolute path** to your Firebase service account JSON key file on the server. You can download this file from your Firebase project settings under "Service accounts". | `/var/www/your-project/firebase_credentials.json` |
+
+---
+#### Test Command Configuration
+
+These variables provide default recipients for the `php artisan test:mms` command, making testing easier. They can be overridden with the `--recipient` flag.
+
+| Variable                  | Description                                                          | Example                 |
+|:--------------------------|:---------------------------------------------------------------------|:------------------------|
+| `TEST_RECIPIENT_WHATSAPP` | Default WhatsApp recipient (phone number in international format).   | `6281234567890`         |
+| `TEST_RECIPIENT_TELEGRAM` | Default Telegram recipient (user or group Chat ID).                  | `123456789`             |
+| `TEST_RECIPIENT_FCM`      | Default FCM recipient (a valid device registration token).           | `c1PA...-4s`            |
+| `TEST_RECIPIENT_INTERNAL` | Default internal recipient (the ID of a user in your `users` table). | `1`                     |
+| `TEST_RECIPIENT_EMAIL`    | Default email recipient.                                             | `test-user@example.com` |
+
+
+
+## Versi Bahasa Indonesia
+
+Lampiran ini menyediakan daftar lengkap semua variabel environment (`.env`) yang digunakan oleh Multi-Messaging System (MMS). Variabel-variabel ini dibaca oleh file konfigurasi (`config/mms.php` dan `config/services.php`) untuk mengatur driver pada setiap channel dengan benar.
+
+### Konfigurasi Umum MMS
+
+Variabel ini mengontrol driver mana yang digunakan secara default untuk sebuah channel.
+
+| Variabel              | Deskripsi                                                                                                 | Contoh    |
+|:----------------------|:----------------------------------------------------------------------------------------------------------|:----------|
+| `MMS_EMAIL_DRIVER`    | Mengatur driver default untuk channel `email`. Harus cocok dengan nama key driver di `config/mms.php`.    | `mailgun` |
+| `MMS_WHATSAPP_DRIVER` | Mengatur driver default untuk channel `whatsapp`. Harus cocok dengan nama key driver di `config/mms.php`. | `waha`    |
+
+---
+#### Driver WhatsApp
+
+##### Konfigurasi Driver WAHA
+| Variabel           | Deskripsi                                                                         | Contoh                    |
+|:-------------------|:----------------------------------------------------------------------------------|:--------------------------|
+| `WAHA_API_URL`     | URL dasar lengkap dari server WAHA (WhatsApp HTTP API) Anda yang sedang berjalan. | `http://localhost:3000`   |
+| `WAHA_API_SESSION` | Nama sesi yang Anda gunakan di dalam instance WAHA Anda.                          | `default`                 |
+| `WAHA_API_TOKEN`   | (Opsional) Token API rahasia (`X-Api-Key`) jika instance WAHA Anda diamankan.     | `token-rahasia-waha-anda` |
+
+##### Konfigurasi Driver WatZap
+| Variabel            | Deskripsi                                                                    | Contoh                                  |
+|:--------------------|:-----------------------------------------------------------------------------|:----------------------------------------|
+| `WATZAP_API_URL`    | URL endpoint yang disediakan oleh layanan WatZap.                            | `https://api.watzap.id/v1/send_message` |
+| `WATZAP_API_KEY`    | Kunci API (API key) untuk akun WatZap Anda.                                  | `wz_key_xxxxxxxxxxxx`                   |
+| `WATZAP_NUMBER_KEY` | Kunci nomor spesifik yang terkait dengan nomor pengirim di akun WatZap Anda. | `wz_num_yyyyyyyyyyyy`                   |
+
+---
+#### Driver Email
+
+##### Variabel Email Bersama
+Variabel ini digunakan oleh beberapa driver email untuk mengatur identitas pengirim.
+
+| Variabel            | Deskripsi                                                                            | Contoh                   |
+|:--------------------|:-------------------------------------------------------------------------------------|:-------------------------|
+| `MAIL_FROM_ADDRESS` | Alamat email asal pengiriman pesan. Sebaiknya sudah diverifikasi oleh provider Anda. | `noreply@domainanda.com` |
+| `MAIL_FROM_NAME`    | Nama "Dari" yang muncul di aplikasi email penerima.                                  | `"Nama Aplikasi Anda"`   |
+
+##### Driver Mailtrap API
+| Variabel             | Deskripsi                                                             | Contoh                 |
+|:---------------------|:----------------------------------------------------------------------|:-----------------------|
+| `MAILTRAP_API_TOKEN` | Token API Anda dari dashboard Mailtrap Sending untuk domain tertentu. | `1a2b3c4d5e6f7g8h9i0j` |
+
+##### Driver Mailgun API
+| Variabel         | Deskripsi                                                                      | Contoh                     |
+|:-----------------|:-------------------------------------------------------------------------------|:---------------------------|
+| `MAILGUN_DOMAIN` | Domain pengiriman yang telah Anda konfigurasi di akun Mailgun Anda.            | `mg.domainanda.com`        |
+| `MAILGUN_SECRET` | "Private API Key" Anda dari dashboard Mailgun. Biasanya diawali dengan `key-`. | `key-a1b2c3d4e5f6g7h8i9j0` |
+
+---
+#### Konfigurasi Bot Telegram
+
+Konfigurasi ini digunakan oleh paket `laravel-notification-channels/telegram`.
+
+| Variabel             | Deskripsi                                                                                                              | Contoh                                          |
+|:---------------------|:-----------------------------------------------------------------------------------------------------------------------|:------------------------------------------------|
+| `TELEGRAM_BOT_TOKEN` | Token otentikasi unik untuk bot Anda, yang didapat dari BotFather di Telegram. Dikonfigurasi di `config/services.php`. | `1234567890:ABC-DEF1234ghIkl-zyx57W2v1u123ew11` |
+
+---
+#### Konfigurasi FCM (Firebase)
+
+FCM menggunakan file kredensial akun layanan, bukan kunci sederhana.
+
+| Variabel               | Deskripsi                                                                                                                                                                 | Contoh                                           |
+|:-----------------------|:--------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:-------------------------------------------------|
+| `FIREBASE_CREDENTIALS` | **Path absolut** ke file kunci JSON akun layanan Firebase Anda di server. Anda dapat mengunduh file ini dari pengaturan proyek Firebase Anda di bawah "Service accounts". | `/var/www/proyek-anda/firebase_credentials.json` |
+
+---
+#### Konfigurasi Command Test
+
+Variabel ini menyediakan penerima default untuk command `php artisan test:mms`, mempermudah pengujian. Nilainya dapat diganti dengan flag `--recipient`.
+
+| Variabel                  | Deskripsi                                                             | Contoh                     |
+|:--------------------------|:----------------------------------------------------------------------|:---------------------------|
+| `TEST_RECIPIENT_WHATSAPP` | Penerima WhatsApp default (nomor telepon dalam format internasional). | `6281234567890`            |
+| `TEST_RECIPIENT_TELEGRAM` | Penerima Telegram default (Chat ID pengguna atau grup).               | `123456789`                |
+| `TEST_RECIPIENT_FCM`      | Penerima FCM default (token registrasi perangkat yang valid).         | `c1PA...-4s`               |
+| `TEST_RECIPIENT_INTERNAL` | Penerima internal default (ID seorang pengguna di tabel `users`).     | `1`                        |
+| `TEST_RECIPIENT_EMAIL`    | Penerima email default.                                               | `pengguna-tes@example.com` |

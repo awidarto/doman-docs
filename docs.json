@@ -198,7 +198,8 @@
               "mejik-core/laravel/framework/mms/mms-dev-guide-sending-message",
               "mejik-core/laravel/framework/mms/mms-subsystem-overview",
               "mejik-core/laravel/framework/mms/mms-setup-driver",
-              "mejik-core/laravel/framework/mms/mms-gateway-driver-configuration"
+              "mejik-core/laravel/framework/mms/mms-gateway-driver-configuration",
+              "mejik-core/laravel/framework/mms/mms-environment-config"
             ]
           },
           {

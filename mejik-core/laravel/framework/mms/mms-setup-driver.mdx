@@ -2,9 +2,9 @@
 title: MMS - Setting Up New Driver
 ---
 
-### English Addendum
+## English Addendum
 
-#### 5. How to Implement a New Driver (Example: Mailgun)
+### 5. How to Implement a New Driver (Example: Mailgun)
 
 This guide walks you through the process of adding a new third-party service to the MMS. We will use the Mailgun API as a concrete example for sending emails.
 
@@ -160,24 +160,24 @@ Examine the `notification_dispatch_logs` collection. You should find a new docum
 
 You have successfully integrated a new third-party service into the MMS. This process can be repeated for any API, making the system incredibly flexible and future-proof.
 
-    ### Tambahan Dokumentasi Bahasa Indonesia
+## Tambahan Dokumentasi Bahasa Indonesia
 
-    #### 5. Cara Mengimplementasikan Driver Baru (Contoh: Mailgun)
+### 5. Cara Mengimplementasikan Driver Baru (Contoh: Mailgun)
 
-    Panduan ini akan memandu Anda melalui proses penambahan layanan pihak ketiga baru ke dalam MMS. Kita akan menggunakan API Mailgun sebagai contoh konkret untuk mengirim email.
+Panduan ini akan memandu Anda melalui proses penambahan layanan pihak ketiga baru ke dalam MMS. Kita akan menggunakan API Mailgun sebagai contoh konkret untuk mengirim email.
 
-    **Prasyarat:**
-    *   Anda memiliki akun Mailgun dengan domain aktif dan sebuah API key.
-    *   Anda telah menginstal HTTP client resmi Laravel (`guzzlehttp/guzzle`).
+**Prasyarat:**
+*   Anda memiliki akun Mailgun dengan domain aktif dan sebuah API key.
+*   Anda telah menginstal HTTP client resmi Laravel (`guzzlehttp/guzzle`).
 
-    ---
-    **Langkah 1: Buat Kelas Driver**
+---
+**Langkah 1: Buat Kelas Driver**
 
-    Pertama, buat file baru untuk driver Anda. Karena Mailgun adalah untuk email, kita akan menempatkannya di direktori driver `Email`.
+Pertama, buat file baru untuk driver Anda. Karena Mailgun adalah untuk email, kita akan menempatkannya di direktori driver `Email`.
 
-    **File:** `app/Services/Mms/Drivers/Email/MailgunApiDriver.php`
+**File:** `app/Services/Mms/Drivers/Email/MailgunApiDriver.php`
 
-    Kelas ini harus mengimplementasikan `SenderInterface` dan sebaiknya `extends AbstractSender` untuk memanfaatkan helper logging bawaan.
+Kelas ini harus mengimplementasikan `SenderInterface` dan sebaiknya `extends AbstractSender` untuk memanfaatkan helper logging bawaan.
 
 ```php
     <?php
@@ -275,8 +275,8 @@ Sekarang, daftarkan driver baru Anda di dalam channel `email` pada file `config/
             'from_address' => env('MAIL_FROM_ADDRESS', 'hello@example.com'),
             'from_name' => env('MAIL_FROM_NAME', 'Aplikasi Anda'),
         ],
-    ],
-    ],
+        ],
+        ],
     ],
 
     // ... channel lainnya ...

@@ -2,11 +2,9 @@
 title: MMS - Multi-Messaging System
 ---
 
-## Multi-Messaging System (MMS) Documentation
+## English Version
 
-### English Version
-
-#### 1. Concept and Architecture
+### 1. Concept and Architecture
 
 The Multi-Messaging System (MMS) is a modular, extensible subsystem designed to handle all outgoing notifications from the application. It was created to replace a monolithic utility class, promoting clean code, separation of concerns, and ease of maintenance.
 
@@ -35,7 +33,7 @@ The architecture is based on the **Strategy Design Pattern**, where the core log
 
 ---
 
-#### 2. How to Use the System
+### 2. How to Use the System
 
 To send a message, you should always do so from within a queued Job. This ensures that API calls do not slow down your main application flow.
 
@@ -77,7 +75,7 @@ The process is identical for other channels. Simply change the channel name and 
 
 ---
 
-#### 3. How to Extend the System
+### 3. How to Extend the System
 
 Adding a new provider (e.g., a new SMS gateway) is incredibly simple:
 
@@ -104,7 +102,7 @@ That's it. The system is now ready to use your new driver.
 
 ---
 
-#### 4. How to Test the System
+### 4. How to Test the System
 
 A dedicated Artisan command, `test:mms`, is provided for easy development and debugging.
 
@@ -141,11 +139,9 @@ php artisan test:mms all --params='{"name":"Andi"}'
 ```
 **Expected Output:** The command will show which channel is being tested, the recipient, the created Log ID, and whether the job was dispatched to the queue or sent directly. You can then check the `notification_dispatch_logs` collection in your database to see the final result.
 
-## Dokumentasi Multi-Messaging System (MMS)
+## Versi Bahasa Indonesia
 
-### Versi Bahasa Indonesia
-
-#### 1. Konsep dan Arsitektur
+### 1. Konsep dan Arsitektur
 
 Multi-Messaging System (MMS) adalah sebuah subsistem yang modular dan dapat diperluas, yang dirancang untuk menangani semua notifikasi keluar dari aplikasi. Sistem ini dibuat untuk menggantikan kelas utilitas monolitik, mendukung penulisan kode yang bersih, pemisahan tanggung jawab (*separation of concerns*), dan kemudahan dalam pemeliharaan.
 
@@ -174,7 +170,7 @@ Arsitekturnya didasarkan pada **Strategy Design Pattern**, di mana logika inti u
 
 ---
 
-#### 2. Cara Menggunakan Sistem
+### 2. Cara Menggunakan Sistem
 
 Untuk mengirim pesan, Anda sebaiknya selalu melakukannya dari dalam sebuah Job yang berjalan di antrean (queue). Hal ini memastikan bahwa panggilan API tidak memperlambat alur utama aplikasi Anda.
 
@@ -216,7 +212,7 @@ Prosesnya identik untuk channel lain. Cukup ubah nama channel dan pastikan objek
 
 ---
 
-#### 3. Cara Memperluas Sistem
+### 3. Cara Memperluas Sistem
 
 Menambahkan provider baru (misalnya, gateway SMS baru) sangatlah mudah:
 
@@ -243,7 +239,7 @@ Selesai. Sistem sekarang siap menggunakan driver baru Anda.
 
 ---
 
-#### 4. Cara Menguji Sistem
+### 4. Cara Menguji Sistem
 
 Sebuah command Artisan khusus, `test:mms`, disediakan untuk kemudahan pengembangan dan debugging.
 

@@ -2,17 +2,15 @@
 title: MMS Developer's Guide to Sending Messages
 ---
 
-### MMS Developer's Guide to Sending Messages
-
-### English Version
+## English Version
 
 This guide explains the practical steps for sending messages through the various MMS channels. It covers the crucial difference between **queued (asynchronous)** and **direct (synchronous)** sending, and provides detailed code examples for each channel.
 
-#### Queued vs. Direct Sending: A Key Architectural Concept
+### Queued vs. Direct Sending: A Key Architectural Concept
 
 It's vital to understand that the MMS `send()` method itself is **always synchronous**—it executes immediately when called. The asynchronous (queued) behavior comes from **how you initiate the process**.
 
-##### 1. Queued Sending (Asynchronous) - The Standard & Recommended Approach
+#### 1. Queued Sending (Asynchronous) - The Standard & Recommended Approach
 
 This is the best practice for performance and user experience, especially in a web context (e.g., after a user registers or places an order). You dispatch a Job to the queue, and your application can immediately return a response to the user without waiting for the email or message to be sent. A separate queue worker process handles the actual sending in the background.
 
@@ -45,7 +43,7 @@ public function registerUser(Request $request)
 **Flow:**
 `HTTP Request` -> `dispatch(Job)` -> `(Instant Response to User)` ... `[Queue Worker in Background]` ... `Job->handle()` -> `Mms::channel()->send()`
 
-##### 2. Direct Sending (Synchronous) - For Specific Use Cases
+#### 2. Direct Sending (Synchronous) - For Specific Use Cases
 
 This pattern executes the entire sending process immediately and blocks until it is complete. It's useful in contexts where you need the action to finish before proceeding, such as in an Artisan command or during testing.
 
@@ -84,11 +82,11 @@ The `test:mms --direct` command uses this exact pattern.
 
 ---
 
-#### Channel-Specific Sending Guides
+### Channel-Specific Sending Guides
 
 The following examples show the code inside the `handle()` method of each Job. Remember, you can call this method directly for synchronous sending or let the queue worker call it by using `Job::dispatch()`.
 
-##### 1. Sending a WhatsApp Message
+#### 1. Sending a WhatsApp Message
 
 *   **Key Data:** `recipient` (phone number), `body`.
 *   **Example (`app/Jobs/SendWhatsAppJob.php`):**
@@ -106,7 +104,7 @@ public function handle(): void
 }
 ```
 
-##### 2. Sending an Email
+#### 2. Sending an Email
 
 *   **Key Data:** `recipient` (email address), `body` (HTML), `subject`, `name`.
 *   **Example (`app/Jobs/SendEmailJob.php`):**
@@ -126,7 +124,7 @@ public function handle(): void
 }
 ```
 
-##### 3. Sending an FCM Push Notification
+#### 3. Sending an FCM Push Notification
 
 *   **Key Data:** `recipient` (FCM token), `body`, `title`, `image` (optional).
 *   **Example (`app/Jobs/SendFcmJob.php`):**
@@ -146,7 +144,7 @@ public function handle(): void
 }
 ```
 
-##### 4. Sending a Telegram Message
+#### 4. Sending a Telegram Message
 
 *   **Key Data:** `recipient` (Chat ID), `body`.
 *   **Example (`app/Jobs/SendTelegramJob.php`):**
@@ -164,7 +162,7 @@ public function handle(): void
 }
 ```
 
-##### 5. Sending an Internal (Database) Notification
+#### 5. Sending an Internal (Database) Notification
 
 *   **Key Data:** `recipient` (User ID), `body`, `title`, and custom structured data (e.g., `entity`).
 *   **Example (`app/Jobs/SendInternalNotification.php`):**
@@ -192,15 +190,15 @@ public function handle()
 }
 ```
 
-### Versi Bahasa Indonesia
+## Versi Bahasa Indonesia
 
 Panduan ini menjelaskan langkah-langkah praktis untuk mengirim pesan melalui berbagai channel MMS. Panduan ini mencakup perbedaan krusial antara pengiriman **melalui antrean (asinkron)** dan **langsung (sinkron)**, serta menyediakan contoh kode terperinci untuk setiap channel.
 
-#### Pengiriman Via Antrean vs. Langsung: Sebuah Konsep Arsitektur Kunci
+### Pengiriman Via Antrean vs. Langsung: Sebuah Konsep Arsitektur Kunci
 
 Sangat penting untuk memahami bahwa method `send()` milik MMS itu sendiri **selalu sinkron**—ia dieksekusi secara langsung saat dipanggil. Perilaku asinkron (menggunakan antrean/queue) berasal dari **cara Anda memulai proses tersebut**.
 
-##### 1. Pengiriman Via Antrean (Asinkron) - Pendekatan Standar & Direkomendasikan
+#### 1. Pengiriman Via Antrean (Asinkron) - Pendekatan Standar & Direkomendasikan
 
 Ini adalah praktik terbaik untuk performa dan pengalaman pengguna, terutama dalam konteks web (misalnya, setelah pengguna mendaftar atau melakukan pesanan). Anda mengirimkan (dispatch) sebuah Job ke dalam antrean, dan aplikasi Anda dapat langsung mengembalikan respons kepada pengguna tanpa menunggu email atau pesan terkirim. Proses queue worker yang terpisah menangani pengiriman sebenarnya di latar belakang.
 
@@ -232,7 +230,7 @@ public function registerUser(Request $request)
 **Alur:**
 `Request HTTP` -> `dispatch(Job)` -> `(Respons Instan ke Pengguna)` ... `[Queue Worker di Latar Belakang]` ... `Job->handle()` -> `Mms::channel()->send()`
 
-##### 2. Pengiriman Langsung (Sinkron) - Untuk Kasus Tertentu
+#### 2. Pengiriman Langsung (Sinkron) - Untuk Kasus Tertentu
 
 Pola ini mengeksekusi seluruh proses pengiriman secara langsung dan akan berhenti (block) sampai selesai. Ini berguna dalam konteks di mana Anda memerlukan tindakan tersebut selesai sebelum melanjutkan, seperti dalam command Artisan atau saat pengujian.
 
@@ -269,11 +267,11 @@ Command `test:mms --direct` menggunakan pola ini.
 
 ---
 
-#### Panduan Pengiriman Spesifik per Channel
+### Panduan Pengiriman Spesifik per Channel
 
 Contoh-contoh berikut menunjukkan kode di dalam method `handle()` dari setiap Job. Ingat, Anda dapat memanggil method ini secara langsung untuk pengiriman sinkron atau membiarkan queue worker memanggilnya dengan menggunakan `Job::dispatch()`.
 
-##### 1. Mengirim Pesan WhatsApp
+#### 1. Mengirim Pesan WhatsApp
 
 *   **Data Kunci:** `recipient` (nomor telepon), `body`.
 *   **Contoh (`app/Jobs/SendWhatsAppJob.php`):**
@@ -286,7 +284,7 @@ public function handle(): void
 }
 ```
 
-##### 2. Mengirim Email
+#### 2. Mengirim Email
 
 *   **Data Kunci:** `recipient` (alamat email), `body` (HTML), `subject`, `name`.
 *   **Contoh (`app/Jobs/SendEmailJob.php`):**
@@ -302,7 +300,7 @@ public function handle(): void
 }
 ```
 
-##### 3. Mengirim Notifikasi Push FCM
+#### 3. Mengirim Notifikasi Push FCM
 
 *   **Data Kunci:** `recipient` (token FCM), `body`, `title`, `image` (opsional).
 *   **Contoh (`app/Jobs/SendFcmJob.php`):**
@@ -318,7 +316,7 @@ public function handle(): void
 }
 ```
 
-##### 4. Mengirim Pesan Telegram
+#### 4. Mengirim Pesan Telegram
 
 *   **Data Kunci:** `recipient` (Chat ID), `body`.
 *   **Contoh (`app/Jobs/SendTelegramJob.php`):**
@@ -331,7 +329,7 @@ public function handle(): void
 }
 ```
 
-##### 5. Mengirim Notifikasi Internal (Database)
+#### 5. Mengirim Notifikasi Internal (Database)
 
 *   **Data Kunci:** `recipient` (User ID), `body`, `title`, dan data terstruktur kustom (misalnya, `entity`).
 *   **Contoh (`app/Jobs/SendInternalNotification.php`):**
