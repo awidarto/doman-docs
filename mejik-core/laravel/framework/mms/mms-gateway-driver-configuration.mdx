@@ -1,0 +1,472 @@
+---
+title: MMS - Gateway Configuration Guide
+---
+
+## MMS Gateway Setup and Configuration Guide
+
+### English Version
+
+This document provides a step-by-step guide on how to configure each communication channel and its specific gateways within the Multi-Messaging System (MMS).
+
+#### 1. Common Channel Setup Concepts
+
+Before configuring a specific gateway, it's important to understand what each channel type generally requires:
+
+*   **Email:** You need credentials for an email sending service. This can be a traditional SMTP server or a modern API-based provider like Mailtrap, Mailgun, or SendGrid. You will always need an API key/secret and usually a "from" address.
+*   **WhatsApp:** This channel requires a connection to a WhatsApp Gateway API. These are services that bridge your application with the WhatsApp Business Platform. You will need the gateway's URL and authentication credentials (like an API key or session token).
+*   **Telegram:** This requires you to create a "Bot" via Telegram's BotFather. The setup will provide you with a unique Bot Token. You will also need the recipient's `Chat ID`.
+*   **FCM (Firebase Cloud Messaging):** This requires a Firebase project. The primary credential is a JSON file (`firebase_credentials.json`) containing your project's service account keys, which allows your server to send push notifications securely.
+*   **Internal (Database):** This channel is built-in and requires no external setup. It relies on your existing `User` model and Laravel's notification system to store messages in the `notifications` database collection.
+
+---
+
+#### 2. Specific Gateway Setup Instructions
+
+##### A. Email: Mailtrap API
+
+This driver sends emails synchronously via the Mailtrap Sending API, providing immediate feedback.
+
+*   **Prerequisites:** An active Mailtrap account with a verified sending domain.
+*   **Step 1: Get Credentials**
+1.  Log in to your Mailtrap account.
+2.  Navigate to "Sending Domains" and select your domain.
+3.  Under the "API & Integrations" tab, you will find your **API Token**.
+*   **Step 2: Update `.env` File**
+```dotenv
+# Set the default email driver to mailtrap
+MMS_EMAIL_DRIVER=mailtrap
+
+# Mailtrap Credentials
+MAILTRAP_API_TOKEN=your_actual_api_token_here
+MAIL_FROM_ADDRESS=you@yourverifieddomain.com
+MAIL_FROM_NAME="Your Application Name"
+    ```
+*   **Step 3: Verify `config/mms.php`**
+Ensure the driver is configured correctly. The `class` and `config` keys should match the following:
+```php
+'email' => [
+    'default' => env('MMS_EMAIL_DRIVER', 'mailtrap'),
+    'drivers' => [
+        'mailtrap' => [
+            'class' => \App\Services\Mms\Drivers\Email\MailtrapApiDriver::class,
+            'config' => [
+                'url' => 'https://send.api.mailtrap.io/api/send',
+                'token' => env('MAILTRAP_API_TOKEN'),
+                'from_address' => env('MAIL_FROM_ADDRESS'),
+                'from_name' => env('MAIL_FROM_NAME'),
+            ],
+        ],
+        // ... other email drivers
+    ],
+],
+    ```
+
+##### B. WhatsApp: WAHA (WhatsApp HTTP API)
+
+This driver connects to a WAHA server instance, which can be self-hosted or provided by a third party.
+
+*   **Prerequisites:** A running and accessible WAHA server instance.
+*   **Step 1: Get Credentials**
+1.  You need the **URL** of your WAHA server (e.g., `http://localhost:3000`).
+2.  You need the **Session Name** you are using in WAHA (e.g., `default`).
+3.  If your WAHA instance is secured, you will need the **API Token** (sometimes referred to as `X-Api-Key`).
+*   **Step 2: Update `.env` File**
+```dotenv
+# Set the default WhatsApp driver to waha
+MMS_WHATSAPP_DRIVER=waha
+
+# WAHA Server Credentials
+WAHA_API_URL=http://your-waha-server-url:3000
+WAHA_API_SESSION=default
+WAHA_API_TOKEN=your_optional_secret_token
+    ```
+*   **Step 3: Verify `config/mms.php`**
+```php
+'whatsapp' => [
+    'default' => env('MMS_WHATSAPP_DRIVER', 'waha'),
+    'drivers' => [
+        'waha' => [
+            'class' => \App\Services\Mms\Drivers\WhatsApp\WahaDriver::class, // Ensure you created this driver
+            'config' => [
+                'url' => env('WAHA_API_URL'),
+                'session' => env('WAHA_API_SESSION', 'default'),
+                'token' => env('WAHA_API_TOKEN'),
+            ],
+        ],
+        // ... other WhatsApp drivers
+    ],
+],
+    ```
+
+##### C. Telegram Bot
+
+This driver uses your own Telegram Bot to send messages.
+
+*   **Prerequisites:** A Telegram account.
+*   **Step 1: Create a Bot and Get Token**
+1.  In Telegram, search for the user `BotFather` and start a chat.
+2.  Send the command `/newbot`.
+3.  Follow the prompts to name your bot and choose a username.
+4.  BotFather will provide you with a unique **Bot Token**.
+*   **Step 2: Get a Recipient Chat ID**
+1.  Find your newly created bot in Telegram and send it a message.
+2.  Open your browser and navigate to the following URL, replacing `YOUR_BOT_TOKEN` with your actual token: `https://api.telegram.org/botYOUR_BOT_TOKEN/getUpdates`
+3.  Look for the JSON response. Inside `result[0].message.chat`, you will find the `id`. This is your **Chat ID**.
+*   **Step 3: Update `.env` File**
+The `laravel-notification-channels/telegram` package reads its token from `config/services.php`, so we add it there.
+```dotenv
+# This is used by the services.php config file
+TELEGRAM_BOT_TOKEN=your_unique_bot_token_here
+    ```
+*   **Step 4: Update `config/services.php`**
+```php
+'telegram-bot-api' => [
+    'token' => env('TELEGRAM_BOT_TOKEN'),
+],
+    ```
+*   **Step 5: Verify `config/mms.php`**
+The Telegram driver in MMS doesn't need specific config, as it relies on the global service configuration.
+```php
+'telegram' => [
+    'default' => 'bot',
+    'drivers' => [
+        'bot' => [
+            'class' => \App\Services\Mms\Drivers\Telegram\TelegramBotDriver::class,
+            'config' => [], // No specific config needed here
+        ],
+    ],
+],
+    ```
+
+---
+
+#### 3. Advanced: Customizing Internal Database Notifications
+
+The internal database channel is powerful because you can store complex, structured data directly in the notification, thanks to MongoDB's schema-less nature. This allows you to differentiate notification types without creating new notification classes.
+
+**Use Case:** You want to send notifications for different business entities, like a `Contract` or an `Invoice`, and have the frontend display them differently.
+
+**Step 1: Prepare the Data in the Job**
+
+In the job that sends the internal notification (e.g., `SendInternalNotification`), construct a detailed payload. The key is to add a structured `entity` object.
+
+**File:** `app/Jobs/SendInternalNotification.php`
+```php
+public function handle()
+{
+    // ... inside the handle method ...
+    $body = Mms::compileMessage($this->templateId, $this->params);
+
+    $message = (new MmsMessage())
+        ->to($this->userId)
+        ->body($body)
+        ->set('dispatch_log_id', $this->dispatchLogId)
+        ->set('title', $this->subject);
+
+    // --- CUSTOM ENTITY LOGIC ---
+    // Check a parameter to determine the entity type
+    if (isset($this->params['contract_id'])) {
+        $message->set('entity', [
+            'type' => 'contract',
+            'data' => [
+                'id' => $this->params['contract_id'],
+                'due_date' => $this->params['due_date'],
+                'url' => '/contracts/' . $this->params['contract_id'],
+            ]
+        ]);
+    } elseif (isset($this->params['invoice_id'])) {
+        $message->set('entity', [
+            'type' => 'invoice',
+            'data' => [
+                'id' => $this->params['invoice_id'],
+                'amount' => $this->params['amount'],
+                'url' => '/invoices/' . $this->params['invoice_id'],
+            ]
+        ]);
+    }
+
+    Mms::channel('internal')->send($message);
+}
+```
+
+**Step 2: How the Data is Stored**
+
+The `GenericDatabaseNotification` class takes whatever array it's given and saves it. When you send a notification for a contract, the `data` field in your `notifications` MongoDB collection will look like this:
+
+```json
+{
+  "title": "Contract Nearing Expiry",
+  "message": "Your contract #C123 is due to expire on 2023-12-31.",
+  "entity": {
+    "type": "contract",
+    "data": {
+      "id": "C123",
+      "due_date": "2023-12-31",
+      "url": "/contracts/C123"
+    }
+  }
+}
+```
+
+**Step 3: Using the Data on the Frontend**
+
+Your frontend application can now easily read this structured data and apply custom logic:
+
+```javascript
+// Example frontend logic
+function renderNotification(notification) {
+    const entity = notification.data.entity;
+
+    if (entity && entity.type === 'contract') {
+        // Render with a contract icon and link to the contract page
+        return `<a href="${entity.data.url}">
+                    <i class="icon-contract"></i>
+                    ${notification.data.title}
+                </a>`;
+    } else if (entity && entity.type === 'invoice') {
+        // Render with an invoice icon and show the amount
+        return `<a href="${entity.data.url}">
+                    <i class="icon-invoice"></i>
+                    ${notification.data.title} - Amount: ${entity.data.amount}
+                </a>`;
+    } else {
+        // Default rendering
+        return `<div>${notification.data.title}</div>`;
+    }
+}
+```
+This approach provides maximum flexibility for your internal notification system with minimal backend changes.
+
+
+### Versi Bahasa Indonesia
+
+Dokumen ini menyediakan panduan langkah-demi-langkah untuk mengonfigurasi setiap channel komunikasi dan gateway spesifiknya di dalam Multi-Messaging System (MMS).
+
+#### 1. Konsep Umum Konfigurasi Channel
+
+Sebelum mengonfigurasi gateway tertentu, penting untuk memahami apa yang umumnya dibutuhkan oleh setiap jenis channel:
+
+*   **Email:** Anda memerlukan kredensial untuk layanan pengiriman email. Ini bisa berupa server SMTP tradisional atau penyedia berbasis API modern seperti Mailtrap, Mailgun, atau SendGrid. Anda akan selalu membutuhkan API key/secret dan biasanya alamat "from".
+*   **WhatsApp:** Channel ini memerlukan koneksi ke API Gateway WhatsApp. Ini adalah layanan yang menjembatani aplikasi Anda dengan WhatsApp Business Platform. Anda akan memerlukan URL gateway dan kredensial otentikasi (seperti API key atau token sesi).
+*   **Telegram:** Ini mengharuskan Anda membuat "Bot" melalui BotFather milik Telegram. Pengaturan ini akan memberi Anda Token Bot yang unik. Anda juga akan memerlukan `Chat ID` penerima.
+*   **FCM (Firebase Cloud Messaging):** Ini memerlukan proyek Firebase. Kredensial utamanya adalah file JSON (`firebase_credentials.json`) yang berisi kunci akun layanan proyek Anda, yang memungkinkan server Anda mengirim notifikasi push dengan aman.
+*   **Internal (Database):** Channel ini sudah terpasang dan tidak memerlukan pengaturan eksternal. Channel ini bergantung pada model `User` yang ada dan sistem notifikasi Laravel untuk menyimpan pesan di koleksi database `notifications`.
+
+---
+
+#### 2. Instruksi Pengaturan Gateway Spesifik
+
+##### A. Email: Mailtrap API
+
+Driver ini mengirim email secara sinkron melalui Mailtrap Sending API, memberikan umpan balik langsung.
+
+*   **Prasyarat:** Akun Mailtrap aktif dengan domain pengiriman yang terverifikasi.
+*   **Langkah 1: Dapatkan Kredensial**
+1.  Login ke akun Mailtrap Anda.
+2.  Navigasi ke "Sending Domains" dan pilih domain Anda.
+3.  Di bawah tab "API & Integrations", Anda akan menemukan **API Token** Anda.
+*   **Langkah 2: Perbarui File `.env`**
+```dotenv
+# Atur driver email default ke mailtrap
+MMS_EMAIL_DRIVER=mailtrap
+
+# Kredensial Mailtrap
+MAILTRAP_API_TOKEN=token_api_anda_yang_sebenarnya
+MAIL_FROM_ADDRESS=anda@domainterverifikasi.com
+MAIL_FROM_NAME="Nama Aplikasi Anda"
+    ```
+*   **Langkah 3: Verifikasi `config/mms.php`**
+Pastikan driver dikonfigurasi dengan benar. Key `class` dan `config` harus sesuai dengan berikut ini:
+```php
+'email' => [
+    'default' => env('MMS_EMAIL_DRIVER', 'mailtrap'),
+    'drivers' => [
+        'mailtrap' => [
+            'class' => \App\Services\Mms\Drivers\Email\MailtrapApiDriver::class,
+            'config' => [
+                'url' => 'https://send.api.mailtrap.io/api/send',
+                'token' => env('MAILTRAP_API_TOKEN'),
+                'from_address' => env('MAIL_FROM_ADDRESS'),
+                'from_name' => env('MAIL_FROM_NAME'),
+            ],
+        ],
+        // ... driver email lainnya
+    ],
+],
+    ```
+
+##### B. WhatsApp: WAHA (WhatsApp HTTP API)
+
+Driver ini terhubung ke instance server WAHA, yang bisa di-hosting sendiri atau disediakan oleh pihak ketiga.
+
+*   **Prasyarat:** Instance server WAHA yang sedang berjalan dan dapat diakses.
+*   **Langkah 1: Dapatkan Kredensial**
+1.  Anda memerlukan **URL** dari server WAHA Anda (misalnya, `http://localhost:3000`).
+2.  Anda memerlukan **Nama Sesi** (Session Name) yang Anda gunakan di WAHA (misalnya, `default`).
+3.  Jika instance WAHA Anda diamankan, Anda akan memerlukan **API Token** (terkadang disebut sebagai `X-Api-Key`).
+*   **Langkah 2: Perbarui File `.env`**
+```dotenv
+# Atur driver WhatsApp default ke waha
+MMS_WHATSAPP_DRIVER=waha
+
+# Kredensial Server WAHA
+WAHA_API_URL=http://url-server-waha-anda:3000
+WAHA_API_SESSION=default
+WAHA_API_TOKEN=token_rahasia_opsional_anda
+    ```
+*   **Langkah 3: Verifikasi `config/mms.php`**
+```php
+'whatsapp' => [
+    'default' => env('MMS_WHATSAPP_DRIVER', 'waha'),
+    'drivers' => [
+        'waha' => [
+            'class' => \App\Services\Mms\Drivers\WhatsApp\WahaDriver::class, // Pastikan Anda sudah membuat driver ini
+            'config' => [
+                'url' => env('WAHA_API_URL'),
+                'session' => env('WAHA_API_SESSION', 'default'),
+                'token' => env('WAHA_API_TOKEN'),
+            ],
+        ],
+        // ... driver WhatsApp lainnya
+    ],
+],
+    ```
+
+##### C. Telegram Bot
+
+Driver ini menggunakan Bot Telegram Anda sendiri untuk mengirim pesan.
+
+*   **Prasyarat:** Akun Telegram.
+*   **Langkah 1: Buat Bot dan Dapatkan Token**
+1.  Di Telegram, cari pengguna `BotFather` dan mulai obrolan.
+2.  Kirim perintah `/newbot`.
+3.  Ikuti petunjuk untuk memberi nama bot Anda dan memilih username.
+4.  BotFather akan memberi Anda **Token Bot** yang unik.
+*   **Langkah 2: Dapatkan Chat ID Penerima**
+1.  Temukan bot yang baru saja Anda buat di Telegram dan kirimkan pesan.
+2.  Buka browser Anda dan navigasikan ke URL berikut, ganti `YOUR_BOT_TOKEN` dengan token Anda: `https://api.telegram.org/botYOUR_BOT_TOKEN/getUpdates`
+3.  Cari respons JSON. Di dalam `result[0].message.chat`, Anda akan menemukan `id`. Ini adalah **Chat ID** Anda.
+*   **Langkah 3: Perbarui File `.env`**
+Paket `laravel-notification-channels/telegram` membaca tokennya dari `config/services.php`, jadi kita menambahkannya di sana.
+```dotenv
+# Ini digunakan oleh file config services.php
+TELEGRAM_BOT_TOKEN=token_bot_unik_anda_di_sini
+    ```
+*   **Langkah 4: Perbarui `config/services.php`**
+```php
+'telegram-bot-api' => [
+    'token' => env('TELEGRAM_BOT_TOKEN'),
+],
+    ```
+*   **Langkah 5: Verifikasi `config/mms.php`**
+Driver Telegram di MMS tidak memerlukan konfigurasi khusus, karena ia bergantung pada konfigurasi layanan global.
+```php
+'telegram' => [
+    'default' => 'bot',
+    'drivers' => [
+        'bot' => [
+            'class' => \App\Services\Mms\Drivers\Telegram\TelegramBotDriver::class,
+            'config' => [], // Tidak perlu config khusus di sini
+        ],
+    ],
+],
+    ```
+
+---
+
+#### 3. Tingkat Lanjut: Kustomisasi Notifikasi Database Internal
+
+Channel database internal sangat kuat karena Anda dapat menyimpan data terstruktur yang kompleks langsung di dalam notifikasi, berkat sifat *schema-less* dari MongoDB. Ini memungkinkan Anda untuk membedakan jenis notifikasi tanpa membuat kelas notifikasi baru.
+
+**Studi Kasus:** Anda ingin mengirim notifikasi untuk entitas bisnis yang berbeda, seperti `Kontrak` atau `Faktur`, dan ingin frontend menampilkannya secara berbeda.
+
+**Langkah 1: Siapkan Data di dalam Job**
+
+Di dalam job yang mengirimkan notifikasi internal (misalnya, `SendInternalNotification`), buat payload yang terperinci. Kuncinya adalah menambahkan objek `entity` yang terstruktur.
+
+**File:** `app/Jobs/SendInternalNotification.php`
+```php
+public function handle()
+{
+    // ... di dalam method handle ...
+    $body = Mms::compileMessage($this->templateId, $this->params);
+
+    $message = (new MmsMessage())
+        ->to($this->userId)
+        ->body($body)
+        ->set('dispatch_log_id', $this->dispatchLogId)
+        ->set('title', $this->subject);
+
+    // --- LOGIKA ENTITAS KUSTOM ---
+    // Periksa parameter untuk menentukan tipe entitas
+    if (isset($this->params['contract_id'])) {
+        $message->set('entity', [
+            'type' => 'contract',
+            'data' => [
+                'id' => $this->params['contract_id'],
+                'due_date' => $this->params['due_date'],
+                'url' => '/contracts/' . $this->params['contract_id'],
+            ]
+        ]);
+    } elseif (isset($this->params['invoice_id'])) {
+        $message->set('entity', [
+            'type' => 'invoice',
+            'data' => [
+                'id' => $this->params['invoice_id'],
+                'amount' => $this->params['amount'],
+                'url' => '/invoices/' . $this->params['invoice_id'],
+            ]
+        ]);
+    }
+
+    Mms::channel('internal')->send($message);
+}
+```
+
+**Langkah 2: Bagaimana Data Disimpan**
+
+Kelas `GenericDatabaseNotification` akan mengambil array apa pun yang diberikan dan menyimpannya. Saat Anda mengirim notifikasi untuk sebuah kontrak, field `data` di koleksi `notifications` MongoDB Anda akan terlihat seperti ini:
+
+```json
+{
+  "title": "Kontrak Akan Segera Berakhir",
+  "message": "Kontrak Anda #C123 akan berakhir pada 2023-12-31.",
+  "entity": {
+    "type": "contract",
+    "data": {
+      "id": "C123",
+      "due_date": "2023-12-31",
+      "url": "/contracts/C123"
+    }
+  }
+}
+```
+
+**Langkah 3: Menggunakan Data di Frontend**
+
+Aplikasi frontend Anda sekarang dapat dengan mudah membaca data terstruktur ini dan menerapkan logika kustom:
+
+```javascript
+// Contoh logika di frontend
+function renderNotification(notification) {
+    const entity = notification.data.entity;
+
+    if (entity && entity.type === 'contract') {
+        // Render dengan ikon kontrak dan tautan ke halaman kontrak
+        return `<a href="${entity.data.url}">
+                    <i class="icon-contract"></i>
+                    ${notification.data.title}
+                </a>`;
+    } else if (entity && entity.type === 'invoice') {
+        // Render dengan ikon faktur dan tampilkan jumlahnya
+        return `<a href="${entity.data.url}">
+                    <i class="icon-invoice"></i>
+                    ${notification.data.title} - Jumlah: ${entity.data.amount}
+                </a>`;
+    } else {
+        // Tampilan default
+        return `<div>${notification.data.title}</div>`;
+    }
+}
+```
+Pendekatan ini memberikan fleksibilitas maksimum untuk sistem notifikasi internal Anda dengan perubahan backend yang minimal.

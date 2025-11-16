@@ -1,0 +1,432 @@
+---
+title: Event Augmentation Setup and Data Format for Timeline & Calendar Views
+---
+
+## English Documentation
+
+### Event Augmentation for Timeline & Calendar Views
+
+#### 1. Overview
+
+The Event Augmentation feature provides a flexible and standardized way to attach time-based events to resources displayed in the `TreeResourceEditor` and `CalendarView` components. This system is configuration-driven from your `AdminController` and supports three main data structures: `flat` lists, `simple_tree` hierarchies, and `compound_tree` hierarchies.
+
+The core principle is to fetch a primary collection of resources (e.g., documents, projects, employees) and then "augment" each item in that collection with its related events from a different data source. This ensures a single source of truth and efficient data loading.
+
+#### 2. Configuration & Setup
+
+Event augmentation is configured in your child controller (e.g., `DocumentController.php`) by defining specific properties. The system automatically detects the configuration and fetches the corresponding events.
+
+**Configuration Parameters:**
+
+*   `model` (string): The fully qualified class name of the Event model (e.g., `App\Models\DocumentEvent::class`).
+*   `resource_id_field` (string): The "foreign key" column in the event model's table that links back to the resource's primary key (e.g., `documentId`).
+*   `event_fields` (array): A key-value map to transform your event model's database columns into the standard format expected by the frontend components.
+*   **Key:** The standard field name (`id`, `title`, `start`, `end`).
+*   **Value:** The actual column name in your event database table (e.g., `revisionDate`).
+
+---
+
+#### 3. Implementation Examples
+
+Here are examples for each of the three supported data structures.
+
+##### Case 1: Flat List
+
+**Scenario:** You have a simple, non-hierarchical list of `Projects`. Each project's tasks are stored in a separate `ProjectTasks` model.
+
+**Controller Setup (`ProjectController.php`):**
+```php
+class ProjectController extends AdminController
+{
+    public function __construct()
+    {
+        parent::__construct();
+        $this->model = new Project();
+
+        // Define the table structure as flat.
+        $this->table_structure_mode = 'flat';
+
+        // Configure the event source.
+        $this->table_tree_event_config = [
+            'model' => 'App\Models\ProjectTask',
+            'resource_id_field' => 'projectId', // Foreign key in the 'project_tasks' table.
+            'event_fields' => [
+                'id' => '_id',
+                'title' => 'taskName',
+                'start' => 'startDate',
+                'end' => 'dueDate',
+            ],
+        ];
+    }
+}
+```
+
+##### Case 2: Simple Tree (Self-Referencing)
+
+**Scenario:** You have a hierarchical `Documents` model where each document can have a `parentId` that points to another document. The timeline events for each document are stored in a `DocumentEvents` model.
+
+**Controller Setup (`DocumentController.php`):**
+```php
+class DocumentController extends AdminController
+{
+    public function __construct()
+    {
+        parent::__construct();
+        $this->model = new Document();
+
+        // Configure the self-referencing tree structure.
+        $this->table_structure_mode = 'simple_tree';
+        $this->table_tree_parent_field = 'parentId';
+        $this->table_tree_root_parent_value = null;
+
+        // Configure the event source. This is identical to the flat list setup.
+        $this->table_tree_event_config = [
+            'model' => 'App\Models\DocumentEvent',
+            'resource_id_field' => 'documentId', // Foreign key in the 'document_events' table.
+            'event_fields' => [
+                'id' => '_id',
+                'title' => 'eventName',
+                'start' => 'eventStartDate',
+                'end' => 'eventEndDate',
+            ],
+        ];
+    }
+}
+```
+
+##### Case 3: Compound Tree (Multi-Model & Self-Referencing)
+
+**Scenario:** A complex hierarchy where `Departments` can contain sub-departments (self-referencing) and also contain `Employees`. `Departments` have their events stored in `DepartmentMeetings`, while `Employees` have their events in `EmployeeTasks`.
+
+**Controller Setup (`OrganizationController.php`):**
+```php
+class OrganizationController extends AdminController
+{
+    public function __construct()
+    {
+        parent::__construct();
+
+        // Configure the multi-model tree structure.
+        $this->table_structure_mode = 'compound_tree';
+
+        $this->table_compound_tree_config = [
+            'department' => [
+                'model' => 'App\Models\Department',
+                'primary_key' => 'id',
+                'parent_type' => null, // Root node
+                'prefix' => 'dept',
+                'text_fields' => ['departmentName'],
+                'self_referencing_key' => 'parent_department_id', // Links to other departments.
+
+                // Event configuration specific to 'department' nodes.
+                'event_config' => [
+                    'model' => 'App\Models\DepartmentMeeting',
+                    'resource_id_field' => 'department_id',
+                    'event_fields' => [
+                        'id' => 'id',
+                        'title' => 'meeting_topic',
+                        'start' => 'start_time',
+                        'end' => 'end_time',
+                    ],
+                ],
+            ],
+            'employee' => [
+                'model' => 'App\Models\Employee',
+                'primary_key' => 'id',
+                'parent_type' => 'department', // Employees belong to a department.
+                'foreign_key' => 'department_id',
+                'prefix' => 'emp',
+                'text_fields' => ['firstName', 'lastName'],
+
+                // Event configuration specific to 'employee' nodes.
+                'event_config' => [
+                    'model' => 'App\Models\EmployeeTask',
+                    'resource_id_field' => 'employee_id',
+                    'event_fields' => [
+                        'id' => 'id',
+                        'title' => 'task_description',
+                        'start' => 'assigned_at',
+                        'end' => 'due_at',
+                    ],
+                ],
+            ],
+        ];
+    }
+}
+```
+
+---
+
+#### 4. Final Data Format
+
+Regardless of the structure, the `AdminController` will process the data and produce a JSON response where each resource node contains an `events` array.
+
+**Data Format for a Flat List:**
+The response `data` will be a simple array of resource objects.
+
+```json
+[
+  {
+    "id": 1,
+    "title": "Alpha Project",
+    "status": "In Progress",
+    "events": [
+      {
+        "id": "task_01",
+        "title": "Initial Planning",
+        "start": "2025-11-10T09:00:00.000Z",
+        "end": "2025-11-12T17:00:00.000Z"
+      }
+    ]
+  },
+  {
+    "id": 2,
+    "title": "Bravo Project",
+    "status": "Completed",
+    "events": []
+  }
+]
+```
+
+**Data Format for Tree Structures (Simple or Compound):**
+The response `data` will be an array of root-level resource objects, with children and events nested inside.
+
+```json
+[
+  {
+    "id": 1,
+    "title": "Project Documents",
+    "events": [],
+    "children": [
+      {
+        "id": 2,
+        "title": "UI/UX Mockups",
+        "events": [
+          {
+            "id": 101,
+            "title": "Finalize Wireframes",
+            "start": "2025-11-03T09:00:00.000Z",
+            "end": "2025-11-05T17:00:00.000Z"
+          }
+        ],
+        "children": []
+      }
+    ]
+  }
+]
+```
+
+
+## Dokumentasi Bahasa Indonesia
+
+### Augmentasi Event untuk Tampilan Timeline & Kalender
+
+#### 1. Gambaran Umum
+
+Fitur Augmentasi Event menyediakan cara yang fleksibel dan terstandarisasi untuk melampirkan event berbasis waktu ke sumber daya (resources) yang ditampilkan dalam komponen `TreeResourceEditor` dan `CalendarView`. Sistem ini digerakkan oleh konfigurasi dari `AdminController` Anda dan mendukung tiga struktur data utama: daftar `flat` (datar), hierarki `simple_tree` (pohon sederhana), dan hierarki `compound_tree` (pohon majemuk).
+
+Prinsip utamanya adalah mengambil koleksi data sumber daya utama (misalnya: dokumen, proyek, karyawan) dan kemudian "menambah" (augment) setiap item dalam koleksi tersebut dengan event terkait dari sumber data yang berbeda. Hal ini memastikan sumber data tunggal yang valid dan pemuatan data yang efisien.
+
+#### 2. Konfigurasi & Pengaturan
+
+Augmentasi Event dikonfigurasi di dalam controller turunan Anda (contoh: `DocumentController.php`) dengan mendefinisikan properti spesifik. Sistem akan secara otomatis mendeteksi konfigurasi dan mengambil event yang sesuai.
+
+**Parameter Konfigurasi:**
+
+*   `model` (string): Nama kelas Model Event yang memenuhi syarat (contoh: `App\Models\DocumentEvent::class`).
+*   `resource_id_field` (string): Nama kolom "foreign key" di tabel model event yang menghubungkan kembali ke primary key dari sumber daya (contoh: `documentId`).
+*   `event_fields` (array): Sebuah pemetaan (map) key-value untuk mengubah kolom dari database model event Anda menjadi format standar yang diharapkan oleh komponen frontend.
+*   **Key:** Nama field standar (`id`, `title`, `start`, `end`).
+*   **Value:** Nama kolom sebenarnya di tabel database event Anda (contoh: `revisionDate`).
+
+---
+
+#### 3. Contoh Implementasi
+
+Berikut adalah contoh untuk setiap struktur data yang didukung.
+
+##### Kasus 1: Daftar Datar (Flat List)
+
+**Skenario:** Anda memiliki daftar `Projects` yang sederhana dan tidak hierarkis. Setiap tugas (task) dari sebuah proyek disimpan dalam Model `ProjectTasks` yang terpisah.
+
+**Pengaturan Controller (`ProjectController.php`):**
+```php
+class ProjectController extends AdminController
+{
+    public function __construct()
+    {
+        parent::__construct();
+        $this->model = new Project();
+
+        // Definisikan struktur tabel sebagai 'flat'.
+        $this->table_structure_mode = 'flat';
+
+        // Konfigurasi sumber data event.
+        $this->table_tree_event_config = [
+            'model' => 'App\Models\ProjectTask',
+            'resource_id_field' => 'projectId', // Foreign key di tabel 'project_tasks'.
+            'event_fields' => [
+                'id' => '_id',
+                'title' => 'taskName',
+                'start' => 'startDate',
+                'end' => 'dueDate',
+            ],
+        ];
+    }
+}
+```
+
+##### Kasus 2: Pohon Sederhana (Simple Tree / Self-Referencing)
+
+**Skenario:** Anda memiliki Model `Documents` hierarkis di mana setiap dokumen dapat memiliki `parentId` yang menunjuk ke dokumen lain. Event timeline untuk setiap dokumen disimpan dalam Model `DocumentEvents`.
+
+**Pengaturan Controller (`DocumentController.php`):**
+```php
+class DocumentController extends AdminController
+{
+    public function __construct()
+    {
+        parent::__construct();
+        $this->model = new Document();
+
+        // Konfigurasi struktur pohon self-referencing.
+        $this->table_structure_mode = 'simple_tree';
+        $this->table_tree_parent_field = 'parentId';
+        $this->table_tree_root_parent_value = null;
+
+        // Konfigurasi sumber data event. Pengaturannya identik dengan daftar datar.
+        $this->table_tree_event_config = [
+            'model' => 'App\Models\DocumentEvent',
+            'resource_id_field' => 'documentId', // Foreign key di tabel 'document_events'.
+            'event_fields' => [
+                'id' => '_id',
+                'title' => 'eventName',
+                'start' => 'eventStartDate',
+                'end' => 'eventEndDate',
+            ],
+        ];
+    }
+}
+```
+
+##### Kasus 3: Pohon Majemuk (Compound Tree / Multi-Model & Self-Referencing)
+
+**Skenario:** Hierarki kompleks di mana `Departments` dapat berisi sub-departemen (self-referencing) dan juga berisi `Employees`. `Departments` memiliki event yang disimpan di `DepartmentMeetings`, sementara `Employees` memiliki event di `EmployeeTasks`.
+
+**Pengaturan Controller (`OrganizationController.php`):**
+```php
+class OrganizationController extends AdminController
+{
+    public function __construct()
+    {
+        parent::__construct();
+
+        // Konfigurasi struktur pohon multi-model.
+        $this->table_structure_mode = 'compound_tree';
+
+        $this->table_compound_tree_config = [
+            'department' => [
+                'model' => 'App\Models\Department',
+                'primary_key' => 'id',
+                'parent_type' => null, // Node akar
+                'prefix' => 'dept',
+                'text_fields' => ['departmentName'],
+                'self_referencing_key' => 'parent_department_id', // Menghubungkan ke departemen lain.
+
+                // Konfigurasi event khusus untuk node 'department'.
+                'event_config' => [
+                    'model' => 'App\Models\DepartmentMeeting',
+                    'resource_id_field' => 'department_id',
+                    'event_fields' => [
+                        'id' => 'id',
+                        'title' => 'meeting_topic',
+                        'start' => 'start_time',
+                        'end' => 'end_time',
+                    ],
+                ],
+            ],
+            'employee' => [
+                'model' => 'App\Models\Employee',
+                'primary_key' => 'id',
+                'parent_type' => 'department', // Karyawan berada di bawah departemen.
+                'foreign_key' => 'department_id',
+                'prefix' => 'emp',
+                'text_fields' => ['firstName', 'lastName'],
+
+                // Konfigurasi event khusus untuk node 'employee'.
+                'event_config' => [
+                    'model' => 'App\Models\EmployeeTask',
+                    'resource_id_field' => 'employee_id',
+                    'event_fields' => [
+                        'id' => 'id',
+                        'title' => 'task_description',
+                        'start' => 'assigned_at',
+                        'end' => 'due_at',
+                    ],
+                ],
+            ],
+        ];
+    }
+}
+```
+
+---
+
+#### 4. Format Data Final
+
+Terlepas dari strukturnya, `AdminController` akan memproses data dan menghasilkan respons JSON di mana setiap node sumber daya berisi sebuah array `events`.
+
+**Format Data untuk Daftar Datar (Flat List):**
+Respons `data` akan berupa array sederhana berisi objek-objek sumber daya.
+
+```json
+[
+  {
+    "id": 1,
+    "title": "Alpha Project",
+    "status": "In Progress",
+    "events": [
+      {
+        "id": "task_01",
+        "title": "Initial Planning",
+        "start": "2025-11-10T09:00:00.000Z",
+        "end": "2025-11-12T17:00:00.000Z"
+      }
+    ]
+  },
+  {
+    "id": 2,
+    "title": "Bravo Project",
+    "status": "Completed",
+    "events": []
+  }
+]
+```
+
+**Format Data untuk Struktur Pohon (Simple atau Compound):**
+Respons `data` akan berupa array berisi objek sumber daya level-akar, dengan `children` dan `events` bersarang di dalamnya.
+
+```json
+[
+  {
+    "id": 1,
+    "title": "Project Documents",
+    "events": [],
+    "children": [
+      {
+        "id": 2,
+        "title": "UI/UX Mockups",
+        "events": [
+          {
+            "id": 101,
+            "title": "Finalize Wireframes",
+            "start": "2025-11-03T09:00:00.000Z",
+            "end": "2025-11-05T17:00:00.000Z"
+          }
+        ],
+        "children": []
+      }
+    ]
+  }
+]
+```

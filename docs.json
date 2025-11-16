@@ -193,6 +193,15 @@
             ]
           },
           {
+            "group": "Messaging Sub System",
+            "pages": [
+              "mejik-core/laravel/framework/mms/mms-dev-guide-sending-message",
+              "mejik-core/laravel/framework/mms/mms-subsystem-overview",
+              "mejik-core/laravel/framework/mms/mms-setup-driver",
+              "mejik-core/laravel/framework/mms/mms-gateway-driver-configuration"
+            ]
+          },
+          {
             "group": "Use Case",
             "pages": [
               "mejik-core/laravel/commands/converter/case/invoice-generator-with-template.mdx"
@@ -309,6 +318,8 @@
           {
             "group": "References",
             "pages": [
+              "mejik-core/vue/components/reference/unified-data-backend-setup",
+              "mejik-core/vue/components/reference/event-augmentation-data-format",
               "mejik-core/vue/components/reference/advanced-tree-data-format",
               "mejik-core/vue/components/data-view/usecase-compound-tree-datatable",
               "mejik-core/vue/components/data-view/usecase-sidebar-tree-datatable",

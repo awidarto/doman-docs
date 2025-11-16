@@ -1,0 +1,380 @@
+---
+title: Unified Data Format & Backend Setup
+---
+
+## Data Format & Backend Setup Documentation (English)
+
+This document outlines the required JSON data structure that the Laravel `AdminController` must provide to the Vue frontend components, particularly `TreeResourceEditor` and `CalendarView`. It details the unified format for `flat`, `simple_tree`, and `compound_tree` structures, including the event augmentation system.
+
+### 1. The Unified Hierarchical Resource Format
+
+This is the **single source of truth** for all resource and event data. Whether for a flat list or a complex tree, the backend should produce an array of "node" objects. Nesting is achieved via a `children` property, and time-based data is attached via an `events` property.
+
+#### Standard Node Structure
+
+Every item in the `data` array, at any level of the hierarchy, must follow this structure:
+
+```json
+{
+  "id": "doc-123",
+  "title": "Project Documents",
+  "_type": "category",
+  "_expanded": true,
+  "_selectable": true,
+  "_selected": false,
+  "events": [
+    {
+      "id": "evt-001",
+      "title": "Initial Review",
+      "start": "2025-11-10T09:00:00.000Z",
+      "end": "2025-11-10T11:00:00.000Z"
+    }
+  ],
+  "children": [
+    // ... an array of other node objects following this same structure ...
+  ]
+}
+```
+
+-   **`id`** (String|Number): The unique identifier for the resource node.
+-   **`title`** (String): The display name for the resource.
+-   **`children`** (Array): An array of child node objects, following the same structure. An empty array `[]` signifies a leaf node.
+-   **`events`** (Array): An array of event objects associated *directly* with this resource node.
+    -   **`id`** (String|Number): Unique ID for the event.
+    -   **`title`** (String): The text displayed on the event.
+    -   **`start`** (String): The start date/time in **ISO 8601 format** (`YYYY-MM-DDTHH:mm:ssZ`).
+    -   **`end`** (String): The end date/time in **ISO 8601 format**.
+-   **`_type`** (String, optional): A developer-defined type for the node (e.g., 'document', 'category', 'employee'). Used for dynamic icons.
+-   **`_expanded`** (Boolean, optional): A hint from the server to tell the frontend if this node should be expanded by default.
+-   **`_selectable`** (Boolean, optional): A hint from the server to determine if the node can be selected.
+-   **`_selected`** (Boolean, optional): A hint from the server to pre-select a node on load.
+
+### 2. Backend Setup in `AdminController`
+
+The `AdminController` is responsible for fetching data from various database tables and assembling it into the Unified Hierarchical format. This is configured in your child controllers (e.g., `DocumentController`).
+
+#### Event Augmentation Configuration
+
+The key to attaching events is a configuration array that maps a resource model to its corresponding event model.
+
+-   `model` (string): The class name of the Event model (e.g., `App\Models\DocumentEvent::class`).
+-   `resource_id_field` (string): The foreign key column in the event model's table that links back to the resource's primary key (e.g., `documentId`).
+-   `event_fields` (array): A map to transform your database columns into the standard event format (`id`, `title`, `start`, `end`).
+
+---
+
+### 3. Implementation Examples
+
+Here are examples for each of the three supported data structures.
+
+#### Case 1: Flat List
+
+A flat list is treated as a tree with only root-level nodes. It uses the same event configuration as a simple tree.
+
+-   **Controller Setup (`ProjectController.php`):**
+    ```php
+    class ProjectController extends AdminController
+    {
+        public function __construct()
+        {
+            parent::__construct();
+            $this->model = new Project();
+            $this->table_structure_mode = 'flat';
+
+            $this->table_tree_event_config = [
+                'model' => 'App\Models\ProjectTask',
+                'resource_id_field' => 'projectId',
+                'event_fields' => [
+                    'id' => '_id', 'title' => 'taskName', 'start' => 'startDate', 'end' => 'dueDate',
+                ],
+            ];
+        }
+    }
+    ```
+-   **Final JSON Output (`/api/projects`):** The response is a standard Laravel paginated object, where the `data` array contains the augmented resource nodes.
+    ```json
+    {
+      "data": [
+        {
+          "id": 1, "title": "Alpha Project", "events": [ { "id": "task_01", ... } ], "children": []
+        },
+        {
+          "id": 2, "title": "Bravo Project", "events": [], "children": []
+        }
+      ],
+      "meta": { "current_page": 1, ... }
+    }
+    ```
+
+#### Case 2: Simple Tree (Self-Referencing)
+
+This is for a single model that references itself (e.g., `Documents` with a `parentId`).
+
+-   **Controller Setup (`DocumentController.php`):**
+    ```php
+    class DocumentController extends AdminController
+    {
+        public function __construct()
+        {
+            parent::__construct();
+            $this->model = new Document();
+
+            $this->table_structure_mode = 'simple_tree';
+            $this->table_tree_parent_field = 'parentId';
+            $this->table_tree_root_parent_value = null;
+
+            $this->table_tree_event_config = [
+                'model' => 'App\Models\DocumentEvent',
+                'resource_id_field' => 'documentId',
+                'event_fields' => [
+                    'id' => '_id', 'title' => 'eventName', 'start' => 'eventStartDate', 'end' => 'eventEndDate',
+                ],
+            ];
+        }
+    }
+    ```
+-   **Final JSON Output (`/api/documents`):** The response `data` is an array of root-level nodes with `children` and `events` nested inside.
+    ```json
+    {
+      "data": [
+        {
+          "id": 1, "title": "Project Documents", "events": [], "children": [
+            { "id": 2, "title": "UI/UX Mockups", "events": [ { ... } ], "children": [] }
+          ]
+        }
+      ],
+      "total": 1 // Total root nodes for pagination
+    }
+    ```
+
+#### Case 3: Compound Tree (Multi-Model & Self-Referencing)
+
+This is for complex hierarchies involving multiple different models. The event configuration is defined *inside* each model's block in the `$table_compound_tree_config`.
+
+-   **Controller Setup (`OrganizationController.php`):**
+    ```php
+    class OrganizationController extends AdminController
+    {
+        public function __construct()
+        {
+            parent::__construct();
+            $this->table_structure_mode = 'compound_tree';
+
+            $this->table_compound_tree_config = [
+                'department' => [
+                    'model' => 'App\Models\Department',
+                    'primary_key' => 'id', 'parent_type' => null, 'prefix' => 'dept',
+                    'text_fields' => ['departmentName'], 'self_referencing_key' => 'parent_department_id',
+                    'event_config' => [ /* Department's event source config */ ],
+                ],
+                'employee' => [
+                    'model' => 'App\Models\Employee',
+                    'primary_key' => 'id', 'parent_type' => 'department', 'foreign_key' => 'department_id',
+                    'prefix' => 'emp', 'text_fields' => ['firstName', 'lastName'],
+                    'event_config' => [ /* Employee's separate event source config */ ],
+                ],
+            ];
+        }
+    }
+    ```
+-   **Final JSON Output (`/api/organization`):** The structure is identical to the simple tree, but nodes can have different data and event sources, identified by `_type`.
+    ```json
+    {
+      "data": [
+        {
+          "id": "dept-1", "title": "Engineering", "_type": "department", "events": [ ... ], "children": [
+            { "id": "emp-101", "title": "John Doe", "_type": "employee", "events": [ ... ], "children": [] }
+          ]
+        }
+      ],
+      "total": 1
+    }
+    ```
+
+---
+---
+
+## Dokumentasi Format Data & Pengaturan Backend (Bahasa Indonesia)
+
+Dokumen ini menguraikan struktur data JSON yang wajib disediakan oleh `AdminController` Laravel ke komponen frontend Vue, khususnya `TreeResourceEditor` dan `CalendarView`. Dokumen ini merinci format terpadu untuk struktur `flat`, `simple_tree`, dan `compound_tree`, termasuk sistem augmentasi event.
+
+### 1. Format Sumber Daya Hierarkis Terpadu
+
+Ini adalah **sumber kebenaran tunggal** untuk semua data sumber daya (resource) dan event. Baik untuk daftar datar maupun pohon yang kompleks, backend harus menghasilkan sebuah array berisi objek "node". Susunan bersarang (nesting) dicapai melalui properti `children`, dan data berbasis waktu dilampirkan melalui properti `events`.
+
+#### Struktur Node Standar
+
+Setiap item dalam array `data`, di tingkat hierarki manapun, harus mengikuti struktur ini:
+
+```json
+{
+  "id": "doc-123",
+  "title": "Dokumen Proyek",
+  "_type": "category",
+  "_expanded": true,
+  "_selectable": true,
+  "_selected": false,
+  "events": [
+    {
+      "id": "evt-001",
+      "title": "Tinjauan Awal",
+      "start": "2025-11-10T09:00:00.000Z",
+      "end": "2025-11-10T11:00:00.000Z"
+    }
+  ],
+  "children": [
+    // ... array berisi objek node lain yang mengikuti struktur yang sama ...
+  ]
+}
+```
+
+-   **`id`** (String|Number): Pengenal unik untuk node sumber daya.
+-   **`title`** (String): Nama tampilan untuk sumber daya.
+-   **`children`** (Array): Sebuah array berisi objek node anak, yang mengikuti struktur yang sama. Array kosong `[]` menandakan node daun (leaf).
+-   **`events`** (Array): Sebuah array berisi objek event yang terkait *langsung* dengan node sumber daya ini.
+    -   **`id`** (String|Number): ID unik untuk event.
+    -   **`title`** (String): Teks yang ditampilkan pada event.
+    -   **`start`** (String): Tanggal/waktu mulai dalam **format ISO 8601** (`YYYY-MM-DDTHH:mm:ssZ`).
+    -   **`end`** (String): Tanggal/waktu selesai dalam **format ISO 8601**.
+-   **`_type`** (String, opsional): Tipe yang ditentukan oleh developer untuk node (misalnya, 'document', 'category', 'employee'). Digunakan untuk ikon dinamis.
+-   **`_expanded`** (Boolean, opsional): Petunjuk dari server untuk memberitahu frontend jika node ini harus terbuka (expanded) secara default.
+-   **`_selectable`** (Boolean, opsional): Petunjuk dari server untuk menentukan apakah node dapat dipilih.
+-   **`_selected`** (Boolean, opsional): Petunjuk dari server untuk memilih node secara otomatis saat dimuat.
+
+### 2. Pengaturan Backend di `AdminController`
+
+`AdminController` bertanggung jawab untuk mengambil data dari berbagai tabel database dan menyusunnya ke dalam format Hierarkis Terpadu. Ini dikonfigurasi di dalam controller turunan Anda (misalnya, `DocumentController`).
+
+#### Konfigurasi Augmentasi Event
+
+Kunci untuk melampirkan event adalah sebuah array konfigurasi yang memetakan model sumber daya ke model event yang sesuai.
+
+-   `model` (string): Nama kelas Model Event (misalnya, `App\Models\DocumentEvent::class`).
+-   `resource_id_field` (string): Kolom foreign key di tabel model event yang menghubungkan kembali ke primary key sumber daya (misalnya, `documentId`).
+-   `event_fields` (array): Peta (map) untuk mengubah kolom database Anda menjadi format event standar (`id`, `title`, `start`, `end`).
+
+---
+
+### 3. Contoh Implementasi
+
+Berikut adalah contoh untuk setiap struktur data yang didukung.
+
+#### Kasus 1: Daftar Datar (Flat List)
+
+Daftar datar diperlakukan sebagai pohon yang hanya memiliki node level-akar. Ini menggunakan konfigurasi event yang sama dengan pohon sederhana.
+
+-   **Pengaturan Controller (`ProjectController.php`):**
+    ```php
+    class ProjectController extends AdminController
+    {
+        public function __construct()
+        {
+            parent::__construct();
+            $this->model = new Project();
+            $this->table_structure_mode = 'flat';
+
+            $this->table_tree_event_config = [
+                'model' => 'App\Models\ProjectTask',
+                'resource_id_field' => 'projectId',
+                'event_fields' => [
+                    'id' => '_id', 'title' => 'taskName', 'start' => 'startDate', 'end' => 'dueDate',
+                ],
+            ];
+        }
+    }
+    ```
+-   **Output JSON Final (`/api/projects`):** Responsnya adalah objek paginasi standar Laravel, di mana array `data` berisi node sumber daya yang telah ditambah event.
+    ```json
+    {
+      "data": [
+        { "id": 1, "title": "Proyek Alpha", "events": [ { "id": "task_01", ... } ], "children": [] },
+        { "id": 2, "title": "Proyek Bravo", "events": [], "children": [] }
+      ],
+      "meta": { "current_page": 1, ... }
+    }
+    ```
+
+#### Kasus 2: Pohon Sederhana (Simple Tree)
+
+Ini untuk satu model yang mereferensikan dirinya sendiri (misalnya, `Documents` dengan `parentId`).
+
+-   **Pengaturan Controller (`DocumentController.php`):**
+    ```php
+    class DocumentController extends AdminController
+    {
+        public function __construct()
+        {
+            parent::__construct();
+            $this->model = new Document();
+
+            $this->table_structure_mode = 'simple_tree';
+            $this->table_tree_parent_field = 'parentId';
+            $this->table_tree_root_parent_value = null;
+
+            $this->table_tree_event_config = [
+                'model' => 'App\Models\DocumentEvent',
+                'resource_id_field' => 'documentId',
+                'event_fields' => [
+                    'id' => '_id', 'title' => 'eventName', 'start' => 'eventStartDate', 'end' => 'eventEndDate',
+                ],
+            ];
+        }
+    }
+    ```
+-   **Output JSON Final (`/api/documents`):** Respons `data` adalah array node level-akar dengan `children` dan `events` bersarang di dalamnya.
+    ```json
+    {
+      "data": [
+        {
+          "id": 1, "title": "Dokumen Proyek", "events": [], "children": [
+            { "id": 2, "title": "Mockup UI/UX", "events": [ { ... } ], "children": [] }
+          ]
+        }
+      ],
+      "total": 1 // Total node akar untuk paginasi
+    }
+    ```
+
+#### Kasus 3: Pohon Majemuk (Compound Tree)
+
+Ini untuk hierarki kompleks yang melibatkan beberapa model berbeda. Konfigurasi event didefinisikan *di dalam* blok setiap model di dalam `$table_compound_tree_config`.
+
+-   **Pengaturan Controller (`OrganizationController.php`):**
+    ```php
+    class OrganizationController extends AdminController
+    {
+        public function __construct()
+        {
+            parent::__construct();
+            $this->table_structure_mode = 'compound_tree';
+
+            $this->table_compound_tree_config = [
+                'department' => [
+                    'model' => 'App\Models\Department',
+                    /* ... config lain ... */
+                    'self_referencing_key' => 'parent_department_id',
+                    'event_config' => [ /* Konfigurasi sumber event untuk Departemen */ ],
+                ],
+                'employee' => [
+                    'model' => 'App\Models\Employee',
+                    /* ... config lain ... */
+                    'parent_type' => 'department', 'foreign_key' => 'department_id',
+                    'event_config' => [ /* Konfigurasi sumber event terpisah untuk Karyawan */ ],
+                ],
+            ];
+        }
+    }
+    ```
+-   **Output JSON Final (`/api/organization`):** Strukturnya identik dengan pohon sederhana, tetapi node dapat memiliki data dan sumber event yang berbeda, diidentifikasi oleh `_type`.
+    ```json
+    {
+      "data": [
+        {
+          "id": "dept-1", "title": "Teknik", "_type": "department", "events": [ ... ], "children": [
+            { "id": "emp-101", "title": "Budi Santoso", "_type": "employee", "events": [ ... ], "children": [] }
+          ]
+        }
+      ],
+      "total": 1
+    }
+    ```

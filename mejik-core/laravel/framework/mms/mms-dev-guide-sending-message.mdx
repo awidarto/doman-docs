@@ -1,0 +1,356 @@
+---
+title: MMS Developer's Guide to Sending Messages
+---
+
+### MMS Developer's Guide to Sending Messages
+
+### English Version
+
+This guide explains the practical steps for sending messages through the various MMS channels. It covers the crucial difference between **queued (asynchronous)** and **direct (synchronous)** sending, and provides detailed code examples for each channel.
+
+#### Queued vs. Direct Sending: A Key Architectural Concept
+
+It's vital to understand that the MMS `send()` method itself is **always synchronous**—it executes immediately when called. The asynchronous (queued) behavior comes from **how you initiate the process**.
+
+##### 1. Queued Sending (Asynchronous) - The Standard & Recommended Approach
+
+This is the best practice for performance and user experience, especially in a web context (e.g., after a user registers or places an order). You dispatch a Job to the queue, and your application can immediately return a response to the user without waiting for the email or message to be sent. A separate queue worker process handles the actual sending in the background.
+
+**When to use:** In Controllers, Listeners, or any part of your code that handles user-facing requests.
+
+**The Code Pattern:** Use the static `dispatch()` method on your Job class.
+
+```php
+use App\Jobs\SendEmailJob;
+
+// Inside a Controller method
+public function registerUser(Request $request)
+{
+    // ... logic to create the user ...
+
+    // Dispatch the job to the queue. This line executes instantly.
+    SendEmailJob::dispatch(
+        'user@example.com',
+        'welcome-email',
+        ['name' => 'John Doe'],
+        'log-id-123', // This would be the ID from NotificationDispatchLog
+        'Welcome to Our Service!'
+    );
+
+    // Immediately return a response to the user.
+    return response()->json(['message' => 'Registration successful!']);
+}
+```
+
+**Flow:**
+`HTTP Request` -> `dispatch(Job)` -> `(Instant Response to User)` ... `[Queue Worker in Background]` ... `Job->handle()` -> `Mms::channel()->send()`
+
+##### 2. Direct Sending (Synchronous) - For Specific Use Cases
+
+This pattern executes the entire sending process immediately and blocks until it is complete. It's useful in contexts where you need the action to finish before proceeding, such as in an Artisan command or during testing.
+
+**When to use:** In Artisan commands, tests, or specific background tasks that require immediate execution.
+
+**The Code Pattern:** Create a new instance of the Job and call its `handle()` method directly.
+
+```php
+use App\Jobs\SendEmailJob;
+
+// Inside an Artisan command's handle() method
+public function handle()
+{
+    $this->info('Sending a direct test email...');
+
+    // 1. Create a new instance of the job
+    $job = new SendEmailJob(
+        'user@example.com',
+        'welcome-email',
+        ['name' => 'John Doe'],
+        'log-id-456',
+        'Direct Test Email'
+    );
+    
+    // 2. Execute its handle() method directly
+    $job->handle();
+
+    $this->info('Email sending process complete.');
+}
+```
+
+**Flow:**
+`Artisan Command` -> `new Job()` -> `$job->handle()` -> `Mms::channel()->send()` -> `(Command waits for completion)`
+
+The `test:mms --direct` command uses this exact pattern.
+
+---
+
+#### Channel-Specific Sending Guides
+
+The following examples show the code inside the `handle()` method of each Job. Remember, you can call this method directly for synchronous sending or let the queue worker call it by using `Job::dispatch()`.
+
+##### 1. Sending a WhatsApp Message
+
+*   **Key Data:** `recipient` (phone number), `body`.
+*   **Example (`app/Jobs/SendWhatsAppJob.php`):**
+```php
+public function handle(): void
+{
+    $body = Mms::compileMessage($this->templateId, $this->params);
+
+    $message = (new MmsMessage())
+        ->to($this->recipient)
+        ->body($body)
+        ->set('dispatch_log_id', $this->dispatchLogId);
+
+    Mms::channel('whatsapp')->send($message);
+}
+```
+
+##### 2. Sending an Email
+
+*   **Key Data:** `recipient` (email address), `body` (HTML), `subject`, `name`.
+*   **Example (`app/Jobs/SendEmailJob.php`):**
+```php
+public function handle(): void
+{
+    $body = Mms::compileMessage($this->templateId, $this->params);
+
+    $message = (new MmsMessage())
+        ->to($this->recipient)
+        ->body($body)
+        ->set('dispatch_log_id', $this->dispatchLogId)
+        ->set('subject', $this->subject)
+        ->set('name', $this->params['name'] ?? 'Valued User');
+
+    Mms::channel('email')->send($message);
+}
+```
+
+##### 3. Sending an FCM Push Notification
+
+*   **Key Data:** `recipient` (FCM token), `body`, `title`, `image` (optional).
+*   **Example (`app/Jobs/SendFcmJob.php`):**
+```php
+public function handle(): void
+{
+    $body = Mms::compileMessage($this->templateId, $this->params);
+
+    $message = (new MmsMessage())
+        ->to($this->recipient)
+        ->body($body)
+        ->set('dispatch_log_id', $this->dispatchLogId)
+        ->set('title', $this->title)
+        ->set('image', $this->params['imageUrl'] ?? null);
+
+    Mms::channel('fcm')->send($message);
+}
+```
+
+##### 4. Sending a Telegram Message
+
+*   **Key Data:** `recipient` (Chat ID), `body`.
+*   **Example (`app/Jobs/SendTelegramJob.php`):**
+```php
+public function handle(): void
+{
+    $body = Mms::compileMessage($this->templateId, $this->params);
+
+    $message = (new MmsMessage())
+        ->to($this->recipient)
+        ->body($body)
+        ->set('dispatch_log_id', $this->dispatchLogId);
+
+    Mms::channel('telegram')->send($message);
+}
+```
+
+##### 5. Sending an Internal (Database) Notification
+
+*   **Key Data:** `recipient` (User ID), `body`, `title`, and custom structured data (e.g., `entity`).
+*   **Example (`app/Jobs/SendInternalNotification.php`):**
+```php
+public function handle()
+{
+    $body = Mms::compileMessage($this->templateId, $this->params);
+
+    $message = (new MmsMessage())
+        ->to($this->userId)
+        ->body($body)
+        ->set('dispatch_log_id', $this->dispatchLogId)
+        ->set('title', $this->subject)
+        ->set('type', 'alert'); // Example of a simple type
+
+    // Example of adding a complex, structured object
+    if (isset($this->params['contract_id'])) {
+        $message->set('entity', [
+            'type' => 'contract',
+            'data' => ['id' => $this->params['contract_id']]
+        ]);
+    }
+
+    Mms::channel('internal')->send($message);
+}
+```
+
+### Versi Bahasa Indonesia
+
+Panduan ini menjelaskan langkah-langkah praktis untuk mengirim pesan melalui berbagai channel MMS. Panduan ini mencakup perbedaan krusial antara pengiriman **melalui antrean (asinkron)** dan **langsung (sinkron)**, serta menyediakan contoh kode terperinci untuk setiap channel.
+
+#### Pengiriman Via Antrean vs. Langsung: Sebuah Konsep Arsitektur Kunci
+
+Sangat penting untuk memahami bahwa method `send()` milik MMS itu sendiri **selalu sinkron**—ia dieksekusi secara langsung saat dipanggil. Perilaku asinkron (menggunakan antrean/queue) berasal dari **cara Anda memulai proses tersebut**.
+
+##### 1. Pengiriman Via Antrean (Asinkron) - Pendekatan Standar & Direkomendasikan
+
+Ini adalah praktik terbaik untuk performa dan pengalaman pengguna, terutama dalam konteks web (misalnya, setelah pengguna mendaftar atau melakukan pesanan). Anda mengirimkan (dispatch) sebuah Job ke dalam antrean, dan aplikasi Anda dapat langsung mengembalikan respons kepada pengguna tanpa menunggu email atau pesan terkirim. Proses queue worker yang terpisah menangani pengiriman sebenarnya di latar belakang.
+
+**Kapan digunakan:** Di dalam Controller, Listener, atau bagian mana pun dari kode Anda yang menangani permintaan dari pengguna.
+
+**Pola Kode:** Gunakan method statis `dispatch()` pada kelas Job Anda.
+
+```php
+use App\Jobs\SendEmailJob;
+
+// Di dalam method Controller
+public function registerUser(Request $request)
+{
+    // ... logika untuk membuat user ...
+
+    // Dispatch job ke antrean. Baris ini dieksekusi secara instan.
+    SendEmailJob::dispatch(
+        'user@example.com',
+        'welcome-email',
+        ['name' => 'John Doe'],
+        'log-id-123', // Ini adalah ID dari NotificationDispatchLog
+        'Selamat Datang di Layanan Kami!'
+    );
+
+    // Langsung kembalikan respons kepada pengguna.
+    return response()->json(['message' => 'Pendaftaran berhasil!']);
+}
+```
+**Alur:**
+`Request HTTP` -> `dispatch(Job)` -> `(Respons Instan ke Pengguna)` ... `[Queue Worker di Latar Belakang]` ... `Job->handle()` -> `Mms::channel()->send()`
+
+##### 2. Pengiriman Langsung (Sinkron) - Untuk Kasus Tertentu
+
+Pola ini mengeksekusi seluruh proses pengiriman secara langsung dan akan berhenti (block) sampai selesai. Ini berguna dalam konteks di mana Anda memerlukan tindakan tersebut selesai sebelum melanjutkan, seperti dalam command Artisan atau saat pengujian.
+
+**Kapan digunakan:** Di dalam command Artisan, tes, atau tugas latar belakang spesifik yang memerlukan eksekusi segera.
+
+**Pola Kode:** Buat instance baru dari Job dan panggil method `handle()`-nya secara langsung.
+```php
+use App\Jobs\SendEmailJob;
+
+// Di dalam method handle() sebuah command Artisan
+public function handle()
+{
+    $this->info('Mengirim email tes secara langsung...');
+
+    // 1. Buat instance baru dari job
+    $job = new SendEmailJob(
+        'user@example.com',
+        'welcome-email',
+        ['name' => 'John Doe'],
+        'log-id-456',
+        'Email Tes Langsung'
+    );
+    
+    // 2. Eksekusi method handle()-nya secara langsung
+    $job->handle();
+
+    $this->info('Proses pengiriman email selesai.');
+}
+```
+**Alur:**
+`Command Artisan` -> `new Job()` -> `$job->handle()` -> `Mms::channel()->send()` -> `(Command menunggu hingga selesai)`
+
+Command `test:mms --direct` menggunakan pola ini.
+
+---
+
+#### Panduan Pengiriman Spesifik per Channel
+
+Contoh-contoh berikut menunjukkan kode di dalam method `handle()` dari setiap Job. Ingat, Anda dapat memanggil method ini secara langsung untuk pengiriman sinkron atau membiarkan queue worker memanggilnya dengan menggunakan `Job::dispatch()`.
+
+##### 1. Mengirim Pesan WhatsApp
+
+*   **Data Kunci:** `recipient` (nomor telepon), `body`.
+*   **Contoh (`app/Jobs/SendWhatsAppJob.php`):**
+```php
+public function handle(): void
+{
+    $body = Mms::compileMessage($this->templateId, $this->params);
+    $message = (new MmsMessage())->to($this->recipient)->body($body)->set('dispatch_log_id', $this->dispatchLogId);
+    Mms::channel('whatsapp')->send($message);
+}
+```
+
+##### 2. Mengirim Email
+
+*   **Data Kunci:** `recipient` (alamat email), `body` (HTML), `subject`, `name`.
+*   **Contoh (`app/Jobs/SendEmailJob.php`):**
+```php
+public function handle(): void
+{
+    $body = Mms::compileMessage($this->templateId, $this->params);
+    $message = (new MmsMessage())->to($this->recipient)->body($body)
+        ->set('dispatch_log_id', $this->dispatchLogId)
+        ->set('subject', $this->subject)
+        ->set('name', $this->params['name'] ?? 'Pengguna Yth');
+    Mms::channel('email')->send($message);
+}
+```
+
+##### 3. Mengirim Notifikasi Push FCM
+
+*   **Data Kunci:** `recipient` (token FCM), `body`, `title`, `image` (opsional).
+*   **Contoh (`app/Jobs/SendFcmJob.php`):**
+```php
+public function handle(): void
+{
+    $body = Mms::compileMessage($this->templateId, $this->params);
+    $message = (new MmsMessage())->to($this->recipient)->body($body)
+        ->set('dispatch_log_id', $this->dispatchLogId)
+        ->set('title', $this->title)
+        ->set('image', $this->params['imageUrl'] ?? null);
+    Mms::channel('fcm')->send($message);
+}
+```
+
+##### 4. Mengirim Pesan Telegram
+
+*   **Data Kunci:** `recipient` (Chat ID), `body`.
+*   **Contoh (`app/Jobs/SendTelegramJob.php`):**
+```php
+public function handle(): void
+{
+    $body = Mms::compileMessage($this->templateId, $this->params);
+    $message = (new MmsMessage())->to($this->recipient)->body($body)->set('dispatch_log_id', $this->dispatchLogId);
+    Mms::channel('telegram')->send($message);
+}
+```
+
+##### 5. Mengirim Notifikasi Internal (Database)
+
+*   **Data Kunci:** `recipient` (User ID), `body`, `title`, dan data terstruktur kustom (misalnya, `entity`).
+*   **Contoh (`app/Jobs/SendInternalNotification.php`):**
+```php
+public function handle()
+{
+    $body = Mms::compileMessage($this->templateId, $this->params);
+    $message = (new MmsMessage())->to($this->userId)->body($body)
+        ->set('dispatch_log_id', $this->dispatchLogId)
+        ->set('title', $this->subject)
+        ->set('type', 'peringatan_kontrak');
+
+    if (isset($this->params['contract_id'])) {
+        $message->set('entity', [
+            'type' => 'contract',
+            'data' => ['id' => $this->params['contract_id']]
+        ]);
+    }
+    
+    Mms::channel('internal')->send($message);
+}
+```

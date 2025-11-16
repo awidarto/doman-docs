@@ -1,0 +1,281 @@
+---
+title: MMS - Multi-Messaging System
+---
+
+## Multi-Messaging System (MMS) Documentation
+
+### English Version
+
+#### 1. Concept and Architecture
+
+The Multi-Messaging System (MMS) is a modular, extensible subsystem designed to handle all outgoing notifications from the application. It was created to replace a monolithic utility class, promoting clean code, separation of concerns, and ease of maintenance.
+
+The architecture is based on the **Strategy Design Pattern**, where the core logic of sending a message is delegated to interchangeable "drivers".
+
+**Core Components:**
+
+*   **`MmsManager` (and `Mms` Facade):** This is the central entry point for the entire system. It is responsible for reading the configuration, resolving the correct driver for a given channel, and providing helper methods like compiling messages from templates.
+*   **Contracts (Interfaces):**
+*   `SenderInterface`: Defines the fundamental rule that every driver *must* have a `send()` method.
+*   `MessageInterface`: Defines the structure for a standardized message object, ensuring data is passed consistently.
+*   **Drivers:** These are the concrete classes that contain the logic for communicating with a specific third-party API (e.g., WAHA, Mailtrap, Firebase). Each driver implements the `SenderInterface`.
+*   **`MmsMessage` DTO:** A simple Data Transfer Object that implements `MessageInterface`. It acts as a standardized "package" carrying the recipient, body, and any other metadata to the driver.
+*   **Configuration (`config/mms.php`):** The "control panel" for the system. This file defines all available communication "channels" (like `whatsapp`, `email`), which drivers are available for each channel, and the credentials/settings for each driver.
+*   **Logging (`NotificationDispatchLog`):** The system is tightly integrated with a unified logging model. Every message sent, regardless of the channel or driver, has its status tracked in the `notification_dispatch_logs` collection.
+
+**Data Flow:**
+
+1.  A **Job** (e.g., `SendWhatsAppJob`) is dispatched.
+2.  The Job uses the `Mms` facade to compile a message and create an `MmsMessage` object.
+3.  The Job calls `Mms::channel('whatsapp')->send($message)`.
+4.  The `MmsManager` reads the `config/mms.php` file to find the default driver for the `whatsapp` channel (e.g., `WatZapDriver`).
+5.  The `MmsManager` instantiates the `WatZapDriver` with its specific configuration.
+6.  The `send()` method on the `WatZapDriver` is executed, which makes the API call to WatZap.
+7.  The driver then updates the `NotificationDispatchLog` record with the final status (`sent` or `failed`) and the response from the API.
+
+---
+
+#### 2. How to Use the System
+
+To send a message, you should always do so from within a queued Job. This ensures that API calls do not slow down your main application flow.
+
+**Example: Sending a WhatsApp message from `SendWhatsAppJob`**
+
+The process involves three simple steps within the job's `handle()` method.
+
+```php
+// In app/Jobs/SendWhatsAppJob.php
+
+public function handle(): void
+{
+    try {
+        // 1. Compile the message body from a template
+        $body = Mms::compileMessage($this->templateId, $this->params);
+
+        // 2. Build the standard message object
+        // The `dispatch_log_id` is crucial for linking the message to its log entry.
+        $message = (new MmsMessage())
+            ->to($this->recipient)
+            ->body($body)
+            ->set('dispatch_log_id', $this->dispatchLogId);
+
+        // 3. Send via the configured channel and driver
+        // The manager automatically selects the default driver for the 'whatsapp' channel.
+        Mms::channel('whatsapp')->send($message);
+
+    } catch (\Exception $e) {
+        // Log the error and rethrow to let the queue worker handle retries/failures
+        Log::error('SendWhatsAppJob failed.', ['error' => $e->getMessage(), 'dispatchLogId' => $this->dispatchLogId]);
+        throw $e;
+    }
+}
+```
+
+**Sending to Other Channels:**
+
+The process is identical for other channels. Simply change the channel name and ensure the `MmsMessage` object contains any extra data the driver might need (like a `subject` for email or a `title` for FCM).
+
+---
+
+#### 3. How to Extend the System
+
+Adding a new provider (e.g., a new SMS gateway) is incredibly simple:
+
+1.  **Create a New Driver:** Create a new class in the appropriate `app/Services/Mms/Drivers/` sub-directory (e.g., `Sms/NewGatewayDriver.php`). It must implement the `SenderInterface`.
+2.  **Update Configuration:** Add your new driver to the `config/mms.php` file under the appropriate channel.
+```php
+'sms' => [
+    'default' => 'new_gateway',
+    'drivers' => [
+        'new_gateway' => [
+            'class' => \App\Services\Mms\Drivers\Sms\NewGatewayDriver::class,
+            'config' => [
+                'api_key' => env('NEW_GATEWAY_API_KEY'),
+                'api_url' => env('NEW_GATEWAY_URL'),
+            ],
+        ],
+        // ... other sms drivers
+    ],
+],
+```
+3.  **Update `.env`:** Add the new environment variables (`NEW_GATEWAY_API_KEY`, etc.).
+
+That's it. The system is now ready to use your new driver.
+
+---
+
+#### 4. How to Test the System
+
+A dedicated Artisan command, `test:mms`, is provided for easy development and debugging.
+
+**Command Signature:**
+`php artisan test:mms {channel?} {--options}`
+
+**Arguments & Options:**
+
+*   `channel`: (Optional) The specific channel to test. Can be `whatsapp`, `telegram`, `fcm`, `internal`, `email`. If omitted, it defaults to `all`.
+*   `--template=<slug>` or `-T`: The slug of the notification template to use. Defaults to `test-template`.
+*   `--params='<json>'` or `-P`: A JSON string of parameters to fill the template. Example: `'{"name":"Budi"}'`.
+*   `--recipient=<value>` or `-R`: The recipient's identifier. This is required for single-channel tests.
+*   For `internal`, this can be a User ID, email, or name.
+*   For other channels, it's the phone number, chat ID, FCM token, or email address.
+*   `--direct` or `-D`: A boolean flag. If present, the message will be sent **synchronously** without being pushed to the queue. This is extremely useful for immediate feedback during development.
+
+**Usage Examples:**
+
+```bash
+# Test a single channel (WhatsApp) with a specific recipient and parameters
+php artisan test:mms whatsapp --recipient=628123456789 --params='{"name":"Budi"}'
+
+# Test the Telegram channel, using the default recipient from your .env file
+php artisan test:mms telegram
+
+# Test an internal notification by finding a user via their email
+php artisan test:mms internal --recipient=admin@example.com
+
+# Test the FCM channel directly (synchronously) without using the queue
+php artisan test:mms fcm --recipient="fcm-token-here" --direct
+
+# Test ALL configured channels at once, using recipients from your .env
+php artisan test:mms all --params='{"name":"Andi"}'
+```
+**Expected Output:** The command will show which channel is being tested, the recipient, the created Log ID, and whether the job was dispatched to the queue or sent directly. You can then check the `notification_dispatch_logs` collection in your database to see the final result.
+
+## Dokumentasi Multi-Messaging System (MMS)
+
+### Versi Bahasa Indonesia
+
+#### 1. Konsep dan Arsitektur
+
+Multi-Messaging System (MMS) adalah sebuah subsistem yang modular dan dapat diperluas, yang dirancang untuk menangani semua notifikasi keluar dari aplikasi. Sistem ini dibuat untuk menggantikan kelas utilitas monolitik, mendukung penulisan kode yang bersih, pemisahan tanggung jawab (*separation of concerns*), dan kemudahan dalam pemeliharaan.
+
+Arsitekturnya didasarkan pada **Strategy Design Pattern**, di mana logika inti untuk mengirim pesan didelegasikan ke "driver" yang dapat diganti-ganti.
+
+**Komponen Inti:**
+
+*   **`MmsManager` (dan `Mms` Facade):** Ini adalah titik masuk utama untuk keseluruhan sistem. Ia bertanggung jawab untuk membaca konfigurasi, memilih driver yang tepat untuk channel tertentu, dan menyediakan metode bantuan seperti mengompilasi pesan dari template.
+*   **Contracts (Interfaces):**
+*   `SenderInterface`: Mendefinisikan aturan dasar bahwa setiap driver *wajib* memiliki method `send()`.
+*   `MessageInterface`: Mendefinisikan struktur untuk objek pesan standar, memastikan data diteruskan secara konsisten.
+*   **Drivers:** Ini adalah kelas konkret yang berisi logika untuk berkomunikasi dengan API pihak ketiga tertentu (misalnya, WAHA, Mailtrap, Firebase). Setiap driver mengimplementasikan `SenderInterface`.
+*   **`MmsMessage` DTO:** Sebuah Data Transfer Object sederhana yang mengimplementasikan `MessageInterface`. Ia berfungsi sebagai "paket" standar yang membawa informasi penerima, isi pesan, dan metadata lainnya ke driver.
+*   **Konfigurasi (`config/mms.php`):** "Panel kontrol" untuk sistem ini. File ini mendefinisikan semua "channel" komunikasi yang tersedia (seperti `whatsapp`, `email`), driver mana yang tersedia untuk setiap channel, beserta kredensial dan pengaturannya.
+*   **Logging (`NotificationDispatchLog`):** Sistem ini terintegrasi erat dengan model logging terpadu. Setiap pesan yang dikirim, terlepas dari channel atau drivernya, statusnya akan dilacak dalam koleksi `notification_dispatch_logs`.
+
+**Alur Data:**
+
+1.  Sebuah **Job** (misalnya, `SendWhatsAppJob`) dijalankan (di-dispatch).
+2.  Job tersebut menggunakan `Mms` facade untuk mengompilasi pesan dan membuat objek `MmsMessage`.
+3.  Job memanggil `Mms::channel('whatsapp')->send($message)`.
+4.  `MmsManager` membaca file `config/mms.php` untuk menemukan driver default untuk channel `whatsapp` (misalnya, `WatZapDriver`).
+5.  `MmsManager` membuat instance `WatZapDriver` beserta konfigurasinya.
+6.  Method `send()` pada `WatZapDriver` dieksekusi, yang kemudian melakukan panggilan API ke WatZap.
+7.  Driver kemudian memperbarui catatan `NotificationDispatchLog` dengan status akhir (`sent` atau `failed`) dan respons dari API.
+
+---
+
+#### 2. Cara Menggunakan Sistem
+
+Untuk mengirim pesan, Anda sebaiknya selalu melakukannya dari dalam sebuah Job yang berjalan di antrean (queue). Hal ini memastikan bahwa panggilan API tidak memperlambat alur utama aplikasi Anda.
+
+**Contoh: Mengirim pesan WhatsApp dari `SendWhatsAppJob`**
+
+Prosesnya melibatkan tiga langkah sederhana di dalam method `handle()` milik Job.
+
+```php
+// Di dalam app/Jobs/SendWhatsAppJob.php
+
+public function handle(): void
+{
+    try {
+    // 1. Kompilasi isi pesan dari sebuah template
+    $body = Mms::compileMessage($this->templateId, $this->params);
+
+    // 2. Buat objek pesan standar
+    // `dispatch_log_id` sangat penting untuk menghubungkan pesan ke catatan log-nya.
+    $message = (new MmsMessage())
+    ->to($this->recipient)
+    ->body($body)
+    ->set('dispatch_log_id', $this->dispatchLogId);
+
+    // 3. Kirim melalui channel dan driver yang telah dikonfigurasi
+    // Manager akan secara otomatis memilih driver default untuk channel 'whatsapp'.
+    Mms::channel('whatsapp')->send($message);
+
+} catch (\Exception $e) {
+    // Catat error dan lemparkan kembali agar queue worker dapat menangani percobaan ulang/kegagalan
+    Log::error('SendWhatsAppJob failed.', ['error' => $e->getMessage(), 'dispatchLogId' => $this->dispatchLogId]);
+    throw $e;
+}
+}
+```
+
+**Mengirim ke Channel Lain:**
+
+Prosesnya identik untuk channel lain. Cukup ubah nama channel dan pastikan objek `MmsMessage` berisi data tambahan apa pun yang mungkin dibutuhkan driver (seperti `subject` untuk email atau `title` untuk FCM).
+
+---
+
+#### 3. Cara Memperluas Sistem
+
+Menambahkan provider baru (misalnya, gateway SMS baru) sangatlah mudah:
+
+1.  **Buat Driver Baru:** Buat kelas baru di sub-direktori yang sesuai di `app/Services/Mms/Drivers/` (misalnya, `Sms/NewGatewayDriver.php`). Kelas ini harus mengimplementasikan `SenderInterface`.
+2.  **Perbarui Konfigurasi:** Tambahkan driver baru Anda ke file `config/mms.php` di bawah channel yang sesuai.
+```php
+'sms' => [
+    'default' => 'new_gateway',
+    'drivers' => [
+        'new_gateway' => [
+            'class' => \App\Services\Mms\Drivers\Sms\NewGatewayDriver::class,
+            'config' => [
+            'api_key' => env('NEW_GATEWAY_API_KEY'),
+            'api_url' => env('NEW_GATEWAY_URL'),
+        ],
+    ],
+    // ... driver sms lainnya
+    ],
+],
+```
+3.  **Perbarui `.env`:** Tambahkan variabel environment baru (`NEW_GATEWAY_API_KEY`, dll.).
+
+Selesai. Sistem sekarang siap menggunakan driver baru Anda.
+
+---
+
+#### 4. Cara Menguji Sistem
+
+Sebuah command Artisan khusus, `test:mms`, disediakan untuk kemudahan pengembangan dan debugging.
+
+**Struktur Command:**
+`php artisan test:mms {channel?} {--options}`
+
+**Argumen & Opsi:**
+
+*   `channel`: (Opsional) Channel spesifik yang akan diuji. Bisa berupa `whatsapp`, `telegram`, `fcm`, `internal`, `email`. Jika tidak diisi, default-nya adalah `all`.
+*   `--template=<slug>` atau `-T`: "Slug" dari template notifikasi yang akan digunakan. Default-nya adalah `test-template`.
+*   `--params='<json>'` atau `-P`: String JSON berisi parameter untuk mengisi template. Contoh: `'{"name":"Budi"}'`.
+*   `--recipient=<value>` atau `-R`: Pengenal penerima. Wajib diisi jika menguji satu channel.
+*   Untuk `internal`, bisa berupa User ID, email, atau nama.
+*   Untuk channel lain, bisa berupa nomor telepon, chat ID, token FCM, atau alamat email.
+*   `--direct` atau `-D`: Sebuah flag boolean. Jika ada, pesan akan dikirim secara **langsung (synchronous)** tanpa dimasukkan ke dalam antrean (queue). Ini sangat berguna untuk mendapatkan umpan balik instan saat pengembangan.
+
+**Contoh Penggunaan:**
+
+```bash
+# Uji satu channel (WhatsApp) dengan penerima dan parameter spesifik
+php artisan test:mms whatsapp --recipient=628123456789 --params='{"name":"Budi"}'
+
+# Uji channel Telegram, menggunakan penerima default dari file .env Anda
+php artisan test:mms telegram
+
+# Uji notifikasi internal dengan mencari user melalui email mereka
+php artisan test:mms internal --recipient=admin@example.com
+
+# Uji channel FCM secara langsung (sinkron) tanpa menggunakan queue
+php artisan test:mms fcm --recipient="fcm-token-here" --direct
+
+# Uji SEMUA channel yang terkonfigurasi sekaligus, menggunakan penerima dari .env
+php artisan test:mms all --params='{"name":"Andi"}'
+```
+**Output yang Diharapkan:** Command akan menampilkan channel mana yang sedang diuji, penerimanya, ID Log yang dibuat, dan apakah Job dimasukkan ke queue atau dikirim langsung. Anda kemudian dapat memeriksa koleksi `notification_dispatch_logs` di database Anda untuk melihat hasil akhirnya.

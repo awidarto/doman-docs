@@ -1,0 +1,320 @@
+---
+title: MMS - Setting Up New Driver
+---
+
+### English Addendum
+
+#### 5. How to Implement a New Driver (Example: Mailgun)
+
+This guide walks you through the process of adding a new third-party service to the MMS. We will use the Mailgun API as a concrete example for sending emails.
+
+**Prerequisites:**
+*   You have a Mailgun account with an active domain and an API key.
+*   You have installed the official Laravel HTTP client (`guzzlehttp/guzzle`).
+
+---
+**Step 1: Create the Driver Class**
+
+First, create a new file for your driver. Since Mailgun is for email, we'll place it in the `Email` drivers directory.
+
+**File:** `app/Services/Mms/Drivers/Email/MailgunApiDriver.php`
+
+The class must implement the `SenderInterface` and should extend `AbstractSender` to leverage the built-in logging helper.
+
+```php
+<?php
+
+namespace App\Services\Mms\Drivers\Email;
+
+use App\Models\NotificationDispatchLog;
+use App\Services\Mms\Contracts\MessageInterface;
+use App\Services\Mms\Contracts\SenderInterface;
+use App\Services\Mms\Drivers\AbstractSender;
+use Illuminate\Support\Facades\Http;
+
+class MailgunApiDriver extends AbstractSender implements SenderInterface
+{
+    /**
+     * Send the message via the Mailgun API.
+     *
+     * @param MessageInterface $message
+     * @return NotificationDispatchLog
+     * @throws \Exception
+     */
+    public function send(MessageInterface $message): NotificationDispatchLog
+    {
+        $dispatchLogId = $message->get('dispatch_log_id');
+        if (!$dispatchLogId) {
+            throw new \InvalidArgumentException('A dispatch_log_id is required to send a message.');
+        }
+
+        try {
+            // 1. Validate configuration from config/mms.php
+            $domain = $this->config['domain'] ?? null;
+            $apiKey = $this->config['secret'] ?? null;
+            if (!$domain || !$apiKey) {
+                throw new \Exception('Mailgun domain or secret is not configured for this driver.');
+            }
+
+            $apiUrl = "https://api.mailgun.net/v3/{$domain}/messages";
+
+            // 2. Prepare the payload for the API request
+            $payload = [
+                'from'    => $this->config['from_name'] . ' <' . $this->config['from_address'] . '>',
+                'to'      => $message->getRecipient(),
+                'subject' => $message->get('subject', 'Notification'),
+                'html'    => $message->getBody(), // Assumes the body is pre-rendered HTML
+            ];
+
+            // 3. Make the API call using Laravel's HTTP Client
+            $response = Http::withBasicAuth('api', $apiKey)
+                            ->asMultipart() // Mailgun's messages endpoint often uses multipart/form-data
+                            ->post($apiUrl, $payload);
+
+            // 4. Interpret the response and log the result
+            $body = $response->json();
+            $isSuccess = $response->successful();
+
+            // Mailgun returns an ID like '<202312011030.1234@yourdomain.com>'
+            // We can strip the angle brackets for a cleaner log.
+            $gatewayId = $isSuccess ? trim($body['id'] ?? '', '<>') : null;
+            
+            return $this->logResult($dispatchLogId, $isSuccess, $gatewayId, $body);
+
+        } catch (\Exception $e) {
+            // 5. Catch any exceptions and log the failure
+            return $this->logResult($dispatchLogId, false, null, ['error' => $e->getMessage()]);
+        }
+    }
+}
+```
+
+---
+**Step 2: Add Configuration to `config/mms.php`**
+
+Now, register your new driver within the `email` channel in your `config/mms.php` file.
+
+```php
+// in config/mms.php
+
+'channels' => [
+    'email' => [
+        'default' => env('MMS_EMAIL_DRIVER', 'mailgun'), // Let's make it the new default
+
+        'drivers' => [
+            'laravel' => [
+                // ... laravel driver config ...
+            ],
+            'mailtrap' => [
+                // ... mailtrap driver config ...
+            ],
+            'mailgun' => [
+                'class' => \App\Services\Mms\Drivers\Email\MailgunApiDriver::class,
+                'config' => [
+                    'domain' => env('MAILGUN_DOMAIN'),
+                    'secret' => env('MAILGUN_SECRET'),
+                    'from_address' => env('MAIL_FROM_ADDRESS', 'hello@example.com'),
+                    'from_name' => env('MAIL_FROM_NAME', 'Your App'),
+                ],
+            ],
+        ],
+    ],
+
+    // ... other channels ...
+],
+```
+
+---
+**Step 3: Update Environment Variables (`.env`)**
+
+Add the necessary credentials for your new driver to your `.env` file.
+
+```dotenv
+MMS_EMAIL_DRIVER=mailgun
+
+MAILGUN_DOMAIN=mg.yourdomain.com
+MAILGUN_SECRET=key-yourlongapikeyhere
+MAIL_FROM_ADDRESS=noreply@mg.yourdomain.com
+MAIL_FROM_NAME="Your Application Name"
+```
+
+---
+**Step 4: Test Your New Driver**
+
+You can now test your new driver immediately using the `test:mms` command.
+
+1.  **Run the command:**
+```bash
+# The command will automatically use 'mailgun' as it's the new default for the 'email' channel
+php artisan test:mms email --recipient=test@example.com --params='{"name":"Mailgun User"}'
+
+# For immediate feedback, use the --direct flag
+php artisan test:mms email --recipient=test@example.com --direct
+```
+
+2.  **Check the logs:**
+Examine the `notification_dispatch_logs` collection. You should find a new document for this test.
+*   The `status` should be `sent`.
+*   The `gateway_message_id` should contain the ID returned by Mailgun.
+*   The `gateway_response` field will have the full JSON response from the Mailgun API for debugging.
+
+You have successfully integrated a new third-party service into the MMS. This process can be repeated for any API, making the system incredibly flexible and future-proof.
+
+    ### Tambahan Dokumentasi Bahasa Indonesia
+
+    #### 5. Cara Mengimplementasikan Driver Baru (Contoh: Mailgun)
+
+    Panduan ini akan memandu Anda melalui proses penambahan layanan pihak ketiga baru ke dalam MMS. Kita akan menggunakan API Mailgun sebagai contoh konkret untuk mengirim email.
+
+    **Prasyarat:**
+    *   Anda memiliki akun Mailgun dengan domain aktif dan sebuah API key.
+    *   Anda telah menginstal HTTP client resmi Laravel (`guzzlehttp/guzzle`).
+
+    ---
+    **Langkah 1: Buat Kelas Driver**
+
+    Pertama, buat file baru untuk driver Anda. Karena Mailgun adalah untuk email, kita akan menempatkannya di direktori driver `Email`.
+
+    **File:** `app/Services/Mms/Drivers/Email/MailgunApiDriver.php`
+
+    Kelas ini harus mengimplementasikan `SenderInterface` dan sebaiknya `extends AbstractSender` untuk memanfaatkan helper logging bawaan.
+
+```php
+    <?php
+
+    namespace App\Services\Mms\Drivers\Email;
+
+    use App\Models\NotificationDispatchLog;
+    use App\Services\Mms\Contracts\MessageInterface;
+    use App\Services\Mms\Contracts\SenderInterface;
+    use App\Services\Mms\Drivers\AbstractSender;
+    use Illuminate\Support\Facades\Http;
+
+    class MailgunApiDriver extends AbstractSender implements SenderInterface
+    {
+        /**
+         * Kirim pesan melalui API Mailgun.
+         *
+         * @param MessageInterface $message
+         * @return NotificationDispatchLog
+         * @throws \Exception
+         */
+        public function send(MessageInterface $message): NotificationDispatchLog
+        {
+            $dispatchLogId = $message->get('dispatch_log_id');
+
+            if (!$dispatchLogId) {
+                throw new \InvalidArgumentException('dispatch_log_id wajib diisi untuk mengirim pesan.');
+            }
+
+            try {
+                // 1. Validasi konfigurasi dari config/mms.php
+                $domain = $this->config['domain'] ?? null;
+                $apiKey = $this->config['secret'] ?? null;
+                if (!$domain || !$apiKey) {
+                throw new \Exception('Domain atau secret Mailgun belum dikonfigurasi untuk driver ini.');
+            }
+
+            $apiUrl = "https://api.mailgun.net/v3/{$domain}/messages";
+
+            // 2. Siapkan payload untuk permintaan API
+            $payload = [
+            'from'    => $this->config['from_name'] . ' <' . $this->config['from_address'] . '>',
+            'to'      => $message->getRecipient(),
+            'subject' => $message->get('subject', 'Notifikasi'),
+            'html'    => $message->getBody(), // Asumsikan isi pesan adalah HTML yang sudah di-render
+            ];
+
+            // 3. Lakukan panggilan API menggunakan HTTP Client Laravel
+            $response = Http::withBasicAuth('api', $apiKey)
+            ->asMultipart() // Endpoint pesan Mailgun seringkali menggunakan multipart/form-data
+            ->post($apiUrl, $payload);
+
+            // 4. Interpretasikan respons dan catat hasilnya
+            $body = $response->json();
+            $isSuccess = $response->successful();
+
+            // Mailgun mengembalikan ID seperti '<202312011030.1234@yourdomain.com>'
+            // Kita bisa menghilangkan kurung sudut agar log lebih bersih.
+            $gatewayId = $isSuccess ? trim($body['id'] ?? '', '<>') : null;
+
+            return $this->logResult($dispatchLogId, $isSuccess, $gatewayId, $body);
+
+        } catch (\Exception $e) {
+            // 5. Tangkap semua exception dan catat kegagalannya
+            return $this->logResult($dispatchLogId, false, null, ['error' => $e->getMessage()]);
+        }
+        }
+    }
+```
+
+---
+**Langkah 2: Tambahkan Konfigurasi ke `config/mms.php`**
+
+Sekarang, daftarkan driver baru Anda di dalam channel `email` pada file `config/mms.php` Anda.
+
+```php
+    // di dalam config/mms.php
+
+    'channels' => [
+    'email' => [
+    'default' => env('MMS_EMAIL_DRIVER', 'mailgun'), // Jadikan sebagai default baru
+
+    'drivers' => [
+    'laravel' => [
+    // ... konfigurasi driver laravel ...
+    ],
+    'mailtrap' => [
+    // ... konfigurasi driver mailtrap ...
+    ],
+    'mailgun' => [
+        'class' => \App\Services\Mms\Drivers\Email\MailgunApiDriver::class,
+        'config' => [
+            'domain' => env('MAILGUN_DOMAIN'),
+            'secret' => env('MAILGUN_SECRET'),
+            'from_address' => env('MAIL_FROM_ADDRESS', 'hello@example.com'),
+            'from_name' => env('MAIL_FROM_NAME', 'Aplikasi Anda'),
+        ],
+    ],
+    ],
+    ],
+
+    // ... channel lainnya ...
+    ],
+```
+
+---
+**Langkah 3: Perbarui Variabel Environment (`.env`)**
+
+Tambahkan kredensial yang diperlukan untuk driver baru Anda ke file `.env`.
+
+```dotenv
+    MMS_EMAIL_DRIVER=mailgun
+
+    MAILGUN_DOMAIN=mg.domainanda.com
+    MAILGUN_SECRET=key-apikeyandadisini
+    MAIL_FROM_ADDRESS=noreply@mg.domainanda.com
+    MAIL_FROM_NAME="Nama Aplikasi Anda"
+```
+
+---
+**Langkah 4: Uji Driver Baru Anda**
+
+Anda sekarang dapat menguji driver baru Anda secara langsung menggunakan command `test:mms`.
+
+1.  **Jalankan command:**
+```bash
+    # Command akan otomatis menggunakan 'mailgun' karena sudah menjadi default baru untuk channel 'email'
+    php artisan test:mms email --recipient=test@example.com --params='{"name":"Pengguna Mailgun"}'
+
+    # Untuk umpan balik instan, gunakan flag --direct
+    php artisan test:mms email --recipient=test@example.com --direct
+```
+
+2.  **Periksa log:**
+Periksa koleksi `notification_dispatch_logs`. Anda seharusnya menemukan dokumen baru untuk pengujian ini.
+*   `status` seharusnya `sent`.
+*   `gateway_message_id` seharusnya berisi ID yang dikembalikan oleh Mailgun.
+*   Field `gateway_response` akan berisi respons JSON lengkap dari API Mailgun untuk keperluan debugging.
+
+Anda telah berhasil mengintegrasikan layanan pihak ketiga baru ke dalam MMS. Proses ini dapat diulangi untuk API apa pun, membuat sistem ini sangat fleksibel dan siap untuk masa depan.
