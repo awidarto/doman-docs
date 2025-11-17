@@ -210,6 +210,14 @@
             ]
           },
           {
+            "group": "ETL Sub System",
+            "pages": [
+              "mejik-core/laravel/framework/etl/etl-user-guide",
+              "mejik-core/laravel/framework/etl/etl-dev-guide",
+              "mejik-core/laravel/framework/etl/etl-devspec"
+            ]
+          },
+          {
             "group": "Use Case",
             "pages": [
               "mejik-core/laravel/commands/converter/case/invoice-generator-with-template.mdx"

@@ -1,0 +1,326 @@
+---
+title: ETL Service Developer Guide
+---
+
+### **(English)**
+
+## Part 2: Developer Guide
+
+This section provides a technical overview for developers on how to set up, use, and extend the ETL service.
+
+### **1. Setup and Configuration**
+
+1.  **Create a Schema File:** In `config/etl_schemas/`, create a `.yml` file for your model (e.g., `user_schema.yml`). This is the most critical step.
+2.  **Register Service Provider:** Ensure `App\Providers\EtlServiceProvider::class` is in the `providers` array in `config/app.php`.
+3.  **Register Facade Alias:** In `config/app.php`, add `'Etl' => App\Services\Etl\Etl::class,` to the `aliases` array.
+4.  **Clear Cache:** Run `php artisan config:clear`.
+
+### **2. Schema Preparation**
+
+The schema file is the single source of truth. Below is a reference for its properties.
+
+| Key               | Description                                       | Example                                   |
+|:------------------|:--------------------------------------------------|:------------------------------------------|
+| `primary_key`     | The unique field identifier.                      | `_id`                                     |
+| `fields.<key>`    | The definition block for a field.                 | `name: { ... }`                           |
+| `type`            | Data type for casting.                            | `integer`, `datetime`, `boolean`, `array` |
+| `header`          | Human-readable spreadsheet header.                | `header: 'Full Name'`                     |
+| `validator`       | Laravel validation rules.                         | `validator: 'required\|string\|max:255'`  |
+| `edit` / `create` | UI behavior: `true`, `false`, `RO`, `VO`.         | `edit: 'RO'`                              |
+| `view` / `api`    | Visibility flag.                                  | `api: true`                               |
+| `object`          | Defines sub-fields for `array` or `object` types. | `object: { street: { type: string } }`    |
+
+### **3. Core Usage: Calling the Service**
+
+**Importing Data**
+
+Typically done in a controller method.
+
+```php
+use App\Models\User;
+use Etl;
+use Illuminate\Http\Request;
+
+class UserController extends Controller
+{
+    public function import(Request $request)
+    {
+        $request->validate(['file' => 'required|mimes:xlsx,xls']);
+        $filePath = $request->file('file')->getRealPath();
+
+        // 1. Choose the driver and process the file
+        $dataToInsert = Etl::driver('open_spout_schema_import')
+                           ->process($filePath, 'user_schema');
+
+        // 2. Loop and save to the database
+        foreach ($dataToInsert as $doc) {
+            User::updateOrCreate(
+                ['_id' => $doc['_id']], // Match criteria
+                $doc                   // Data to insert/update
+            );
+        }
+
+        return back()->with('success', 'Data imported successfully!');
+    }
+}
+```
+
+**Exporting Data (Fluent API)**
+
+The `export()` method provides a clean, chainable interface.
+
+*   **Basic Export:**
+```php
+use App\Models\User;
+use Etl;
+
+$files = Etl::export()
+    ->from(User::class)
+    ->usingSchema('user_schema')
+    ->to('all_users.xlsx') // Saves to storage/app/
+    ->dispatch();
+    ```
+
+*   **Advanced Export (Filtered, Paginated, Different Driver & Disk):**
+```php
+$query = User::where('age', '>', 30);
+
+$files = Etl::export()
+    ->query($query) // Use a pre-built Eloquent query
+    ->usingSchema('user_schema')
+    ->withDriver('open_spout_schema_export') // Use the fast driver
+    ->onDisk('s3') // Save to a different filesystem disk
+    ->to('reports/users_over_30.xlsx')
+    ->chunk(10000) // Create a new file for every 10,000 records
+    ->dispatch();
+    ```
+
+### **4. Advanced Usage: Leveraging the Schema**
+
+Your `SchemaService` can be used to drive other parts of your application.
+
+*   **Validation in a Form Request:**
+```php
+// app/Http/Requests/StoreUserRequest.php
+use App\Services\Etl\SchemaService;
+
+public function rules(SchemaService $schemaService): array
+{
+    return $schemaService->getValidationRules('user_schema', 'create');
+}
+    ```
+
+*   **API Resources:**
+```php
+// app/Http/Resources/UserResource.php
+use App\Services\Etl\SchemaService;
+
+public function toArray(Request $request): array
+{
+    $schemaService = app(SchemaService::class);
+    $apiFields = $schemaService->getApiFields('user_schema');
+    return $this->only($apiFields);
+}
+    ```
+
+### **5. Testing**
+
+Use the built-in Artisan command to test the entire pipeline without a browser.
+
+```bash
+# Test 'user_schema' with the 'User' model
+php artisan etl:test-pipeline user_schema User
+
+# Use the high-performance openspout driver
+php artisan etl:test-pipeline user_schema User --driver=openspout
+```
+### **For Developers: How to Call the CSV Driver**
+
+To process a CSV file, simply call the `open_spout_csv_schema_import` driver.
+
+**English Example:**
+```php
+use Etl;
+use Illuminate\Http\Request;
+
+public function importFromCsv(Request $request)
+{
+    $request->validate(['file' => 'required|mimes:csv,txt']);
+    $filePath = $request->file('file')->getRealPath();
+
+    $dataToInsert = Etl::driver('open_spout_csv_schema_import')
+                       ->process($filePath, 'user_schema');
+
+    // ... database logic ...
+}
+```
+
+---
+
+## **(Bahasa Indonesia)**
+
+## Bagian 2: Panduan Developer
+
+Bagian ini menyediakan gambaran teknis bagi developer tentang cara mengatur, menggunakan, dan mengembangkan layanan ETL.
+
+### **1. Pengaturan dan Konfigurasi**
+
+1.  **Buat File Skema:** Di dalam `config/etl_schemas/`, buat sebuah file `.yml` untuk model Anda (contoh: `user_schema.yml`). Ini adalah langkah paling krusial.
+2.  **Daftarkan Service Provider:** Pastikan `App\Providers\EtlServiceProvider::class` ada di dalam array `providers` di `config/app.php`.
+3.  **Daftarkan Alias Facade:** Di `config/app.php`, tambahkan `'Etl' => App\Services\Etl\Etl::class,` ke dalam array `aliases`.
+4.  **Hapus Cache:** Jalankan `php artisan config:clear`.
+
+### **2. Persiapan Skema**
+
+File skema adalah satu-satunya sumber kebenaran (single source of truth). Berikut adalah referensi untuk propertinya.
+
+| Key               | Deskripsi                                                  | Contoh                                    |
+|:------------------|:-----------------------------------------------------------|:------------------------------------------|
+| `primary_key`     | Pengidentifikasi unik untuk field.                         | `_id`                                     |
+| `fields.<key>`    | Blok definisi untuk sebuah field.                          | `name: { ... }`                           |
+| `type`            | Tipe data untuk konversi (casting).                        | `integer`, `datetime`, `boolean`, `array` |
+| `header`          | Label header spreadsheet yang mudah dibaca.                | `header: 'Nama Lengkap'`                  |
+| `validator`       | Aturan validasi Laravel.                                   | `validator: 'required\|string\|max:255'`  |
+| `edit` / `create` | Perilaku di UI: `true`, `false`, `RO`, `VO`.               | `edit: 'RO'`                              |
+| `view` / `api`    | Penanda visibilitas.                                       | `api: true`                               |
+| `object`          | Mendefinisikan sub-field untuk tipe `array` atau `object`. | `object: { street: { type: string } }`    |
+
+### **3. Penggunaan Inti: Memanggil Layanan**
+
+**Mengimpor Data**
+
+Biasanya dilakukan di dalam method controller.
+
+```php
+use App\Models\User;
+use Etl;
+use Illuminate\Http\Request;
+
+class UserController extends Controller
+{
+    public function import(Request $request)
+    {
+        $request->validate(['file' => 'required|mimes:xlsx,xls']);
+        $filePath = $request->file('file')->getRealPath();
+
+        // 1. Pilih driver dan proses file
+        $dataToInsert = Etl::driver('open_spout_schema_import')
+                           ->process($filePath, 'user_schema');
+
+        // 2. Lakukan perulangan dan simpan ke database
+        foreach ($dataToInsert as $doc) {
+            User::updateOrCreate(
+                ['_id' => $doc['_id']], // Kriteria pencocokan
+                $doc                   // Data untuk dimasukkan/diperbarui
+            );
+        }
+
+        return back()->with('success', 'Data berhasil diimpor!');
+    }
+}
+```
+
+**Mengekspor Data (API Fluent)**
+
+Method `export()` menyediakan antarmuka yang bersih dan dapat dirangkai (chainable).
+
+*   **Ekspor Dasar:**
+```php
+use App\Models\User;
+use Etl;
+
+$files = Etl::export()
+    ->from(User::class)
+    ->usingSchema('user_schema')
+    ->to('semua_pengguna.xlsx') // Disimpan di storage/app/
+    ->dispatch();
+    ```
+
+*   **Ekspor Lanjutan (Difilter, Dipaginasi, Driver & Disk Berbeda):**
+```php
+$query = User::where('age', '>', 30);
+
+$files = Etl::export()
+    ->query($query) // Gunakan query Eloquent yang sudah dibuat
+    ->usingSchema('user_schema')
+    ->withDriver('open_spout_schema_export') // Gunakan driver cepat
+    ->onDisk('s3') // Simpan ke disk filesystem yang berbeda
+    ->to('laporan/pengguna_diatas_30.xlsx')
+    ->chunk(10000) // Buat file baru setiap 10.000 data
+    ->dispatch();
+    ```
+
+### **4. Penggunaan Lanjutan: Memanfaatkan Skema**
+
+`SchemaService` Anda dapat digunakan untuk menggerakkan bagian lain dari aplikasi Anda.
+
+*   **Validasi di Form Request:**
+```php
+// app/Http/Requests/StoreUserRequest.php
+use App\Services\Etl\SchemaService;
+
+public function rules(SchemaService $schemaService): array
+{
+    return $schemaService->getValidationRules('user_schema', 'create');
+}
+    ```
+
+*   **API Resources:**
+```php
+// app/Http/Resources/UserResource.php
+use App\Services\Etl\SchemaService;
+
+public function toArray(Request $request): array
+{
+    $schemaService = app(SchemaService::class);
+    $apiFields = $schemaService->getApiFields('user_schema');
+    return $this->only($apiFields);
+}
+    ```
+
+### **5. Pengujian**
+
+Gunakan perintah Artisan bawaan untuk menguji seluruh alur proses tanpa memerlukan browser.
+
+```bash
+# Uji 'user_schema' dengan model 'User'
+php artisan etl:test-pipeline user_schema User
+
+# Gunakan driver openspout yang berkinerja tinggi
+php artisan etl:test-pipeline user_schema User --driver=openspout
+```
+
+### **Untuk Pengguna: Format File CSV**
+
+Selain Excel (`.xlsx`), layanan ini juga dapat mengimpor data dari file Comma-Separated Value (`.csv`).
+
+*   Baris pertama harus berupa baris header (judul kolom).
+*   Baris anak (misalnya, alamat kedua untuk seorang pengguna) dibuat dengan menambahkan baris baru di mana kolom-kolom induk dibiarkan kosong. Dalam file CSV, ini berarti memulai baris dengan tanda koma.
+
+**Contoh `users.csv`:**
+```csv
+User ID,Nama Lengkap,Alamat Email,Jalan Alamat,Kota Alamat
+"USR-001","Budi Santoso","budi@example.com","Jl. Merdeka 123","Jakarta"
+,,,"Jl. Pengiriman 456","Bandung"
+"USR-002","Ani Lestari","ani@example.com","Jl. Mawar 789","Surabaya"
+```
+*Perhatikan bagaimana baris kedua dimulai dengan tiga koma `, ,,` untuk melewati kolom `User ID`, `Nama Lengkap`, dan `Alamat Email`, yang menandakan baris tersebut adalah alamat lain milik Budi Santoso.*
+
+---
+
+**Contoh Bahasa Indonesia:**
+```php
+use Etl;
+use Illuminate\Http\Request;
+
+public function imporDariCsv(Request $request)
+{
+    $request->validate(['file' => 'required|mimes:csv,txt']);
+    $filePath = $request->file('file')->getRealPath();
+
+    $dataToInsert = Etl::driver('open_spout_csv_schema_import')
+                       ->process($filePath, 'user_schema');
+
+    // ... logika database ...
+}
+```

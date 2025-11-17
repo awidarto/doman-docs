@@ -1,0 +1,163 @@
+---
+title: ETL Service User Guide
+---
+
+## **(English)**
+
+## Part 1: User Guide
+
+This section explains how to correctly fill in the provided Excel templates for data import.
+
+
+
+### **1. Introduction**
+
+The import template is a standard Excel file (`.xlsx`) designed to be simple and intuitive. It typically contains two worksheets:
+*   **`data`**: This is where you enter the information to be imported.
+*   **`guide`**: This sheet contains a summary of these instructions.
+
+### **2. The `data` Worksheet**
+
+The `data` worksheet contains columns that correspond to the fields in the database. The column headers are human-readable (e.g., "Full Name" instead of "user_name").
+
+### **3. The Golden Rule: Entering Data with Multiple Items**
+
+The biggest challenge is entering a single record (like a User) that has multiple related items (like multiple Addresses). We handle this with a simple "parent-child row" system.
+
+**Rule:** The first row for a record contains all its main information. Additional rows for its sub-items are placed directly below, leaving the main information columns blank.
+
+**Example: A User with Two Addresses**
+
+Imagine you are entering a user named "John Doe" who has a primary address and a shipping address.
+
+1.  **First Row (The Parent):** Fill in all of John's information (`User ID`, `Full Name`, `Email`, etc.) AND the details for his **first** address.
+
+| User ID     | Full Name | ... | Address Street | Address City |
+|:------------|:----------|:----|:---------------|:-------------|
+| **USR-001** | John Doe  | ... | 123 Main St    | Anytown      |
+
+2.  **Second Row (The Child):** Add a new row directly below. **DO NOT** repeat John's main information. Only fill in the columns for the **second** address.
+
+| User ID | Full Name | ... | Address Street        | Address City   |
+|:--------|:----------|:----|:----------------------|:---------------|
+| USR-001 | John Doe  | ... | 123 Main St           | Anytown        |
+|         |           | ... | **456 Shipping Blvd** | **Otherville** |
+
+The system will see the blank `User ID` and know that "456 Shipping Blvd" is another address belonging to "John Doe".
+
+### **4. Do's and Don'ts**
+
+*   **DO** fill in the data on the `data` worksheet.
+*   **DO** start a new record by entering a value in the primary key column (e.g., `User ID`).
+*   **DO** leave parent columns blank when adding a second, third, or more sub-items to a record.
+*   **DON'T** change, rename, or delete the column headers in the first row.
+*   **DON'T** change the names of the worksheets (`data`, `guide`).
+*   **DON'T** leave completely empty rows between your data records.
+
+## **Addendum: Using CSV Files for Import**
+
+In addition to Excel (`.xlsx`), the service can also import data from Comma-Separated Value (`.csv`) files.
+
+### **For Users: CSV File Format**
+
+When preparing a `.csv` file, you must follow the same "parent-child row" rule as with Excel.
+
+*   The first row must be the header row.
+*   A child row (e.g., a second address for a user) is created by adding a new line where the parent columns are left blank. In a CSV, this means starting the line with commas.
+
+**Example `users.csv`:**
+```csv
+User ID,Full Name,Email Address,Address Street,Address City
+"USR-001","John Doe","john.doe@example.com","123 Main St","Anytown"
+,,,"456 Oak Ave","Anytown"
+"USR-002","Jane Smith","jane.smith@example.com","789 Pine Ln","Someplace"
+```
+*Notice how the second line starts with three commas `, ,,` to skip the `User ID`, `Full Name`, and `Email Address` columns, indicating it's an address for John Doe.*
+
+---
+
+## **(Bahasa Indonesia)**
+## Bagian 1: Panduan Pengguna
+
+Bagian ini menjelaskan cara mengisi templat Excel untuk impor data dengan benar.
+
+### **1. Pendahuluan**
+
+Templat impor adalah file Excel standar (`.xlsx`) yang didesain agar sederhana dan intuitif. Biasanya, file ini berisi dua lembar kerja (worksheet):
+*   **`data`**: Tempat Anda memasukkan informasi yang akan diimpor.
+*   **`guide`**: Berisi ringkasan dari instruksi ini.
+
+### **2. Worksheet `data`**
+
+Worksheet `data` berisi kolom-kolom yang sesuai dengan field di dalam database. Judul kolom (header) dibuat agar mudah dibaca (contoh: "Nama Lengkap" bukan "user_name").
+
+### **3. Aturan Emas: Memasukkan Data dengan Sub-Item Ganda**
+
+Tantangan terbesar adalah memasukkan satu data (seperti Pengguna) yang memiliki beberapa item terkait (seperti beberapa Alamat). Kami menanganinya dengan sistem "baris induk-anak" yang sederhana.
+
+**Aturan:** Baris pertama untuk sebuah data berisi semua informasi utamanya. Baris tambahan untuk sub-itemnya diletakkan tepat di bawahnya, dengan membiarkan kolom informasi utama tetap kosong.
+
+**Contoh: Seorang Pengguna dengan Dua Alamat**
+
+Bayangkan Anda memasukkan pengguna bernama "Budi Santoso" yang memiliki alamat utama dan alamat pengiriman.
+
+1.  **Baris Pertama (Induk):** Isi semua informasi Budi (`User ID`, `Nama Lengkap`, `Email`, dll.) DAN detail untuk alamat **pertama**-nya.
+
+| User ID     | Nama Lengkap | ... | Jalan Alamat    | Kota Alamat |
+|:------------|:-------------|:----|:----------------|:------------|
+| **USR-001** | Budi Santoso | ... | Jl. Merdeka 123 | Jakarta     |
+
+2.  **Baris Kedua (Anak):** Tambahkan baris baru tepat di bawahnya. **JANGAN** ulangi informasi utama Budi. Hanya isi kolom-kolom untuk alamat **kedua**.
+
+| User ID | Nama Lengkap | ... | Jalan Alamat           | Kota Alamat |
+|:--------|:-------------|:----|:-----------------------|:------------|
+| USR-001 | Budi Santoso | ... | Jl. Merdeka 123        | Jakarta     |
+|         |              | ... | **Jl. Pengiriman 456** | **Bandung** |
+
+Sistem akan melihat `User ID` yang kosong dan tahu bahwa "Jl. Pengiriman 456" adalah alamat lain milik "Budi Santoso".
+
+### **4. Yang Boleh dan Tidak Boleh Dilakukan**
+
+*   **BOLEH** mengisi data pada worksheet `data`.
+*   **BOLEH** memulai data baru dengan mengisi nilai di kolom kunci utama (contoh: `User ID`).
+*   **BOLEH** mengosongkan kolom induk saat menambahkan sub-item kedua, ketiga, dan seterusnya.
+*   **JANGAN** mengubah, mengganti nama, atau menghapus judul kolom di baris pertama.
+*   **JANGAN** mengubah nama worksheet (`data`, `guide`).
+*   **JANGAN** menyisakan baris yang benar-benar kosong di antara baris data Anda.
+
+---
+
+### **Untuk Pengguna: Format File CSV**
+
+Selain Excel (`.xlsx`), layanan ini juga dapat mengimpor data dari file Comma-Separated Value (`.csv`).
+
+*   Baris pertama harus berupa baris header (judul kolom).
+*   Baris anak (misalnya, alamat kedua untuk seorang pengguna) dibuat dengan menambahkan baris baru di mana kolom-kolom induk dibiarkan kosong. Dalam file CSV, ini berarti memulai baris dengan tanda koma.
+
+**Contoh `users.csv`:**
+```csv
+User ID,Nama Lengkap,Alamat Email,Jalan Alamat,Kota Alamat
+"USR-001","Budi Santoso","budi@example.com","Jl. Merdeka 123","Jakarta"
+,,,"Jl. Pengiriman 456","Bandung"
+"USR-002","Ani Lestari","ani@example.com","Jl. Mawar 789","Surabaya"
+```
+*Perhatikan bagaimana baris kedua dimulai dengan tiga koma `, ,,` untuk melewati kolom `User ID`, `Nama Lengkap`, dan `Alamat Email`, yang menandakan baris tersebut adalah alamat lain milik Budi Santoso.*
+
+---
+
+**Contoh Bahasa Indonesia:**
+```php
+use Etl;
+use Illuminate\Http\Request;
+
+public function imporDariCsv(Request $request)
+{
+    $request->validate(['file' => 'required|mimes:csv,txt']);
+    $filePath = $request->file('file')->getRealPath();
+
+    $dataToInsert = Etl::driver('open_spout_csv_schema_import')
+                       ->process($filePath, 'user_schema');
+
+    // ... logika database ...
+}
+```
