@@ -175,7 +175,8 @@ it('can convert a markdown file to a pdf', function () {
     Storage::disk('minio')->assertExists($outputPath);
 });
 ```
-### Addendum: Advanced Spreadsheet Conversion
+
+## Addendum 1: Advanced Spreadsheet Conversion
 
 ### **A.1 Using Spreadsheets as Input**
 
@@ -268,12 +269,103 @@ php artisan convert:document exports/invoice-data.xlsx --input=storage/app/templ
 
 The resulting XLSX file will contain the text from the Markdown file in Column A, with the table's data structured correctly across multiple columns.
 
+## Addendum 2: Advanced XLSX Generation with Templates
 
----
+### **A.2.1 Concept**
+
+While the standard output drivers are excellent for converting a document's content into spreadsheet rows, the templating system provides a higher level of control over the final document's layout and presentation.
+
+The core idea is to use a pre-designed `.xlsx` file as a template. This template can contain headers, footers, logos, static text, and pre-styled cells. The pipeline then injects dynamic data and content into this template.
+
+This process is handled by a new, specialized driver: **`TemplatedXlsxOutputDriver`**. This driver is powered by the `phpoffice/phpspreadsheet` library, as it's the only one capable of both reading an existing spreadsheet and modifying it.
+
+### **A.2.2 Creating the XLSX Template**
+
+To use this feature, you must first create a template `.xlsx` file (e.g., `storage/app/templates/report-template.xlsx`). This file uses two types of special markers:
+
+1.  **Global Placeholders:** For single data points like a title or a date, you can place Blade-style placeholders directly into any cell. The driver will find and replace these.
+*   Syntax: `{{ $variable_name }}` or `{{ $user.name }}`
+*   Example: A cell containing `Report for: {{ $customer_name }}`
+
+2.  **Content Start Marker:** You must designate a single cell where the main, dynamic HTML content will begin to be inserted. All content will flow downwards from this point.
+*   Marker: `{{CONTENT_START}}`
+
+**Example Template (`report-template.xlsx`):**
+
+|       | A                         | B                     | C                   | D |
+|:------|:--------------------------|:----------------------|:--------------------|:--|
+| **1** | **`{{ $report_title }}`** |                       | *Company Logo Here* |   |
+| **2** | Generated On:             | `{{ $generated_on }}` |                     |   |
+| **3** |                           |                       |                     |   |
+| **4** | **Transaction Details**   |                       |                     |   |
+| **5** | `{{CONTENT_START}}`       |                       |                     |   |
+
+### **A.2.3 HTML to Cell Style Mapping**
+
+When the `TemplatedXlsxOutputDriver` processes the HTML content, it applies basic cell styling based on the HTML tags it encounters. This adds a typographic hierarchy to your report.
+
+*   `<h1>`, `<h2>`, `<h3>`: Text is made **bold** with decreasing font sizes.
+*   `<b>`, `<strong>`: Text is made **bold**.
+*   `<i>`, `<em>`: Text is made *italic*.
+*   `<table>`: The driver recognizes HTML tables and correctly maps `<tr>`, `<th>`, and `<td>` to spreadsheet rows and cells, preserving the tabular structure.
+
+### **A.2.4 Configuration**
+
+To enable this feature, ensure the `TemplatedXlsxOutputDriver` is set as the handler for the `.xlsx` extension in your `config/documents.php` file.
+
+```php
+// config/documents.php
+'output_drivers' => [
+    // ...
+    // This driver is now the default for creating rich, templated reports.
+    'xlsx' => \App\Services\DocumentConversion\Drivers\Output\TemplatedXlsxOutputDriver::class,
+
+    // You can keep old drivers for simpler, non-templated exports under a different key
+    'xlsx_simple' => \App\Services\DocumentConversion\Drivers\Output\MaatwebsiteOutputDriver::class,
+],
+```
+
+### **A.2.5 Usage**
+
+You activate the templating feature by specifying the path to your XLSX template file.
+
+**A. Using the Artisan Command**
+
+Use the new `--output-template` option.
+
+```bash
+php artisan convert:document reports/MonthlyReport.xlsx \
+--input=storage/app/templates/invoice.md \
+--disk=public \
+--output-template=storage/app/templates/report-template.xlsx \
+--data='{"report_title":"Monthly Sales","generated_on":"2023-11-15","customer_name":"Global Corp"}'
+```
+
+**B. Programmatic Usage**
+
+Use the new `->usingOutputTemplate()` fluent method on the `DocumentConverter` service.
+
+```php
+use App\Services\DocumentConversion\DocumentConverter;
+
+// ... inside a controller or service
+$data = [
+    'report_title' => 'Monthly Sales',
+    'generated_on' => now()->toDateString(),
+    'customer_name' => 'Global Corp',
+];
+
+DocumentConverter::fromBlade('reports.monthly_sales_content')
+    ->withData($data)
+    ->usingOutputTemplate(storage_path('app/templates/report-template.xlsx'))
+    ->saveTo('minio', 'reports/MonthlyReport.xlsx');
+```
+The system will now produce a fully formatted XLSX file based on your template, filled with the dynamic data and styled content.
+
 
 ## **Versi Bahasa Indonesia**
 
-### **1. Konsep Inti**
+### ***1. Konsep Inti***
 
 Sistem ini dirancang untuk menjadi *pipeline* (alur proses) yang fleksibel dan dapat diperluas untuk mengonversi dokumen dari berbagai format sumber (seperti Markdown atau HTML) ke format target (seperti PDF atau DOCX).
 
@@ -445,10 +537,7 @@ it('dapat mengonversi file markdown ke pdf', function () {
 });
 ```
 
-Excellent idea. Adding an addendum to the documentation is the perfect way to introduce these advanced features without cluttering the main guide. Here is the addendum in both English and Bahasa Indonesia.
-
-
-### **Lampiran: Pemrosesan Spreadsheet Tingkat Lanjut**
+## **Lampiran 1: Pemrosesan Spreadsheet Tingkat Lanjut**
 
 ### **A.1 Menggunakan Spreadsheet sebagai Input**
 
@@ -540,3 +629,97 @@ php artisan convert:document exports/invoice-data.xlsx --input=storage/app/templ
 ```
 
 File XLSX yang dihasilkan akan berisi teks dari file Markdown di Kolom A, dengan data dari tabel terstruktur dengan benar di beberapa kolom.
+
+
+## Lampiran 2: Generate XLSX dengan XLSX Template
+
+### **A.2.1 Konsep**
+
+Meskipun driver output standar sangat baik untuk mengonversi konten dokumen menjadi baris spreadsheet, sistem templating ini memberikan tingkat kontrol yang lebih tinggi atas tata letak dan presentasi dokumen akhir.
+
+Ide intinya adalah menggunakan file `.xlsx` yang sudah dirancang sebelumnya sebagai templat. Templat ini dapat berisi header, footer, logo, teks statis, dan sel yang sudah di-styling. Pipeline kemudian akan menyuntikkan data dan konten dinamis ke dalam templat ini.
+
+Proses ini ditangani oleh driver baru yang terspesialisasi: **`TemplatedXlsxOutputDriver`**. Driver ini didukung oleh library `phpoffice/phpspreadsheet`, karena hanya library inilah yang mampu membaca file spreadsheet yang ada sekaligus memodifikasinya.
+
+### **A.2.2 Membuat Templat XLSX**
+
+Untuk menggunakan fitur ini, Anda harus terlebih dahulu membuat file templat `.xlsx` (misalnya, `storage/app/templates/report-template.xlsx`). File ini menggunakan dua jenis penanda khusus:
+
+1.  **Placeholder Global:** Untuk titik data tunggal seperti judul atau tanggal, Anda dapat menempatkan placeholder bergaya Blade langsung ke dalam sel mana pun. Driver akan menemukan dan menggantinya.
+*   Sintaks: `{{ $nama_variabel }}` atau `{{ $user.name }}`
+*   Contoh: Sebuah sel berisi `Laporan untuk: {{ $customer_name }}`
+
+2.  **Penanda Awal Konten (Content Start Marker):** Anda harus menetapkan satu sel di mana konten HTML dinamis utama akan mulai dimasukkan. Semua konten akan mengalir ke bawah dari titik ini.
+*   Penanda: `{{CONTENT_START}}`
+
+**Contoh Templat (`report-template.xlsx`):**
+
+|       | A                         | B                     | C                 | D |
+|:------|:--------------------------|:----------------------|:------------------|:--|
+| **1** | **`{{ $report_title }}`** |                       | *Logo Perusahaan* |   |
+| **2** | Dibuat pada:              | `{{ $generated_on }}` |                   |   |
+| **3** |                           |                       |                   |   |
+| **4** | **Detail Transaksi**      |                       |                   |   |
+| **5** | `{{CONTENT_START}} `      |                       |                   |   |
+
+### **A.2.3 Pemetaan Styling HTML ke Sel**
+
+Ketika `TemplatedXlsxOutputDriver` memproses konten HTML, ia menerapkan styling sel dasar berdasarkan tag HTML yang ditemuinya. Ini menambahkan hierarki tipografi ke laporan Anda.
+
+*   `<h1>`, `<h2>`, `<h3>`: Teks dibuat **tebal** dengan ukuran font yang semakin kecil.
+*   `<b>`, `<strong>`: Teks dibuat **tebal**.
+*   `<i>`, `<em>`: Teks dibuat *miring*.
+*   `<table>`: Driver mengenali tabel HTML dan memetakan `<tr>`, `<th>`, dan `<td>` dengan benar ke baris dan sel spreadsheet, menjaga struktur tabel.
+
+### **A.2.4 Konfigurasi**
+
+Untuk mengaktifkan fitur ini, pastikan `TemplatedXlsxOutputDriver` diatur sebagai handler untuk ekstensi `.xlsx` di file `config/documents.php` Anda.
+
+```php
+// config/documents.php
+'output_drivers' => [
+    // ...
+    // Driver ini sekarang menjadi default untuk membuat laporan templated yang kaya format.
+    'xlsx' => \App\Services\DocumentConversion\Drivers\Output\TemplatedXlsxOutputDriver::class,
+
+    // Anda dapat menyimpan driver lama untuk ekspor sederhana tanpa templat di bawah key yang berbeda
+    'xlsx_simple' => \App\Services\DocumentConversion\Drivers\Output\MaatwebsiteOutputDriver::class,
+],
+```
+
+### **A.2.5 Penggunaan**
+
+Anda mengaktifkan fitur templating dengan menentukan path ke file templat XLSX Anda.
+
+**A. Menggunakan Perintah Artisan**
+
+Gunakan opsi baru `--output-template`.
+
+```bash
+php artisan convert:document reports/MonthlyReport.xlsx \
+--input=storage/app/templates/invoice.md \
+--disk=public \
+--output-template=storage/app/templates/report-template.xlsx \
+--data='{"report_title":"Penjualan Bulanan","generated_on":"2023-11-15","customer_name":"PT Maju Jaya"}'
+```
+
+**B. Penggunaan Terprogram**
+
+Gunakan metode fluent baru `->usingOutputTemplate()` pada service `DocumentConverter`.
+
+```php
+use App\Services\DocumentConversion\DocumentConverter;
+
+// ... di dalam controller atau service
+$data = [
+    'report_title' => 'Penjualan Bulanan',
+    'generated_on' => now()->toDateString(),
+    'customer_name' => 'PT Maju Jaya',
+];
+
+DocumentConverter::fromBlade('reports.monthly_sales_content')
+    ->withData($data)
+    ->usingOutputTemplate(storage_path('app/templates/report-template.xlsx'))
+    ->saveTo('minio', 'reports/MonthlyReport.xlsx');
+```
+Sistem sekarang akan menghasilkan file XLSX yang diformat sepenuhnya berdasarkan templat Anda, diisi dengan data dinamis dan konten yang telah di-styling.

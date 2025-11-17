@@ -223,18 +223,6 @@
             ]
           },
           {
-            "group": "Converter",
-            "pages": [
-              "mejik-core/laravel/commands/converter/pdf-thumbnail-watermark",
-              "mejik-core/laravel/commands/converter/pdf-thumbnail-watermark-id",
-              "mejik-core/laravel/commands/converter/pdf-thumbnail-generator",
-              "mejik-core/laravel/commands/converter/pdf-convert-from-office",
-              "mejik-core/laravel/commands/converter/images-convert-from-office",
-              "mejik-core/laravel/commands/converter/docx-tpl-generate-command",
-              "mejik-core/laravel/commands/converter/xlsx-generate-command"
-            ]
-          },
-          {
             "group": "Utility",
             "pages": [
               "mejik-core/laravel/commands/utility/source-file-optimizer"
