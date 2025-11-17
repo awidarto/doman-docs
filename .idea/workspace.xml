@@ -41,7 +41,7 @@
     "dart.analysis.tool.window.visible": "false",
     "git-widget-placeholder": "main",
     "kotlin-language-version-configured": "true",
-    "last_opened_file_path": "/Users/awidarto/WebProjects/MejikDocs/doman-docs/mejik-core/laravel/framework/mms",
+    "last_opened_file_path": "/Users/awidarto/WebProjects/MejikDocs/doman-docs/mejik-core/laravel/framework/doc-process",
     "node.js.detected.package.eslint": "true",
     "node.js.detected.package.tslint": "true",
     "node.js.selected.package.eslint": "(autodetect)",
@@ -55,11 +55,11 @@
 }]]></component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
+      <recent name="$PROJECT_DIR$/mejik-core/laravel/framework/doc-process" />
       <recent name="$PROJECT_DIR$/mejik-core/laravel/framework/mms" />
       <recent name="$PROJECT_DIR$/mejik-core/vue/components/data-view" />
       <recent name="$PROJECT_DIR$/mejik-core/vue/components" />
       <recent name="$PROJECT_DIR$/apps/fas" />
-      <recent name="$PROJECT_DIR$/dev/dms" />
     </key>
     <key name="MoveFile.RECENT_KEYS">
       <recent name="$PROJECT_DIR$/mejik-core/vue/components/dataview" />
@@ -142,6 +142,8 @@
       <workItem from="1762690036196" duration="2771000" />
       <workItem from="1762964060764" duration="645000" />
       <workItem from="1763270184699" duration="1892000" />
+      <workItem from="1763281294463" duration="9101000" />
+      <workItem from="1763363420087" duration="3025000" />
     </task>
     <servers />
   </component>

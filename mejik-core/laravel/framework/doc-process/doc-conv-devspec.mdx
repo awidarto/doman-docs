@@ -1,0 +1,466 @@
+---
+title: Document Conversion Pipeline Setup
+---
+
+### Step 1: Prerequisites & Installation
+
+Open your terminal in your Laravel project root and run these commands.
+
+1.  **Install PHP Packages:**
+```bash
+# For DOCX generation
+composer require phpoffice/phpword
+
+# For the WeasyPrint PHP client
+composer require rockett/weasyprint
+
+# For S3 / MinIO storage connectivity
+composer require --with-all-dependencies "league/flysystem-aws-s3-v3:^3.0"
+    ```
+
+2.  **Install System Dependencies:**
+You must install the WeasyPrint command-line tool on your server.
+*   **On Debian/Ubuntu:**
+```bash
+sudo apt-get update && sudo apt-get install -y python3-pip python3-cffi libpango-1.0-0 libpangoft2-1.0-0
+sudo pip3 install WeasyPrint
+        ```
+*   For other systems (macOS, Windows, Docker), follow the official WeasyPrint installation guide.
+
+---
+
+### Step 2: Configuration
+
+**1. Environment Variables (`.env`)**
+
+Add the credentials for your MinIO (or other S3-compatible) storage.
+
+```dotenv
+# .env
+
+MINIO_ACCESS_KEY_ID=your-minio-access-key
+MINIO_SECRET_ACCESS_KEY=your-minio-secret-key
+MINIO_REGION=us-east-1
+MINIO_BUCKET=documents
+MINIO_ENDPOINT="http://127.0.0.1:9000"
+MINIO_USE_PATH_STYLE_ENDPOINT=true
+```
+
+**2. Filesystem Configuration (`config/filesystems.php`)**
+
+Add the `minio` disk to the `disks` array.
+
+```php
+// config/filesystems.php
+
+'disks' => [
+    // ... other disks like 'local', 'public'
+
+    'minio' => [
+        'driver' => 's3',
+        'key' => env('MINIO_ACCESS_KEY_ID'),
+        'secret' => env('MINIO_SECRET_ACCESS_KEY'),
+        'region' => env('MINIO_REGION'),
+        'bucket' => env('MINIO_BUCKET'),
+        'endpoint' => env('MINIO_ENDPOINT'),
+        'use_path_style_endpoint' => env('MINIO_USE_PATH_STYLE_ENDPOINT', false),
+        'throw' => false,
+    ],
+],
+```
+
+**3. Custom Document Conversion Configuration (`config/documents.php`)**
+
+Create this new file to map file extensions to your driver classes.
+
+```php
+<?php
+// config/documents.php
+
+use App\Services\DocumentConversion\Drivers\Input;
+use App\Services\DocumentConversion\Drivers\Output;
+
+return [
+    /*
+    | Input Drivers: Maps input file extensions to their driver classes.
+    */
+    'input_drivers' => [
+        'md' => Input\MarkdownInputDriver::class,
+    ],
+
+    /*
+    | Output Drivers: Maps output file extensions to their driver classes.
+    */
+    'output_drivers' => [
+        'pdf'  => Output\WeasyPrintOutputDriver::class,
+        'docx' => Output\DocxOutputDriver::class,
+    ],
+];
+```
+
+---
+
+### Step 3: Core Architecture (Interfaces & Service)
+
+Create the necessary directories:
+`mkdir -p app/Services/DocumentConversion/Contracts`
+`mkdir -p app/Services/DocumentConversion/Drivers/Input`
+`mkdir -p app/Services/DocumentConversion/Drivers/Output`
+
+**1. `InputDriverInterface.php`**
+```php
+<?php
+// app/Services/DocumentConversion/Contracts/InputDriverInterface.php
+
+namespace App\Services\DocumentConversion\Contracts;
+
+interface InputDriverInterface
+{
+    /**
+     * Process raw input and wrap it in the specified Blade layout.
+     *
+     * @param string $content The raw content from the source file.
+     * @param array $data Data for placeholder replacement.
+     * @param string $layout The name of the blade layout view to extend.
+     * @return string The final Blade string ready for rendering.
+     */
+    public function process(string $content, array $data, string $layout): string;
+}
+```
+
+**2. `OutputDriverInterface.php`**
+```php
+<?php
+// app/Services/DocumentConversion/Contracts/OutputDriverInterface.php
+
+namespace App\Services\DocumentConversion\Contracts;
+
+interface OutputDriverInterface
+{
+    /**
+     * Render the final HTML into the desired output format.
+     *
+     * @param string $htmlContent The fully rendered HTML from the Blade layout.
+     * @return string The raw binary content of the generated document.
+     */
+    public function render(string $htmlContent): string;
+}
+```
+
+**3. `DocumentConverter.php` (The Orchestrator)**
+```php
+<?php
+// app/Services/DocumentConversion/DocumentConverter.php
+
+namespace App\Services\DocumentConversion;
+
+use Illuminate\Support\Facades\Blade;
+use Illuminate\Support\Facades\File;
+use Illuminate\Support\Facades\Storage;
+
+class DocumentConverter
+{
+    protected string $inputContent;
+    protected string $inputExtension;
+    protected array $data = [];
+    protected ?string $inputDriverClass = null;
+    protected ?string $outputDriverClass = null;
+    protected string $layout = 'layouts.document'; // Default layout
+
+    public function __construct(string $inputPath)
+    {
+        if (!File::exists($inputPath)) {
+            throw new \InvalidArgumentException("Input file does not exist at path: {$inputPath}");
+        }
+        $this->inputContent = File::get($inputPath);
+        $this->inputExtension = File::extension($inputPath);
+    }
+
+    public static function from(string $inputPath): self
+    {
+        return new self($inputPath);
+    }
+
+    public function withData(array $data): self
+    {
+        $this->data = $data;
+        return $this;
+    }
+
+    public function usingLayout(string $layout): self
+    {
+        $this->layout = $layout;
+        return $this;
+    }
+
+    public function usingInputDriver(string $driverClass): self
+    {
+        $this->inputDriverClass = $driverClass;
+        return $this;
+    }
+
+    public function usingOutputDriver(string $driverClass): self
+    {
+        $this->outputDriverClass = $driverClass;
+        return $this;
+    }
+
+    public function saveTo(string $disk, string $path): string
+    {
+        $inputDriverClass = $this->inputDriverClass ?? config('documents.input_drivers.' . $this->inputExtension);
+        $outputDriverClass = $this->outputDriverClass ?? config('documents.output_drivers.' . File::extension($path));
+
+        if (!$inputDriverClass) throw new \Exception("Input driver could not be resolved for extension '{$this->inputExtension}'.");
+        if (!$outputDriverClass) throw new \Exception("Output driver could not be resolved for path '{$path}'.");
+
+        $inputDriver = app($inputDriverClass);
+        $bladeString = $inputDriver->process($this->inputContent, $this->data, $this->layout);
+        $finalHtml = Blade::render($bladeString, $this->data);
+
+        $outputDriver = app($outputDriverClass);
+        $binaryContent = $outputDriver->render($finalHtml);
+
+        Storage::disk($disk)->put($path, $binaryContent, 'public');
+
+        return Storage::disk($disk)->url($path);
+    }
+}
+```
+
+---
+
+### Step 4: The Driver Implementations
+
+**1. `MarkdownInputDriver.php`**
+```php
+<?php
+// app/Services/DocumentConversion/Drivers/Input/MarkdownInputDriver.php
+
+namespace App\Services\DocumentConversion\Drivers\Input;
+
+use App\Services\DocumentConversion\Contracts\InputDriverInterface;
+use Illuminate\Support\Str;
+
+class MarkdownInputDriver implements InputDriverInterface
+{
+    public function process(string $content, array $data, string $layout): string
+    {
+        $processedContent = $this->replacePlaceholders($content, $data);
+        $htmlSnippet = Str::markdown($processedContent);
+
+        return "@extends('{$layout}')\n@section('content')\n" . $htmlSnippet . "\n@endsection";
+    }
+
+    private function replacePlaceholders(string $content, array $data): string
+    {
+        if (empty($data)) {
+            return $content;
+        }
+
+        return preg_replace_callback('/{{\s*([\w.-]+)\s*}}/', function ($matches) use ($data) {
+            return data_get($data, $matches[1], $matches[0]);
+        }, $content);
+    }
+}
+```
+
+**2. `WeasyPrintOutputDriver.php`**
+```php
+<?php
+// app/Services/DocumentConversion/Drivers/Output/WeasyPrintOutputDriver.php
+
+namespace App\Services\DocumentConversion\Drivers\Output;
+
+use App\Services\DocumentConversion\Contracts\OutputDriverInterface;
+use Rockett\WeasyPrint\Client;
+
+class WeasyPrintOutputDriver implements OutputDriverInterface
+{
+    public function render(string $htmlContent): string
+    {
+        return (new Client())->source($htmlContent)->output();
+    }
+}
+```
+
+**3. `DocxOutputDriver.php`**
+```php
+<?php
+// app/Services/DocumentConversion/Drivers/Output/DocxOutputDriver.php
+
+namespace App\Services\DocumentConversion\Drivers\Output;
+
+use App\Services\DocumentConversion\Contracts\OutputDriverInterface;
+use PhpOffice\PhpWord\IOFactory;
+use PhpOffice\PhpWord\PhpWord;
+use PhpOffice\PhpWord\Shared\Html;
+
+class DocxOutputDriver implements OutputDriverInterface
+{
+    public function render(string $htmlContent): string
+    {
+        $phpWord = new PhpWord();
+        $section = $phpWord->addSection();
+        Html::addHtml($section, $htmlContent, false, false);
+
+        $objWriter = IOFactory::createWriter($phpWord, 'Word2007');
+
+        ob_start();
+        $objWriter->save('php://output');
+        $content = ob_get_contents();
+        ob_end_clean();
+
+        return $content;
+    }
+}
+```
+
+---
+
+### Step 5: Templates (Input & Layout)
+
+**1. Blade Layout (`resources/views/layouts/document.blade.php`)**
+
+Create the base layout that will be used for all documents.
+
+```blade
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="Content-Type" content="text/html; charset=utf-8"/>
+    <title>Document</title>
+    <style>
+        body {
+            font-family: DejaVu Sans, sans-serif;
+            font-size: 12px;
+            line-height: 1.6;
+            color: #333;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        th, td {
+            border: 1px solid #dddddd;
+            text-align: left;
+            padding: 8px;
+        }
+        th {
+            background-color: #f2f2f2;
+        }
+        h1, h2, h3 {
+            color: #2c3e50;
+        }
+    </style>
+</head>
+<body>
+    <main>
+        @yield('content')
+    </main>
+</body>
+</html>
+```
+
+**2. Sample Markdown Template (`storage/app/templates/invoice.md`)**
+
+Create this sample input file.
+
+```markdown
+# Invoice for {{ customer_name }}
+
+---
+
+**Invoice Number:** {{ invoice_number }}
+**Date:** {{ date }}
+
+Hello {{ customer_name }},
+
+Thank you for your business. Here is a summary of your recent purchase.
+
+| Description | Quantity | Unit Price | Total |
+| :---------- | :------: | ---------: | ----: |
+| Product A   | 2        | $50.00     | $100.00 |
+| Product B   | 1        | $75.00     | $75.00  |
+| **Total**   |          |            | **$175.00** |
+
+Please feel free to contact us if you have any questions.
+
+Sincerely,
+The Awesome Company
+```
+
+---
+
+### Step 6: The Artisan Command
+
+Run `php artisan make:command ConvertDocumentCommand` and replace its content with this:
+
+```php
+<?php
+// app/Console/Commands/ConvertDocumentCommand.php
+
+namespace App\Console\Commands;
+
+use App\Services\DocumentConversion\DocumentConverter;
+use Illuminate\Console\Command;
+
+class ConvertDocumentCommand extends Command
+{
+    protected $signature = 'convert:document
+                            {input : The path to the input file}
+                            {path : The destination path for the output file (e.g., "invoices/2023/inv-123.pdf")}
+                            {--disk=local : The filesystem disk to save to (e.g., local, public, minio)}
+                            {--data= : JSON string of data for placeholders}
+                            {--layout=layouts.document : The Blade layout to use}';
+
+    protected $description = 'Converts a source document and saves it to a specified filesystem disk.';
+
+    public function handle(): int
+    {
+        try {
+            $inputPath = $this->argument('input');
+            $outputPath = $this->argument('path');
+            $disk = $this->option('disk');
+            $layout = $this->option('layout');
+            $data = $this->option('data') ? json_decode($this->option('data'), true) : [];
+
+            $this->info("Starting conversion...");
+            $this->line("- Input: <comment>{$inputPath}</comment>");
+            $this->line("- Disk: <comment>{$disk}</comment>");
+            $this->line("- Path: <comment>{$outputPath}</comment>");
+
+            $fileUrl = DocumentConverter::from($inputPath)
+                ->withData($data)
+                ->usingLayout($layout)
+                ->saveTo($disk, $outputPath);
+
+            $this->info("✅ Document converted successfully!");
+            $this->line("- File URL: <fg=cyan;options=underscore>{$fileUrl}</>");
+
+            return self::SUCCESS;
+
+        } catch (\Exception $e) {
+            $this->error("❌ Conversion failed: " . $e->getMessage());
+            return self::FAILURE;
+        }
+    }
+}
+```
+
+---
+
+### Step 7: How to Use
+
+You can now run the command from your terminal.
+
+**Example 1: Convert Markdown to PDF and save to MinIO**
+```bash
+php artisan convert:document storage/app/templates/invoice.md invoices/INV-001.pdf --disk=minio --data='{"customer_name":"Wayne Enterprises","invoice_number":"INV-001","date":"2023-11-15"}'
+```
+
+**Example 2: Convert Markdown to DOCX and save to the local public disk**
+```bash
+php artisan convert:document storage/app/templates/invoice.md docs/Report.docx --disk=public --data='{"customer_name":"Stark Industries"}'
+```

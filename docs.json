@@ -203,6 +203,13 @@
             ]
           },
           {
+            "group": "Document Process Sub System",
+            "pages": [
+              "mejik-core/laravel/framework/doc-process/doc-conv-pipeline",
+              "mejik-core/laravel/framework/doc-process/doc-conv-devspec"
+            ]
+          },
+          {
             "group": "Use Case",
             "pages": [
               "mejik-core/laravel/commands/converter/case/invoice-generator-with-template.mdx"

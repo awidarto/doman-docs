@@ -1,0 +1,542 @@
+---
+title: Document Conversion Pipeline Developer Guide
+---
+
+## **English Version**
+
+### **1. Core Concepts**
+
+This system is designed to be a flexible and extensible pipeline for converting documents from various source formats (like Markdown or HTML) into target formats (like PDF or DOCX).
+
+The architecture is built on these key principles:
+
+*   **`DocumentConverter` Service:** This is the central orchestrator of the pipeline. It provides a **fluent interface** that makes the conversion process readable and easy to manage. It doesn't perform conversions itself; it delegates tasks to the appropriate drivers.
+*   **Input Drivers:** An Input Driver's job is to take raw content from a source file (e.g., a `.md` or `.html` file) and prepare it for rendering. This typically involves replacing placeholders with data and wrapping the content in a master Blade layout.
+*   **Output Drivers:** An Output Driver's job is to take the final, fully-rendered HTML (after Blade has processed it) and convert it into the target format's binary content (e.g., the binary data of a PDF or DOCX file).
+*   **Blade as the Intermediate Format:** All conversions pass through a common intermediate step: a Blade view. This allows us to centralize styling (CSS) and document structure (headers, footers) in a single master layout file, ensuring consistency across all generated documents.
+*   **Laravel Filesystem Integration:** The final step of saving the document is handled by Laravel's `Storage` facade, allowing you to save the output to any configured disk, including local storage, S3, or an S3-compatible service like MinIO.
+
+### **2. Configuration**
+
+Before using the pipeline, ensure the following are configured:
+
+**A. System & PHP Dependencies:**
+Make sure you have installed the required system tools and Composer packages.
+*   **System Tool:** `weasyprint` (for PDF generation).
+*   **Composer Packages:** `phpoffice/phpword`, `rockett/weasyprint`, `league/flysystem-aws-s3-v3`.
+
+**B. Environment Variables (`.env`)**
+To save files to an S3-compatible disk like MinIO, add the credentials to your `.env` file.
+```dotenv
+MINIO_ACCESS_KEY_ID=your-minio-access-key
+MINIO_SECRET_ACCESS_KEY=your-minio-secret-key
+MINIO_REGION=us-east-1
+MINIO_BUCKET=documents
+MINIO_ENDPOINT="http://127.0.0.1:9000"
+MINIO_USE_PATH_STYLE_ENDPOINT=true
+```
+
+**C. Filesystem Disk (`config/filesystems.php`)**
+Define the `minio` disk so Laravel's Storage facade knows how to connect to it.
+```php
+'disks' => [
+    // ...
+    'minio' => [
+        'driver' => 's3',
+        'key' => env('MINIO_ACCESS_KEY_ID'),
+        'secret' => env('MINIO_SECRET_ACCESS_KEY'),
+        // ... all other S3 settings
+    ],
+],
+```
+
+**D. Driver Mapping (`config/documents.php`)**
+This is the core configuration file for the pipeline. It maps file extensions to the driver classes that should handle them.
+```php
+<?php
+// config/documents.php
+
+use App\Services\DocumentConversion\Drivers\Input;
+use App\Services\DocumentConversion\Drivers\Output;
+
+return [
+    'input_drivers' => [
+        'md'   => Input\MarkdownInputDriver::class,
+        'html' => Input\HtmlInputDriver::class,
+        'htm'  => Input\HtmlInputDriver::class,
+    ],
+    'output_drivers' => [
+        'pdf'  => Output\WeasyPrintOutputDriver::class,
+        'docx' => Output\DocxOutputDriver::class,
+    ],
+];
+```
+
+### **3. Usage Guide**
+
+You can use the pipeline via the provided Artisan command or programmatically within your application.
+
+**A. Using the Artisan Command (`convert:document`)**
+
+This is the primary way to perform conversions from the command line.
+
+*   **Convert a Markdown file to a PDF on MinIO:**
+```bash
+php artisan convert:document invoices/INV-001.pdf --input=storage/app/templates/invoice.md --disk=minio --data='{"customer_name":"Acme Corp"}'
+    ```
+
+*   **Convert an HTML file to a DOCX on the local public disk:**
+```bash
+php artisan convert:document reports/quarterly.docx --input=storage/app/templates/report.html --disk=public
+    ```
+
+*   **Convert directly from a Blade view to a PDF:**
+(Assumes you have `resources/views/documents/receipt.blade.php`)
+```bash
+php artisan convert:document receipts/R-552.pdf --view=documents.receipt --disk=minio --data='{"amount":"$99.00"}'
+    ```
+
+*   **Specify a custom layout for a file-based conversion:**
+```bash
+php artisan convert:document newsletter.pdf --input=content.md --disk=public --layout=layouts.newsletter
+    ```
+
+**B. Programmatic Usage (e.g., in a Controller)**
+
+You can also use the `DocumentConverter` service directly in your code for dynamic document generation.
+
+```php
+use App\Services\DocumentConversion\DocumentConverter;
+use App\Models\Order;
+
+class OrderController extends Controller
+{
+    public function downloadInvoice(Order $order)
+    {
+        $data = [
+            'order_id' => $order->id,
+            'customer_name' => $order->customer->name,
+            'items' => $order->items,
+        ];
+
+        $filePath = "invoices/{$order->id}.pdf";
+
+        // Use the service to convert a Blade view
+        DocumentConverter::fromBlade('invoices.template')
+            ->withData($data)
+            ->saveTo('minio', $filePath);
+
+        // Now you can redirect the user to the file's URL
+        return redirect()->away(Storage::disk('minio')->url($filePath));
+    }
+}
+```
+
+### **4. Extending the Pipeline**
+
+**A. Creating a New Input Driver**
+1.  Create a new class in `app/Services/DocumentConversion/Drivers/Input` that implements `InputDriverInterface`.
+2.  Implement the `process()` method. It must accept raw content and return a Blade-compatible string that extends a layout.
+3.  Register your new driver in `config/documents.php` with the file extension it handles.
+
+**B. Creating a New Output Driver**
+1.  Create a new class in `app/Services/DocumentConversion/Drivers/Output` that implements `OutputDriverInterface`.
+2.  Implement the `render()` method. It must accept the final HTML and return the raw binary content of the converted file as a string.
+3.  Register your new driver in `config/documents.php` with its output file extension.
+
+### **5. Testing**
+
+It's crucial to test your document generation logic. Use Laravel's `Storage::fake()` to prevent actual files from being written to disk during tests.
+
+Here is an example using Pest/PHPUnit:
+
+```php
+use Illuminate\Support\Facades\Storage;
+use App\Services\DocumentConversion\DocumentConverter;
+
+it('can convert a markdown file to a pdf', function () {
+    // 1. Setup: Fake the storage disk
+    Storage::fake('minio');
+
+    // 2. Arrange: Create a fake input file
+    $markdownContent = '# Hello {{ name }}';
+    Storage::fake('local')->put('test.md', $markdownContent);
+    $inputPath = Storage::disk('local')->path('test.md');
+
+    $data = ['name' => 'World'];
+    $outputPath = 'output/test.pdf';
+
+    // 3. Act: Run the conversion
+    DocumentConverter::from($inputPath)
+        ->withData($data)
+        ->saveTo('minio', $outputPath);
+
+    // 4. Assert: Check that the file was created on the fake disk
+    Storage::disk('minio')->assertExists($outputPath);
+});
+```
+### Addendum: Advanced Spreadsheet Conversion
+
+### **A.1 Using Spreadsheets as Input**
+
+The pipeline can read data from `.csv` and `.xlsx` files and render it as an HTML `<table>` within a target document (like a PDF or DOCX). This is ideal for generating reports from spreadsheet data.
+
+#### **Concept**
+
+When a spreadsheet file is used as input, the corresponding **Input Driver** performs the following steps:
+1.  Parses the `.csv` or `.xlsx` file using a dedicated spreadsheet library.
+2.  Reads all the rows and cells from the first sheet.
+3.  Transforms this data into an HTML `<table>` string.
+4.  Wraps this HTML table string within the standard Blade layout directives (`@extends`, `@section`).
+5.  Passes this Blade string to the renderer, which then flows through the rest of the pipeline to the chosen output format.
+
+#### **Available Engines**
+
+The system supports multiple spreadsheet engines, configurable in `config/documents.php`. You can choose the one that best fits your needs.
+
+1.  **`MaatwebsiteInputDriver`**: (Default) A user-friendly, feature-rich driver using the popular `maatwebsite/excel` package. Great for general use.
+2.  **`OpenSpoutInputDriver`**: A high-performance, low-memory driver using the `openspout/openspout` package. **Recommended for very large files**.
+3.  **`PhpSpreadsheetInputDriver`**: A powerful driver using the underlying `phpoffice/phpspreadsheet` library. Offers maximum control and feature access.
+
+#### **Configuration**
+
+To switch engines, simply edit `config/documents.php` and point the `csv` and `xlsx` keys to your desired driver class.
+
+```php
+// config/documents.php
+'input_drivers' => [
+    // ...
+    // --- To use OpenSpout instead of the default Maatwebsite ---
+    'csv'  => \App\Services\DocumentConversion\Drivers\Input\OpenSpoutInputDriver::class,
+    'xlsx' => \App\Services\DocumentConversion\Drivers\Input\OpenSpoutInputDriver::class,
+],
+```
+
+#### **Usage**
+
+The command is the same regardless of the chosen engine.
+```bash
+# Convert a CSV file into a PDF report
+php artisan convert:document reports/sales-summary.pdf --input=data/sales.csv --disk=public
+
+# Convert an XLSX file into a DOCX document
+php artisan convert:document reports/inventory.docx --input=data/inventory.xlsx --disk=public
+```
+
+---
+
+### **A.2 Generating Spreadsheets as Output**
+
+The pipeline can also convert a source document (like Markdown or HTML) into an `.xlsx` file. This is useful for exporting structured and unstructured content into a spreadsheet format.
+
+#### **Concept**
+
+This is a more advanced conversion. When `.xlsx` is the target format, the **Output Driver** performs a unique process:
+1.  It receives the final, fully-rendered HTML from the Blade engine.
+2.  It parses the HTML DOM structure.
+3.  When it encounters a `<table>` element, it translates the table's rows (`<tr>`) and cells (`<th>`, `<td>`) directly into spreadsheet rows and cells.
+4.  When it encounters any other block-level element (`<h1>`, `<p>`, `<ul>`, etc.), it extracts the element's text content and places it into a new spreadsheet row in the first column.
+5.  This preserves both the structured data and the textual context of the original document.
+
+#### **Available Engines**
+
+Like with input, you have a choice of engines for generating XLSX files.
+
+1.  **`MaatwebsiteOutputDriver`**: (Default) Uses `maatwebsite/excel` to easily build the spreadsheet from a PHP array. Very convenient and reliable.
+2.  **`OpenSpoutOutputDriver`**: Uses `openspout/openspout`'s streaming writer. **Excellent for generating extremely large XLSX files** without hitting memory limits.
+3.  **`PhpSpreadsheetOutputDriver`**: Uses `phpoffice/phpspreadsheet` to build the document in memory. Offers deep control over cell styling, formulas, and other advanced features.
+
+#### **Configuration**
+
+To switch engines, edit the `xlsx` key in the `output_drivers` section of `config/documents.php`.
+
+```php
+// config/documents.php
+'output_drivers' => [
+    // ...
+    // --- To use PhpSpreadsheet instead of the default Maatwebsite ---
+    'xlsx' => \App\Services\DocumentConversion\Drivers\Output\PhpSpreadsheetOutputDriver::class,
+],
+```
+
+#### **Usage**
+
+```bash
+# Convert a Markdown file (containing text and a table) into an XLSX file
+php artisan convert:document exports/invoice-data.xlsx --input=storage/app/templates/invoice.md --disk=minio
+```
+
+The resulting XLSX file will contain the text from the Markdown file in Column A, with the table's data structured correctly across multiple columns.
+
+
+---
+
+## **Versi Bahasa Indonesia**
+
+### **1. Konsep Inti**
+
+Sistem ini dirancang untuk menjadi *pipeline* (alur proses) yang fleksibel dan dapat diperluas untuk mengonversi dokumen dari berbagai format sumber (seperti Markdown atau HTML) ke format target (seperti PDF atau DOCX).
+
+Arsitekturnya dibangun di atas prinsip-prinsip utama berikut:
+
+*   **Service `DocumentConverter`:** Ini adalah orkestrator pusat dari pipeline. Ia menyediakan **fluent interface** yang membuat proses konversi mudah dibaca dan dikelola. Service ini tidak melakukan konversi secara langsung; ia mendelegasikan tugas ke *driver* yang sesuai.
+*   **Input Driver:** Tugas Input Driver adalah mengambil konten mentah dari file sumber (misalnya, file `.md` atau `.html`) dan menyiapkannya untuk di-render. Ini biasanya melibatkan penggantian *placeholder* dengan data dan membungkus konten dalam layout master Blade.
+*   **Output Driver:** Tugas Output Driver adalah mengambil HTML final yang sudah di-render (setelah diproses oleh Blade) dan mengubahnya menjadi konten biner dari format target (misalnya, data biner dari file PDF atau DOCX).
+*   **Blade sebagai Format Perantara:** Semua konversi melewati langkah perantara yang sama: view Blade. Ini memungkinkan kita untuk memusatkan *styling* (CSS) dan struktur dokumen (header, footer) dalam satu file layout master, memastikan konsistensi di semua dokumen yang dihasilkan.
+*   **Integrasi Filesystem Laravel:** Langkah terakhir untuk menyimpan dokumen ditangani oleh `Storage` facade dari Laravel, memungkinkan Anda menyimpan output ke *disk* apa pun yang telah dikonfigurasi, termasuk penyimpanan lokal, S3, atau layanan yang kompatibel dengan S3 seperti MinIO.
+
+### **2. Konfigurasi**
+
+Sebelum menggunakan pipeline, pastikan hal-hal berikut telah dikonfigurasi:
+
+**A. Dependensi Sistem & PHP:**
+Pastikan Anda telah menginstal perangkat lunak sistem dan paket Composer yang diperlukan.
+*   **Perangkat Lunak Sistem:** `weasyprint` (untuk pembuatan PDF).
+*   **Paket Composer:** `phpoffice/phpword`, `rockett/weasyprint`, `league/flysystem-aws-s3-v3`.
+
+**B. Variabel Environment (`.env`)**
+Untuk menyimpan file ke disk yang kompatibel dengan S3 seperti MinIO, tambahkan kredensial ke file `.env` Anda.
+```dotenv
+MINIO_ACCESS_KEY_ID=kunci-akses-minio-anda
+MINIO_SECRET_ACCESS_KEY=kunci-rahasia-minio-anda
+MINIO_REGION=us-east-1
+MINIO_BUCKET=documents
+MINIO_ENDPOINT="http://127.0.0.1:9000"
+MINIO_USE_PATH_STYLE_ENDPOINT=true
+```
+
+**C. Disk Filesystem (`config/filesystems.php`)**
+Definisikan disk `minio` agar Storage facade Laravel tahu cara terhubung dengannya.
+```php
+'disks' => [
+    // ...
+    'minio' => [
+        'driver' => 's3',
+        'key' => env('MINIO_ACCESS_KEY_ID'),
+        'secret' => env('MINIO_SECRET_ACCESS_KEY'),
+        // ... semua pengaturan S3 lainnya
+    ],
+],
+```
+
+**D. Pemetaan Driver (`config/documents.php`)**
+Ini adalah file konfigurasi inti untuk pipeline. File ini memetakan ekstensi file ke kelas driver yang harus menanganinya.
+```php
+<?php
+// config/documents.php
+
+use App\Services\DocumentConversion\Drivers\Input;
+use App\Services\DocumentConversion\Drivers\Output;
+
+return [
+    'input_drivers' => [
+        'md'   => Input\MarkdownInputDriver::class,
+        'html' => Input\HtmlInputDriver::class,
+        'htm'  => Input\HtmlInputDriver::class,
+    ],
+    'output_drivers' => [
+        'pdf'  => Output\WeasyPrintOutputDriver::class,
+        'docx' => Output\DocxOutputDriver::class,
+    ],
+];
+```
+
+### **3. Panduan Penggunaan**
+
+Anda dapat menggunakan pipeline melalui perintah Artisan yang disediakan atau secara terprogram di dalam aplikasi Anda.
+
+**A. Menggunakan Perintah Artisan (`convert:document`)**
+
+Ini adalah cara utama untuk melakukan konversi dari baris perintah.
+
+*   **Mengonversi file Markdown ke PDF di MinIO:**
+```bash
+php artisan convert:document invoices/INV-001.pdf --input=storage/app/templates/invoice.md --disk=minio --data='{"customer_name":"PT Sejahtera"}'
+    ```
+
+*   **Mengonversi file HTML ke DOCX di disk `public` lokal:**
+```bash
+php artisan convert:document reports/quarterly.docx --input=storage/app/templates/report.html --disk=public
+    ```
+
+*   **Mengonversi langsung dari view Blade ke PDF:**
+(Asumsikan Anda memiliki file `resources/views/documents/receipt.blade.php`)
+```bash
+php artisan convert:document receipts/R-552.pdf --view=documents.receipt --disk=minio --data='{"amount":"Rp 150.000"}'
+    ```
+
+*   **Menentukan layout kustom untuk konversi berbasis file:**
+```bash
+php artisan convert:document newsletter.pdf --input=content.md --disk=public --layout=layouts.newsletter
+    ```
+
+**B. Penggunaan Terprogram (misalnya, di dalam Controller)**
+
+Anda juga dapat menggunakan service `DocumentConverter` secara langsung di dalam kode Anda untuk pembuatan dokumen dinamis.
+
+```php
+use App\Services\DocumentConversion\DocumentConverter;
+use App\Models\Order;
+
+class OrderController extends Controller
+{
+    public function downloadInvoice(Order $order)
+    {
+        $data = [
+            'order_id' => $order->id,
+            'customer_name' => $order->customer->name,
+            'items' => $order->items,
+        ];
+
+        $filePath = "invoices/{$order->id}.pdf";
+
+        // Gunakan service untuk mengonversi view Blade
+        DocumentConverter::fromBlade('invoices.template')
+            ->withData($data)
+            ->saveTo('minio', $filePath);
+
+        // Sekarang Anda dapat mengarahkan pengguna ke URL file tersebut
+        return redirect()->away(Storage::disk('minio')->url($filePath));
+    }
+}
+```
+
+### **4. Memperluas Pipeline**
+
+**A. Membuat Input Driver Baru**
+1.  Buat kelas baru di `app/Services/DocumentConversion/Drivers/Input` yang mengimplementasikan `InputDriverInterface`.
+2.  Implementasikan metode `process()`. Metode ini harus menerima konten mentah dan mengembalikan string yang kompatibel dengan Blade yang me-`extend` sebuah layout.
+3.  Daftarkan driver baru Anda di `config/documents.php` dengan ekstensi file yang ditanganinya.
+
+**B. Membuat Output Driver Baru**
+1.  Buat kelas baru di `app/Services/DocumentConversion/Drivers/Output` yang mengimplementasikan `OutputDriverInterface`.
+2.  Implementasikan metode `render()`. Metode ini harus menerima HTML final dan mengembalikan konten biner mentah dari file yang telah dikonversi dalam bentuk string.
+3.  Daftarkan driver baru Anda di `config/documents.php` dengan ekstensi file outputnya.
+
+### **5. Pengujian (Testing)**
+
+Sangat penting untuk menguji logika pembuatan dokumen Anda. Gunakan `Storage::fake()` dari Laravel untuk mencegah penulisan file ke disk selama pengujian.
+
+Berikut adalah contoh menggunakan Pest/PHPUnit:
+
+```php
+use Illuminate\Support\Facades\Storage;
+use App\Services\DocumentConversion\DocumentConverter;
+
+it('dapat mengonversi file markdown ke pdf', function () {
+    // 1. Setup: Buat disk penyimpanan palsu (fake)
+    Storage::fake('minio');
+
+    // 2. Arrange: Buat file input palsu
+    $markdownContent = '# Halo {{ name }}';
+    Storage::fake('local')->put('test.md', $markdownContent);
+    $inputPath = Storage::disk('local')->path('test.md');
+
+    $data = ['name' => 'Dunia'];
+    $outputPath = 'output/test.pdf';
+
+    // 3. Act: Jalankan proses konversi
+    DocumentConverter::from($inputPath)
+        ->withData($data)
+        ->saveTo('minio', $outputPath);
+
+    // 4. Assert: Periksa apakah file telah dibuat di disk palsu
+    Storage::disk('minio')->assertExists($outputPath);
+});
+```
+
+Excellent idea. Adding an addendum to the documentation is the perfect way to introduce these advanced features without cluttering the main guide. Here is the addendum in both English and Bahasa Indonesia.
+
+
+### **Lampiran: Pemrosesan Spreadsheet Tingkat Lanjut**
+
+### **A.1 Menggunakan Spreadsheet sebagai Input**
+
+Pipeline ini dapat membaca data dari file `.csv` dan `.xlsx` dan me-render-nya sebagai `<table>` HTML di dalam dokumen target (seperti PDF atau DOCX). Fitur ini ideal untuk membuat laporan dari data spreadsheet.
+
+#### **Konsep**
+
+Ketika file spreadsheet digunakan sebagai input, **Input Driver** yang sesuai akan melakukan langkah-langkah berikut:
+1.  Mem-parsing file `.csv` atau `.xlsx` menggunakan library spreadsheet khusus.
+2.  Membaca semua baris dan sel dari sheet pertama.
+3.  Mengubah data ini menjadi string `<table>` HTML.
+4.  Membungkus string tabel HTML ini di dalam direktif layout master Blade (`@extends`, `@section`).
+5.  Meneruskan string Blade ini ke renderer, yang kemudian mengalir melalui sisa pipeline ke format output yang dipilih.
+
+#### **Engine yang Tersedia**
+
+Sistem ini mendukung beberapa *engine* spreadsheet, yang dapat dikonfigurasi di `config/documents.php`. Anda dapat memilih yang paling sesuai dengan kebutuhan Anda.
+
+1.  **`MaatwebsiteInputDriver`**: (Default) Driver yang ramah pengguna dan kaya fitur, menggunakan paket populer `maatwebsite/excel`. Sangat baik untuk penggunaan umum.
+2.  **`OpenSpoutInputDriver`**: Driver berkinerja tinggi dengan penggunaan memori rendah, menggunakan paket `openspout/openspout`. **Direkomendasikan untuk file yang sangat besar**.
+3.  **`PhpSpreadsheetInputDriver`**: Driver yang kuat menggunakan library dasar `phpoffice/phpspreadsheet`. Menawarkan kontrol dan akses fitur yang maksimal.
+
+#### **Konfigurasi**
+
+Untuk mengganti engine, cukup edit `config/documents.php` dan arahkan *key* `csv` dan `xlsx` ke kelas driver yang Anda inginkan.
+
+```php
+// config/documents.php
+'input_drivers' => [
+    // ...
+    // --- Untuk menggunakan OpenSpout sebagai ganti Maatwebsite (default) ---
+    'csv'  => \App\Services\DocumentConversion\Drivers\Input\OpenSpoutInputDriver::class,
+    'xlsx' => \App\Services\DocumentConversion\Drivers\Input\OpenSpoutInputDriver::class,
+],
+```
+
+#### **Penggunaan**
+
+Perintah yang digunakan tetap sama, terlepas dari engine yang dipilih.
+```bash
+# Mengonversi file CSV menjadi laporan PDF
+php artisan convert:document reports/sales-summary.pdf --input=data/sales.csv --disk=public
+
+# Mengonversi file XLSX menjadi dokumen DOCX
+php artisan convert:document reports/inventory.docx --input=data/inventory.xlsx --disk=public
+```
+
+---
+
+### **A.2 Menghasilkan Spreadsheet sebagai Output**
+
+Pipeline ini juga dapat mengonversi dokumen sumber (seperti Markdown atau HTML) menjadi file `.xlsx`. Ini berguna untuk mengekspor konten terstruktur dan tidak terstruktur ke dalam format spreadsheet.
+
+#### **Konsep**
+
+Ini adalah konversi yang lebih canggih. Ketika `.xlsx` menjadi format target, **Output Driver** melakukan proses yang unik:
+1.  Menerima HTML final yang sudah di-render sepenuhnya dari engine Blade.
+2.  Mem-parsing struktur DOM HTML tersebut.
+3.  Ketika menemukan elemen `<table>`, ia menerjemahkan baris (`<tr>`) dan sel (`<th>`, `<td>`) tabel secara langsung menjadi baris dan sel spreadsheet.
+4.  Ketika menemukan elemen tingkat blok lainnya (`<h1>`, `<p>`, `<ul>`, dll.), ia mengekstrak konten teks elemen tersebut dan menempatkannya ke dalam baris spreadsheet baru di kolom pertama.
+5.  Proses ini menjaga data terstruktur sekaligus konteks tekstual dari dokumen asli.
+
+#### **Engine yang Tersedia**
+
+Seperti halnya input, Anda memiliki pilihan engine untuk menghasilkan file XLSX.
+
+1.  **`MaatwebsiteOutputDriver`**: (Default) Menggunakan `maatwebsite/excel` untuk membuat spreadsheet dengan mudah dari array PHP. Sangat nyaman dan andal.
+2.  **`OpenSpoutOutputDriver`**: Menggunakan *streaming writer* dari `openspout/openspout`. **Sangat baik untuk menghasilkan file XLSX yang sangat besar** tanpa mencapai batas memori.
+3.  **`PhpSpreadsheetOutputDriver`**: Menggunakan `phpoffice/phpspreadsheet` untuk membangun dokumen di dalam memori. Menawarkan kontrol mendalam atas *styling* sel, formula, dan fitur canggih lainnya.
+
+#### **Konfigurasi**
+
+Untuk mengganti engine, edit *key* `xlsx` di bagian `output_drivers` pada file `config/documents.php`.
+
+```php
+// config/documents.php
+'output_drivers' => [
+    // ...
+    // --- Untuk menggunakan PhpSpreadsheet sebagai ganti Maatwebsite (default) ---
+    'xlsx' => \App\Services\DocumentConversion\Drivers\Output\PhpSpreadsheetOutputDriver::class,
+],
+```
+
+##### **Penggunaan**
+
+```bash
+# Mengonversi file Markdown (berisi teks dan tabel) menjadi file XLSX
+php artisan convert:document exports/invoice-data.xlsx --input=storage/app/templates/invoice.md --disk=minio
+```
+
+File XLSX yang dihasilkan akan berisi teks dari file Markdown di Kolom A, dengan data dari tabel terstruktur dengan benar di beberapa kolom.
