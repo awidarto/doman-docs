@@ -1,0 +1,634 @@
+---
+title: A Complete Guide to Building Modular & Real-Time Dashboards in Laravel & Vue 2
+---
+
+## Final Documentation: A Complete Guide to Building Modular & Real-Time Dashboards in Laravel & Vue 2
+
+### Table of Contents
+
+1.  **System Architecture**
+2.  **Part 1: The Server-Side Foundation (Laravel)**
+*   1.1. The Reusable Blade Component: `<x-chart-block />`
+3.  **Part 2: The Client-Side Widgets (Vue "Bricks")**
+*   2.1. Universal Chart Component: `ChartBlock.vue`
+*   2.2. KPI Card Component: `KpiCard.vue`
+4.  **Part 3: The Dashboard Canvas (Vue Layout Controller)**
+*   3.1. The Layout Component with Full-Screen Toggle: `DashboardLayout.vue`
+5.  **Part 4: Implementation Patterns & Full Source Code**
+*   4.1. Pattern A: The Standard Live Dashboard (Axios Polling)
+*   Laravel Controller & Routes
+*   Vue Page Component
+*   Blade View
+*   4.2. Pattern B: The Real-Time Dashboard (Server-Sent Events)
+*   Laravel Controller & Routes
+*   Vue Page Component
+*   Blade View
+6.  **Part 5: Project Setup & Configuration**
+*   5.1. Dependencies
+*   5.2. Global Vue Component Registration (`app.js`)
+
+---
+
+### 1. System Architecture
+
+This system is built on a powerful separation of concerns:
+
+*   **Laravel (Backend):** Responsible for data fetching, business logic, and initial page rendering. It provides data to the frontend in a structured format.
+*   **Vue.js (Frontend):** Responsible for rendering all interactive components, managing the UI state, and handling real-time data updates.
+*   **Blade Components (The Bridge):** A simple but effective way to initialize Vue components with server-rendered data, making them easy to use within traditional Laravel views.
+
+The core principle is a **Unified API** for all visual widgets: they all accept `data` and `params` props, making them interchangeable and easy to manage.
+
+---
+
+### Part 1: The Server-Side Foundation (Laravel)
+
+#### 1.1. The Reusable Blade Component: `<x-chart-block />`
+
+This Blade component acts as a convenient wrapper to render the `ChartBlock.vue` component from your Blade files. It simplifies passing PHP data to Vue by handling the JSON encoding and component initialization.
+
+**How to Create:**
+
+```bash
+php artisan make:component ChartBlock
+```
+
+**Component Class: `app/View/Components/ChartBlock.php`**
+```php
+<?php
+
+namespace App\View\Components;
+
+use Illuminate\View\Component;
+use Illuminate\Support\Str;
+
+class ChartBlock extends Component
+{
+    public string $id;
+    public array $data;
+    public array $params;
+
+    /**
+     * Create a new component instance.
+     *
+     * @param array $data   The chart series data. E.g., [['name' => 'Sales', 'data' => [10, 20]]]
+     * @param array $params The chart configuration parameters. E.g., ['title' => 'Weekly Sales']
+     */
+    public function __construct(array $data, array $params)
+    {
+        // A unique ID is useful if you have multiple charts on one page
+        $this->id = 'chart_block_' . Str::random(8);
+        $this->data = $data;
+        $this->params = $params;
+    }
+
+    /**
+     * Get the view / contents that represent the component.
+     */
+    public function render()
+    {
+        return view('components.chart-block');
+    }
+}
+```
+
+**Component View: `resources/views/components/chart-block.blade.php`**
+```html
+{{-- This container's ID is not strictly necessary but can be useful for direct DOM manipulation --}}
+<div id="{{ $id }}">
+
+    {{--
+        This is the most important part. We render our Vue component tag and pass
+        the PHP arrays as JSON-encoded props using Laravel's @json directive.
+        Vue's v-bind shorthand (the colon) tells Vue to interpret the string as JavaScript.
+    --}}
+    <chart-block
+        :data='@json($data)'
+        :params='@json($params)'>
+
+        {{-- Optional: Add a server-rendered loading state. This will be visible --}}
+        {{-- for a brief moment before Vue takes over and mounts the real component. --}}
+        <div class="card">
+            <div class="card-body text-center p-5">
+                <div class="spinner-border text-primary" role="status">
+                    <span class="visually-hidden">Loading...</span>
+                </div>
+            </div>
+        </div>
+
+    </chart-block>
+</div>
+```
+**Usage in a Blade File:**
+```html
+<div class="col-md-6">
+    <x-chart-block :data="$salesDataArray" :params="$salesParamsArray" />
+</div>
+```
+
+---
+
+### Part 2: The Client-Side Widgets (Vue "Bricks")
+
+These are the core visual building blocks of your dashboard.
+
+#### 2.1. Universal Chart Component: `ChartBlock.vue`
+
+**File: `resources/js/components/ChartBlock.vue`**
+```vue
+<template>
+  <div class="card h-100">
+    <div class="card-header d-flex justify-content-between align-items-center">
+      <h5 class="card-title mb-0">{{ params.title || 'Chart' }}</h5>
+    </div>
+    <div class="card-body">
+      <apexchart
+        :height="params.height || '350'"
+        :type="params.type || 'bar'"
+        :options="chartOptions"
+        :series="data"
+      ></apexchart>
+    </div>
+  </div>
+</template>
+
+<script>
+export default {
+  props: {
+    data: { type: Array, required: true },
+    params: { type: Object, required: true },
+  },
+  computed: {
+    chartOptions() {
+      let baseOptions = {
+        chart: {
+          type: this.params.type || 'bar',
+          toolbar: { show: true }, // Enables PNG/SVG/CSV download
+          animations: { enabled: true },
+        },
+        colors: this.params.colors || ['#0d6efd', '#6c757d', '#198754', '#dc3545'],
+        xaxis: { categories: this.params.categories || [] },
+        dataLabels: { enabled: false },
+        stroke: { curve: 'smooth' }
+      };
+
+      if (this.params.options) {
+        const merge = (target, source) => {
+          for (const key in source) {
+            if (source[key] instanceof Object && key in target) {
+              Object.assign(source[key], merge(target[key], source[key]));
+            }
+          }
+          Object.assign(target || {}, source);
+          return target;
+        };
+        return merge(baseOptions, this.params.options);
+      }
+      return baseOptions;
+    },
+  },
+};
+</script>
+```
+
+#### 2.2. KPI Card Component: `KpiCard.vue`
+
+**File: `resources/js/components/KpiCard.vue`**
+```vue
+<template>
+  <div class="card h-100">
+    <div class="card-body">
+      <h6 class="card-subtitle mb-2 text-muted">{{ params.title || 'KPI' }}</h6>
+      <h2 class="card-title">{{ data.headVal || 0 }}</h2>
+      <p v-if="data.subHeadVal" class="card-text text-muted small">
+        <span v-html="data.subHeadIcon"></span>
+        {{ data.subHeadVal }} {{ data.subHeadLabel }}
+      </p>
+    </div>
+  </div>
+</template>
+
+<script>
+export default {
+  props: {
+    data: { type: Object, required: true, default: () => ({}) },
+    params: { type: Object, required: true, default: () => ({}) },
+  },
+};
+</script>
+```
+
+---
+
+### Part 3: The Dashboard Canvas (Vue Layout Controller)
+
+#### 3.1. The Layout Component with Full-Screen Toggle: `DashboardLayout.vue`
+
+**File: `resources/js/components/DashboardLayout.vue`**
+```vue
+<template>
+  <div class="dashboard-container" ref="dashboardContainer">
+    <div class="card mb-4 shadow-sm">
+      <div class="card-body">
+        <div class="d-flex justify-content-between align-items-center">
+          <h5 class="card-title mb-0">Filters</h5>
+          <button class="btn btn-outline-secondary btn-sm" @click="toggleFullScreen">
+            <span v-if="!isFullscreen">↗ Full Screen</span>
+            <span v-else>↙ Exit Full Screen</span>
+          </button>
+        </div>
+        <hr>
+        <slot name="filters"></slot>
+      </div>
+    </div>
+    <div class="dashboard-main">
+      <slot :data="data" :params="params"></slot>
+    </div>
+  </div>
+</template>
+
+<script>
+export default {
+  props: {
+    data: { type: Object, required: true },
+    params: { type: Object, required: true },
+  },
+  data() {
+    return { isFullscreen: false };
+  },
+  mounted() {
+    document.addEventListener('fullscreenchange', this.onFullScreenChange);
+  },
+  beforeDestroy() {
+    document.removeEventListener('fullscreenchange', this.onFullScreenChange);
+  },
+  methods: {
+    toggleFullScreen() {
+      const elem = this.$refs.dashboardContainer;
+      if (!document.fullscreenElement) {
+        if (elem.requestFullscreen) elem.requestFullscreen();
+        else if (elem.webkitRequestFullscreen) elem.webkitRequestFullscreen(); // Safari
+        else if (elem.msRequestFullscreen) elem.msRequestFullscreen(); // IE11
+      } else {
+        if (document.exitFullscreen) document.exitFullscreen();
+      }
+    },
+    onFullScreenChange() {
+      this.isFullscreen = !!document.fullscreenElement;
+    },
+  },
+};
+</script>
+
+<style scoped>
+.dashboard-container:fullscreen {
+  background-color: #f8f9fa;
+  padding: 2rem;
+  overflow-y: auto;
+}
+</style>
+```
+
+---
+
+### Part 4: Implementation Patterns & Full Source Code
+
+#### 4.1. Pattern A: The Standard Live Dashboard (Axios Polling)
+
+##### Laravel Controller & Routes
+
+**File: `app/Http/Controllers/ReportController.php`**
+```php
+<?php
+namespace App\Http\Controllers;
+use Illuminate\Http\Request;
+
+class ReportController extends Controller
+{
+    public function show()
+    {
+        $dashboardObject = $this->getDashboardData(request()->all());
+        return view('report', ['dashboardObject' => $dashboardObject]);
+    }
+
+    public function fetchData(Request $request)
+    {
+        $dashboardObject = $this->getDashboardData($request->all());
+        return response()->json($dashboardObject);
+    }
+
+    private function getDashboardData(array $filters): array
+    {
+        // MOCK DATA - Replace with your actual database queries
+        // Use $filters['date'], $filters['category'] to filter your queries.
+        return [
+            'params' => [
+                'serviceRequest' => ['title' => 'Service Requests'],
+                'soBarMix' => [
+                    'title' => 'Order Mix',
+                    'type' => 'bar',
+                    'categories' => ['Mon', 'Tue', 'Wed', 'Thu', 'Fri'],
+                ]
+            ],
+            'data' => [
+                'serviceRequest' => [
+                    'headVal' => rand(50, 150),
+                    'subHeadVal' => 'today',
+                ],
+                'soBarMix' => [
+                    ['name' => 'Online', 'data' => [rand(10,50), rand(10,50), rand(10,50), rand(10,50), rand(10,50)]],
+                    ['name' => 'In-Store', 'data' => [rand(10,50), rand(10,50), rand(10,50), rand(10,50), rand(10,50)]],
+                ]
+            ]
+        ];
+    }
+}
+```
+
+**Routes:**
+```php
+// routes/web.php
+use App\Http\Controllers\ReportController;
+Route::get('/report', [ReportController::class, 'show']);
+
+// routes/api.php
+use App\Http\Controllers\ReportController;
+Route::post('/dashboard-data', [ReportController::class, 'fetchData']);
+```
+
+##### Vue Page Component
+
+**File: `resources/js/components/MyReportPage.vue`**
+```vue
+<template>
+  <div>
+    <div v-if="loading" class="text-center p-5"><div class="spinner-border"></div></div>
+    <dashboard-layout v-else :data="dashboardData" :params="dashboardParams">
+      <template v-slot:filters>
+        <div class="row">
+          <div class="col-md-4"><input type="date" class="form-control" v-model="filters.date"></div>
+          <div class="col-md-4">
+              <select class="form-select" v-model="filters.category">
+                  <option value="all">All Categories</option>
+                  <option value="tech">Tech</option>
+              </select>
+          </div>
+          <div class="col-md-4"><button class="btn btn-primary w-100" @click="applyFilters">Apply</button></div>
+        </div>
+      </template>
+      <template v-slot:default="{ data, params }">
+        <div class="row mb-4">
+          <div class="col-md-3"><kpi-card :data="data.serviceRequest" :params="params.serviceRequest" /></div>
+        </div>
+        <div class="row"><div class="col-12"><chart-block :data="data.soBarMix" :params="params.soBarMix" /></div></div>
+      </template>
+    </dashboard-layout>
+  </div>
+</template>
+<script>
+export default {
+  props: {
+    initialData: { type: Object, required: true },
+    initialParams: { type: Object, required: true },
+  },
+  data() {
+    return {
+      loading: false,
+      dashboardData: this.initialData,
+      dashboardParams: this.initialParams,
+      filters: { date: new Date().toISOString().slice(0, 10), category: 'all' },
+    };
+  },
+  methods: {
+    applyFilters() {
+      this.loading = true;
+      axios.post('/api/dashboard-data', this.filters)
+        .then(res => {
+          this.dashboardData = res.data.data;
+          this.dashboardParams = res.data.params;
+        })
+        .finally(() => { this.loading = false; });
+    },
+  },
+};
+</script>
+```
+
+##### Blade View
+
+**File: `resources/views/report.blade.php`**
+```html
+@extends('layouts.app')
+@section('content')
+<div class="container-fluid py-4">
+    <my-report-page
+        :initial-data='@json($dashboardObject['data'])'
+        :initial-params='@json($dashboardObject['params'])'
+    ></my-report-page>
+</div>
+@endsection
+```
+
+#### 4.2. Pattern B: The Real-Time Dashboard (Server-Sent Events)
+
+##### Laravel SSE Controller & Routes
+
+**File: `app/Http/Controllers/SseDashboardController.php`**
+```php
+<?php
+namespace App\Http\Controllers;
+
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Str;
+use Symfony\Component\HttpFoundation\StreamedResponse;
+
+class SseDashboardController extends Controller
+{
+    public function index() { return view('sse-dashboard'); }
+
+    public function stream(Request $request)
+    {
+        return new StreamedResponse(function() use ($request) {
+            $connectionId = (string) Str::uuid();
+            $initialFilters = $request->query();
+            Cache::put('sse_filters_'.$connectionId, $initialFilters, now()->addMinutes(30));
+
+            $this->sendSseMessage('connected', ['connectionId' => $connectionId]);
+
+            while (true) {
+                if (connection_aborted()) { break; }
+
+                $currentFilters = Cache::get('sse_filters_'.$connectionId);
+                if (!$currentFilters) { break; }
+
+                $dashboardObject = $this->getDashboardData($currentFilters);
+                $this->sendSseMessage('update', $dashboardObject);
+                sleep(5);
+            }
+        }, 200, [
+            'Content-Type' => 'text/event-stream',
+            'X-Accel-Buffering' => 'no',
+            'Cache-Control' => 'no-cache',
+            'Connection' => 'keep-alive',
+        ]);
+    }
+
+    public function updateFilters(Request $request)
+    {
+        $validated = $request->validate([
+            'connectionId' => 'required|string',
+            'filters' => 'required|array',
+        ]);
+        $key = 'sse_filters_'.$validated['connectionId'];
+        if (Cache::has($key)) {
+            Cache::put($key, $validated['filters'], now()->addMinutes(30));
+            return response()->json(['status' => 'success']);
+        }
+        return response()->json(['status' => 'error', 'message' => 'Stream not found.'], 404);
+    }
+
+    private function getDashboardData(array $filters): array { /* Same as in ReportController */ }
+
+    private function sendSseMessage(string $event, array $data): void
+    {
+        echo "event: {$event}\n";
+        echo "data: " . json_encode($data) . "\n\n";
+        if (ob_get_level() > 0) ob_flush();
+        flush();
+    }
+}
+```
+
+**Routes:**
+```php
+// routes/web.php
+use App\Http\Controllers\SseDashboardController;
+Route::get('/sse-dashboard', [SseDashboardController::class, 'index']);
+Route::get('/sse/dashboard-stream', [SseDashboardController::class, 'stream']);
+
+// routes/api.php
+Route::post('/update-stream-filters', [SseDashboardController::class, 'updateFilters']);
+```
+
+##### Vue Page Component
+
+**File: `resources/js/components/SseDashboardPage.vue`**
+```vue
+<template>
+  <div>
+    <div v-if="!isConnected" class="text-center p-5">
+        <div class="spinner-border"></div>
+        <p class="mt-2">Connecting to live stream...</p>
+    </div>
+    <dashboard-layout v-else :data="dashboardData" :params="dashboardParams">
+      <template v-slot:filters>
+        <div class="row">
+          <div class="col-md-4"><input type="date" class="form-control" v-model="filters.date"></div>
+          <div class="col-md-4"><select class="form-select" v-model="filters.category">...</select></div>
+          <div class="col-md-4"><button class="btn btn-primary w-100" @click="applyFilters" :disabled="isUpdating">Update</button></div>
+        </div>
+      </template>
+      <template v-slot:default="{ data, params }">
+         <div class="row mb-4">
+          <div class="col-md-3"><kpi-card :data="data.serviceRequest" :params="params.serviceRequest" /></div>
+        </div>
+        <div class="row"><div class="col-12"><chart-block :data="data.soBarMix" :params="params.soBarMix" /></div></div>
+      </template>
+    </dashboard-layout>
+  </div>
+</template>
+<script>
+export default {
+  data() {
+    return {
+      eventSource: null,
+      connectionId: null,
+      isConnected: false,
+      isUpdating: false,
+      dashboardData: {},
+      dashboardParams: {},
+      filters: { date: new Date().toISOString().slice(0, 10), category: 'all' },
+    };
+  },
+  mounted() { this.connectToSse(); },
+  beforeDestroy() { if (this.eventSource) this.eventSource.close(); },
+  methods: {
+    connectToSse() {
+      const params = new URLSearchParams(this.filters).toString();
+      this.eventSource = new EventSource(`/sse/dashboard-stream?${params}`);
+      this.eventSource.addEventListener('connected', e => {
+        this.connectionId = JSON.parse(e.data).connectionId;
+        this.isConnected = true;
+      });
+      this.eventSource.addEventListener('update', e => {
+        const data = JSON.parse(e.data);
+        this.dashboardData = data.data;
+        this.dashboardParams = data.params;
+      });
+      this.eventSource.onerror = () => { this.isConnected = false; this.eventSource.close(); };
+    },
+    applyFilters() {
+      if (!this.connectionId) return;
+      this.isUpdating = true;
+      axios.post('/api/update-stream-filters', {
+        connectionId: this.connectionId,
+        filters: this.filters
+      }).finally(() => { this.isUpdating = false; });
+    },
+  },
+};
+</script>
+```
+
+##### Blade View
+
+**File: `resources/views/sse-dashboard.blade.php`**
+```html
+@extends('layouts.app')
+@section('content')
+<div class="container-fluid py-4">
+    <sse-dashboard-page></sse-dashboard-page>
+</div>
+@endsection
+```
+
+---
+
+### Part 5: Project Setup & Configuration
+
+#### 5.1. Dependencies
+Ensure you have the necessary NPM packages installed.
+```bash
+npm install
+npm install apexcharts vue-apexcharts --save
+```
+
+#### 5.2. Global Vue Component Registration (`app.js`)
+
+**File: `resources/js/app.js`**
+```javascript
+require('./bootstrap'); // Includes Axios by default
+window.Vue = require('vue').default;
+
+// --- Third-Party Libraries ---
+import VueApexCharts from 'vue-apexcharts';
+Vue.use(VueApexCharts);
+Vue.component('apexchart', VueApexCharts);
+
+// --- Register Your Custom Dashboard Components ---
+Vue.component('chart-block', require('./components/ChartBlock.vue').default);
+Vue.component('kpi-card', require('./components/KpiCard.vue').default);
+Vue.component('dashboard-layout', require('./components/DashboardLayout.vue').default);
+Vue.component('my-report-page', require('./components/MyReportPage.vue').default);
+Vue.component('sse-dashboard-page', require('./components/SseDashboardPage.vue').default);
+
+// --- Initialize Vue App ---
+const app = new Vue({
+    el: '#app',
+});
+```
+Finally, compile your assets:
+```bash
+npm run dev
+```

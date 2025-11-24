@@ -1,0 +1,489 @@
+---
+title: ETL Quickstart
+---
+
+## ETL Service Integration & User Guide
+
+This document provides a complete guide for using the Schema-Driven ETL Service. It is divided into two main sections:
+
+1.  **User Guide:** For non-technical users who are responsible for preparing and filling out the spreadsheet templates for data import.
+2.  **Developer Guide:** For developers who need to set up, integrate, and extend the service within the Laravel application.
+
+---
+---
+
+## Part 1: User Guide
+
+This section explains how to correctly fill in the provided Excel or CSV templates for data import.
+
+### **(English)**
+
+#### **1. Introduction**
+
+The import template is a standard file, typically Excel (`.xlsx`) but also supported as CSV (`.csv`), designed to be simple and intuitive. Excel templates contain two worksheets:
+*   **`data`**: This is where you enter the information to be imported.
+*   **`guide`**: This sheet contains a summary of these instructions.
+
+#### **2. The `data` Worksheet**
+
+The `data` worksheet contains columns that correspond to the fields in the database. The column headers are human-readable (e.g., "Full Name" instead of "user_name").
+
+#### **3. The Golden Rule: Entering Data with Multiple Items**
+
+The biggest challenge is entering a single record (like a User) that has multiple related items (like multiple Addresses). We handle this with a simple "parent-child row" system.
+
+**Rule:** The first row for a record contains all its main information. Additional rows for its sub-items are placed directly below, leaving the main information columns blank.
+
+**Example: A User with Two Addresses**
+
+1.  **First Row (The Parent):** Fill in all of the user's information (`User ID`, `Full Name`, etc.) AND the details for their **first** address.
+
+| User ID | Full Name | ... | Address Street | Address City |
+| :--- | :--- | :-- | :--- | :--- |
+| **USR-001** | John Doe | ... | 123 Main St | Anytown |
+
+2.  **Second Row (The Child):** Add a new row directly below. **DO NOT** repeat the user's main information. Only fill in the columns for the **second** address.
+
+| User ID | Full Name | ... | Address Street | Address City |
+| :--- | :--- | :-- | :--- | :--- |
+| USR-001 | John Doe | ... | 123 Main St | Anytown |
+| | | ... | **456 Shipping Blvd** | **Otherville** |
+
+The system will see the blank `User ID` and know that "456 Shipping Blvd" is another address belonging to "John Doe".
+
+**Note on CSV Files:** If you are using a `.csv` file, the same rule applies. An empty parent column is represented by an empty space between commas. For example, a child row might start with `,,,,,,,` to skip the first 7 columns.
+
+#### **4. Do's and Don'ts**
+
+*   **DO** fill in the data on the `data` worksheet.
+*   **DO** start a new record by entering a value in the primary key column (e.g., `User ID`).
+*   **DO** leave parent columns blank when adding a second, third, or more sub-items to a record.
+*   **DON'T** change, rename, or delete the column headers in the first row.
+*   **DON'T** change the names of the worksheets in Excel files.
+*   **DON'T** leave completely empty rows between your data records.
+
+---
+
+### **(Bahasa Indonesia)**
+
+## Bagian 1: Panduan Pengguna
+
+Bagian ini menjelaskan cara mengisi templat Excel atau CSV untuk impor data dengan benar.
+
+#### **1. Pendahuluan**
+
+Templat impor adalah file standar, umumnya Excel (`.xlsx`) namun juga bisa berupa file CSV (`.csv`), yang didesain agar sederhana dan intuitif. Templat Excel berisi dua lembar kerja (worksheet):
+*   **`data`**: Tempat Anda memasukkan informasi yang akan diimpor.
+*   **`guide`**: Berisi ringkasan dari instruksi ini.
+
+#### **2. Worksheet `data`**
+
+Worksheet `data` berisi kolom-kolom yang sesuai dengan field di dalam database. Judul kolom (header) dibuat agar mudah dibaca (contoh: "Nama Lengkap" bukan "user_name").
+
+#### **3. Aturan Emas: Memasukkan Data dengan Sub-Item Ganda**
+
+Tantangan terbesar adalah memasukkan satu data (seperti Pengguna) yang memiliki beberapa item terkait (seperti beberapa Alamat). Kami menanganinya dengan sistem "baris induk-anak" yang sederhana.
+
+**Aturan:** Baris pertama untuk sebuah data berisi semua informasi utamanya. Baris tambahan untuk sub-itemnya diletakkan tepat di bawahnya, dengan membiarkan kolom informasi utama tetap kosong.
+
+**Contoh: Seorang Pengguna dengan Dua Alamat**
+
+1.  **Baris Pertama (Induk):** Isi semua informasi pengguna (`User ID`, `Nama Lengkap`, dll.) DAN detail untuk alamat **pertama**-nya.
+
+| User ID | Nama Lengkap | ... | Jalan Alamat | Kota Alamat |
+| :--- | :--- | :-- | :--- | :--- |
+| **USR-001** | Budi Santoso | ... | Jl. Merdeka 123 | Jakarta |
+
+2.  **Baris Kedua (Anak):** Tambahkan baris baru tepat di bawahnya. **JANGAN** ulangi informasi utama pengguna. Hanya isi kolom-kolom untuk alamat **kedua**.
+
+| User ID | Nama Lengkap | ... | Jalan Alamat | Kota Alamat |
+| :--- | :--- | :-- | :--- | :--- |
+| USR-001 | Budi Santoso | ... | Jl. Merdeka 123 | Jakarta |
+| | | ... | **Jl. Pengiriman 456** | **Bandung** |
+
+Sistem akan melihat `User ID` yang kosong dan tahu bahwa "Jl. Pengiriman 456" adalah alamat lain milik "Budi Santoso".
+
+**Catatan untuk File CSV:** Jika Anda menggunakan file `.csv`, aturan yang sama berlaku. Kolom induk yang kosong direpresentasikan oleh spasi kosong di antara koma. Sebagai contoh, baris anak bisa dimulai dengan `,,,,,,,` untuk melewati 7 kolom pertama.
+
+#### **4. Yang Boleh dan Tidak Boleh Dilakukan**
+
+*   **BOLEH** mengisi data pada worksheet `data`.
+*   **BOLEH** memulai data baru dengan mengisi nilai di kolom kunci utama (contoh: `User ID`).
+*   **BOLEH** mengosongkan kolom induk saat menambahkan sub-item kedua, ketiga, dan seterusnya.
+*   **JANGAN** mengubah, mengganti nama, atau menghapus judul kolom di baris pertama.
+*   **JANGAN** mengubah nama worksheet di file Excel.
+*   **JANGAN** menyisakan baris yang benar-benar kosong di antara baris data Anda.
+
+---
+---
+
+## Part 2: Developer Guide
+
+This section provides a technical overview for developers on how to set up, use, and extend the ETL service.
+
+### **(English)**
+
+#### **1. Setup and Configuration**
+
+1.  **File Structure:** Ensure your project uses the following namespaces and locations for ETL-related classes:
+*   **Jobs:** `App\Jobs\Etl\*`
+*   **Models:** `App\Models\Etl\*`
+*   **Vue Components:** `resources/js/components/etl/*`
+*   *(The core service remains in `App\Services\Etl\*`)*
+
+2.  **Create a Schema File:** In `config/etl_schemas/`, create a `.yml` file for your model (e.g., `product_schema.yml`). This is the most critical step.
+
+3.  **Register Service Provider:** Ensure `App\Providers\EtlServiceProvider::class` is in the `providers` array in `config/app.php`.
+
+4.  **Register Facade Alias:** In `config/app.php`, add `'Etl' => App\Services\Etl\Etl::class,` to the `aliases` array.
+
+5.  **Configure Queue:** Ensure your queue driver (e.g., Redis, Database) is configured in `.env` and run the queue worker: `php artisan queue:work`.
+
+6.  **Clear Cache:** Run `php artisan config:clear`.
+
+#### **2. The ETL Schema File**
+
+The schema file is the "single source of truth" that drives the entire ETL process. It defines the data structure, destination model, validation, and more.
+
+**Location:** `config/etl_schemas/`
+**Example:** `user_schema.yml`
+
+```yaml
+# The destination Eloquent model class. REQUIRED.
+model: App\Models\User
+
+# The unique field used to identify a document. REQUIRED.
+primary_key: _id
+
+# A block defining each field in the document.
+fields:
+  # Field key (e.g., 'name')
+  name:
+    # Data type for casting during import (string, integer, boolean, datetime, etc.)
+    type: string
+    # Human-readable spreadsheet header. Falls back to the field key if omitted.
+    header: 'Full Name'
+    # Laravel validation rules. '{{id}}' is a placeholder for the record ID on updates.
+    validator: 'required|string|max:255'
+    # UI behavior for edit/create forms (true, false, 'RO' for Read-Only, 'VO' for View-Only)
+    edit: true
+    create: true
+    # Visibility flag for API resources (true/false)
+    api: true
+
+  # Example of a nested array of objects
+  addresses:
+    type: array
+    # Defines the structure of each object inside the array
+    object:
+      street: { type: string, header: 'Address Street' }
+      city: { type: string, header: 'Address City' }
+```
+
+#### **3. Backend Integration**
+
+The backend is primarily composed of an `EtlController` that dispatches background jobs. The controller is generic and does not need to be modified to support new data models.
+
+*   **API Routes:** Are defined in `routes/api.php` under the `/api/etl` prefix. They handle file uploads, previews, commits, and progress streaming.
+*   **Jobs:** The core logic resides in `App\Jobs\Etl\*`.
+*   `ProcessImportFileJob`: Parses the uploaded file into the buffer collection.
+*   `CommitImportJob`: Moves data from the buffer to the final destination, running it through the pre-commit pipeline.
+*   `DeleteEtlBufferJob`: Cleans up temporary data after the import is complete.
+
+#### **4. Frontend Integration**
+
+The `EtlImportModal.vue` component provides the complete user interface for the import process.
+
+**How to Use It in a Parent Component:**
+
+1.  **Import and Register:** In your parent Vue component (e.g., `UsersPage.vue`), import and register the modal.
+
+```javascript
+import EtlImportModal from '../components/etl/EtlImportModal.vue';
+
+export default {
+  components: {
+    EtlImportModal
+  },
+  data() {
+    return {
+      showImportModal: false
+    };
+  }
+}
+    ```
+
+2.  **Add a Trigger Button:** Create a button that sets `showImportModal` to `true`.
+
+```html
+<b-button @click="showImportModal = true">Import Data</b-button>
+    ```
+
+3.  **Add the Modal Component:** Place the component in your template. Use `v-model` to control its visibility and pass the `schema-name` prop, which is crucial for telling the backend which rules to use.
+
+```html
+<etl-import-modal
+  v-model="showImportModal"
+  schema-name="user_schema"
+/>
+    ```
+*   The value of `schema-name` (`user_schema`) must correspond to the filename in `config/etl_schemas/` (without the `.yml` extension).
+
+---
+
+### **(Bahasa Indonesia)**
+
+## Bagian 2: Panduan Developer
+
+Bagian ini menyediakan gambaran teknis bagi developer tentang cara mengatur, menggunakan, dan mengembangkan layanan ETL.
+
+#### **1. Pengaturan dan Konfigurasi**
+
+1.  **Struktur File:** Pastikan proyek Anda menggunakan namespace dan lokasi berikut untuk kelas-kelas terkait ETL:
+*   **Jobs:** `App\Jobs\Etl\*`
+*   **Models:** `App\Models\Etl\*`
+*   **Vue Components:** `resources/js/components/etl/*`
+*   *(Layanan inti tetap berada di `App\Services\Etl\*`)*
+
+2.  **Buat File Skema:** Di dalam `config/etl_schemas/`, buat sebuah file `.yml` untuk model Anda (contoh: `product_schema.yml`). Ini adalah langkah paling krusial.
+
+3.  **Daftarkan Service Provider:** Pastikan `App\Providers\EtlServiceProvider::class` ada di dalam array `providers` di `config/app.php`.
+
+4.  **Daftarkan Alias Facade:** Di `config/app.php`, tambahkan `'Etl' => App\Services\Etl\Etl::class,` ke dalam array `aliases`.
+
+5.  **Konfigurasi Antrean (Queue):** Pastikan driver antrean Anda (misalnya, Redis, Database) telah dikonfigurasi di `.env` dan jalankan worker-nya: `php artisan queue:work`.
+
+6.  **Hapus Cache:** Jalankan `php artisan config:clear`.
+
+#### **2. File Skema ETL**
+
+File skema adalah "sumber kebenaran tunggal" yang menggerakkan seluruh proses ETL. File ini mendefinisikan struktur data, model tujuan, validasi, dan lainnya.
+
+**Lokasi:** `config/etl_schemas/`
+**Contoh:** `user_schema.yml`
+
+```yaml
+# Kelas model Eloquent tujuan. WAJIB DIISI.
+model: App\Models\User
+
+# Field unik yang digunakan untuk mengidentifikasi dokumen. WAJIB DIISI.
+primary_key: _id
+
+# Blok yang mendefinisikan setiap field dalam dokumen.
+fields:
+  # Kunci field (contoh: 'name')
+  name:
+    # Tipe data untuk konversi (casting) saat impor (string, integer, boolean, datetime, dll.)
+    type: string
+    # Header spreadsheet yang mudah dibaca. Akan menggunakan kunci field jika tidak diisi.
+    header: 'Nama Lengkap'
+    # Aturan validasi Laravel. '{{id}}' adalah placeholder untuk ID record saat update.
+    validator: 'required|string|max:255'
+    # Perilaku UI untuk form edit/create (true, false, 'RO' untuk Read-Only, 'VO' untuk View-Only)
+    edit: true
+    create: true
+    # Penanda visibilitas untuk API resources (true/false)
+    api: true
+
+  # Contoh array dari objek
+  addresses:
+    type: array
+    # Mendefinisikan struktur dari setiap objek di dalam array
+    object:
+      street: { type: string, header: 'Jalan Alamat' }
+      city: { type: string, header: 'Kota Alamat' }
+```
+
+#### **3. Integrasi Backend**
+
+Backend utamanya terdiri dari sebuah `EtlController` yang mengirimkan (dispatch) job ke antrean. Controller ini bersifat generik dan tidak perlu diubah untuk mendukung model data baru.
+
+*   **Rute API:** Didefinisikan di `routes/api.php` di bawah prefix `/api/etl`. Rute ini menangani unggah file, pratinjau, komit, dan streaming progres.
+*   **Jobs:** Logika inti berada di `App\Jobs\Etl\*`.
+*   `ProcessImportFileJob`: Mem-parsing file yang diunggah ke dalam koleksi buffer.
+*   `CommitImportJob`: Memindahkan data dari buffer ke tujuan akhir, menjalankannya melalui pipeline pra-komit.
+*   `DeleteEtlBufferJob`: Membersihkan data sementara setelah impor selesai.
+
+#### **4. Integrasi Frontend**
+
+Komponen `EtlImportModal.vue` menyediakan antarmuka pengguna lengkap untuk proses impor.
+
+**Cara Menggunakannya di Komponen Induk:**
+
+1.  **Impor dan Daftarkan:** Di dalam komponen Vue induk Anda (contoh: `UsersPage.vue`), impor dan daftarkan modal.
+
+```javascript
+import EtlImportModal from '../components/etl/EtlImportModal.vue';
+
+export default {
+  components: {
+    EtlImportModal
+  },
+  data() {
+    return {
+      showImportModal: false
+    };
+  }
+}
+    ```
+
+2.  **Tambahkan Tombol Pemicu:** Buat sebuah tombol yang akan mengubah `showImportModal` menjadi `true`.
+
+```html
+<b-button @click="showImportModal = true">Impor Data</b-button>
+    ```
+
+3.  **Tambahkan Komponen Modal:** Letakkan komponen di dalam template Anda. Gunakan `v-model` untuk mengontrol visibilitasnya dan teruskan prop `schema-name`, yang sangat penting untuk memberitahu backend aturan mana yang harus digunakan.
+
+```html
+<etl-import-modal
+  v-model="showImportModal"
+  schema-name="user_schema"
+/>
+    ```
+*   Nilai dari `schema-name` (`user_schema`) harus sesuai dengan nama file di `config/etl_schemas/` (tanpa ekstensi `.yml`).
+
+## Addendum
+
+### Part 1: For the User & Developer Guide
+
+*   **Action:** Copy and paste the entire block below at the very end of your `## ETL Service Integration & User Guide` file.
+
+---
+---
+
+### **Addendum: Advanced Frontend Integration**
+
+The `EtlImportModal.vue` component has been updated to provide a more flexible and powerful integration method. This section details the changes and the new recommended way to use the component.
+
+#### **(English)**
+
+##### **1. Summary of Changes**
+
+To improve reusability and give developers more control, the following changes were made:
+
+*   **Programmatic Control (via `ref`):** The modal is no longer controlled by a `v-model`. Instead, you will access it via a `ref` and call public `show()` and `hide()` methods to control its visibility. This allows for more complex interactions to be orchestrated from the parent component.
+*   **Event Emission:** The modal now emits events like `@shown` and `@hidden`. This allows the parent component to react to the modal's lifecycle, for example, to refresh a data table after an import is successfully completed and the modal closes.
+*   **Configurable API Endpoint (`baseUrl` Prop):** The API endpoints are no longer hardcoded. A new required `baseUrl` prop must be passed to the component, making it truly reusable for different data models that might have different API route prefixes.
+
+##### **2. Updated Usage Guide**
+
+Here is the new, recommended way to integrate the `EtlImportModal` into a parent component.
+
+**In your parent component's template (e.g., `UsersPage.vue`):**
+
+```html
+<template>
+  <b-container>
+    <!-- 1. The button now calls a method instead of changing data -->
+    <b-button variant="primary" @click="openImportModal">
+      Import Users
+    </b-button>
+
+    <!--
+      2. The modal component is now referenced using 'ref'.
+         - 'v-model' is no longer used.
+         - The 'base-url' prop is now required.
+         - You can listen for events like '@hidden'.
+    -->
+    <etl-import-modal
+      ref="importModal"
+      schema-name="user_schema"
+      base-url="/api/etl"
+      @hidden="onImportModalClosed"
+    />
+  </b-container>
+</template>
+```
+
+**In your parent component's script:**
+
+```javascript
+import EtlImportModal from '../components/etl/EtlImportModal.vue';
+
+export default {
+  components: {
+    EtlImportModal
+  },
+  methods: {
+    // 3. This method programmatically opens the modal
+    openImportModal() {
+      // Access the component via its ref and call its public 'show' method
+      this.$refs.importModal.show();
+    },
+
+    // 4. This method is an event handler for when the modal closes
+    onImportModalClosed() {
+      console.log('The import modal has been hidden.');
+      // This is a great place to refresh your data table, e.g., this.fetchUsers();
+    }
+  }
+}
+```
+
+---
+
+#### **(Bahasa Indonesia)**
+
+##### **1. Ringkasan Perubahan**
+
+Untuk memberikan fleksibilitas dan kontrol yang lebih besar bagi developer, perubahan berikut telah dilakukan pada komponen `EtlImportModal.vue`:
+
+*   **Kontrol Terprogram (via `ref`):** Modal tidak lagi dikontrol oleh `v-model`. Sebagai gantinya, Anda akan mengaksesnya melalui `ref` dan memanggil method publik `show()` dan `hide()` untuk mengontrol visibilitasnya. Ini memungkinkan interaksi yang lebih kompleks untuk diatur dari komponen induk.
+*   **Emisi Event:** Modal sekarang memancarkan (emit) event seperti `@shown` dan `@hidden`. Hal ini memungkinkan komponen induk untuk bereaksi terhadap siklus hidup modal, misalnya, untuk me-refresh tabel data setelah proses impor selesai dan modal tertutup.
+*   **Endpoint API yang Dapat Dikonfigurasi (Prop `baseUrl`):** Endpoint API tidak lagi di-hardcode. Sebuah prop baru yang wajib diisi, `baseUrl`, harus diberikan ke komponen, membuatnya benar-benar dapat digunakan kembali untuk model data berbeda yang mungkin memiliki prefix rute API yang berbeda.
+
+##### **2. Panduan Penggunaan yang Diperbarui**
+
+Berikut adalah cara baru yang direkomendasikan untuk mengintegrasikan `EtlImportModal` ke dalam komponen induk.
+
+**Di dalam template komponen induk Anda (contoh: `UsersPage.vue`):**
+
+```html
+<template>
+  <b-container>
+    <!-- 1. Tombol sekarang memanggil sebuah method, bukan mengubah data -->
+    <b-button variant="primary" @click="bukaModalImpor">
+      Impor Pengguna
+    </b-button>
+
+    <!--
+      2. Komponen modal sekarang direferensikan menggunakan 'ref'.
+         - 'v-model' tidak lagi digunakan.
+         - Prop 'base-url' sekarang wajib diisi.
+         - Anda dapat mendengarkan event seperti '@hidden'.
+    -->
+    <etl-import-modal
+      ref="modalImpor"
+      schema-name="user_schema"
+      base-url="/api/etl"
+      @hidden="saatModalImporDitutup"
+    />
+  </b-container>
+</template>
+```
+
+**Di dalam script komponen induk Anda:**
+
+```javascript
+import EtlImportModal from '../components/etl/EtlImportModal.vue';
+
+export default {
+  components: {
+    EtlImportModal
+  },
+  methods: {
+    // 3. Method ini membuka modal secara terprogram
+    bukaModalImpor() {
+      // Akses komponen melalui ref-nya dan panggil method publik 'show'
+      this.$refs.modalImpor.show();
+    },
+
+    // 4. Method ini adalah event handler saat modal ditutup
+    saatModalImporDitutup() {
+      console.log('Modal impor telah ditutup.');
+      // Ini adalah tempat yang tepat untuk me-refresh tabel data Anda, contoh: this.muatUlangDataPengguna();
+    }
+  }
+}
+```

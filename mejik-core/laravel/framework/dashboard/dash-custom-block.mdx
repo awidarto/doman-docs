@@ -1,0 +1,269 @@
+---
+title: Custom Dashboard Component Block
+---
+
+### Extending the System: Creating a Custom `EChartBlock.vue` Widget
+
+This guide demonstrates how to add a new widget based on a different charting library (Apache ECharts) while adhering to our established `data`/`params` API. This is useful when you need chart types not available in ApexCharts, such as Sankey diagrams, graph visualizations, or advanced 3D plots.
+
+The process involves four key steps:
+1.  **Install** the new libraries.
+2.  **Create** the Vue component, translating our unified API to the ECharts format.
+3.  **Register** the new component globally.
+4.  **Use** the new component in your dashboard.
+
+---
+
+#### Step 1: Install ECharts Dependencies
+
+First, add Apache ECharts and its official Vue 2 wrapper (`vue-echarts`) to your project.
+
+```bash
+npm install echarts vue-echarts --save
+```
+*(Note: For Vue 2, you typically need `vue-echarts@5`. NPM should resolve this correctly.)*
+
+---
+
+#### Step 2: Create the `EChartBlock.vue` Component
+
+This is the core of the integration. We will create a new Vue component that acts as an adapter, translating our generic `params` object into the specific, and often more complex, configuration object that ECharts requires.
+
+**File: `resources/js/components/EChartBlock.vue`**
+
+```vue
+<template>
+  <div class="card h-100">
+    <div class="card-header d-flex justify-content-between align-items-center">
+      <h5 class="card-title mb-0">{{ params.title || 'ECharts Chart' }}</h5>
+    </div>
+    <div class="card-body">
+      <!-- v-chart is the component from vue-echarts -->
+      <!-- The 'autoresize' prop is a handy feature of the wrapper -->
+      <v-chart class="chart" :option="chartOption" autoresize />
+    </div>
+  </div>
+</template>
+
+<script>
+// 1. Import vue-echarts and the core ECharts library
+import { use } from 'echarts/core';
+import { CanvasRenderer } from 'echarts/renderers';
+import { PieChart, BarChart, LineChart } from 'echarts/charts';
+import {
+  TitleComponent,
+  TooltipComponent,
+  LegendComponent,
+  GridComponent,
+} from 'echarts/components';
+import VChart from 'vue-echarts';
+
+// 2. Register the ECharts components you plan to use (for tree-shaking)
+use([
+  CanvasRenderer,
+  PieChart,
+  BarChart,
+  LineChart,
+  TitleComponent,
+  TooltipComponent,
+  LegendComponent,
+  GridComponent,
+]);
+
+export default {
+  components: {
+    VChart,
+  },
+  props: {
+    // 3. We use the EXACT SAME props as our other widgets
+    data: { type: Array, required: true },
+    params: { type: Object, required: true },
+  },
+  computed: {
+    /**
+     * The "Translator": This computed property builds the ECharts
+     * configuration object from our simplified `data` and `params` props.
+     */
+    chartOption() {
+      // Start with a base configuration for a consistent look & feel
+      let baseOptions = {
+        title: {
+          text: this.params.title, // ECharts has a built-in title
+          left: 'center',
+          textStyle: {
+              fontSize: 16,
+              fontWeight: 'normal'
+          }
+        },
+        tooltip: {
+          trigger: 'item',
+        },
+        legend: {
+          orient: 'vertical',
+          left: 'left',
+          show: this.params.showLegend !== false, // Default to true
+        },
+        // Main data series configuration
+        series: this.data.map(seriesItem => ({
+          // Map our generic API to ECharts' specific keys
+          name: seriesItem.name,
+          data: seriesItem.data,
+          // ECharts often requires a 'type' per series
+          type: this.params.type || 'bar',
+          // Default styling for pie charts
+          radius: this.params.type === 'pie' ? '50%' : undefined,
+        })),
+      };
+
+      // Add axis configuration for non-pie charts
+      if (this.params.type !== 'pie' && this.params.categories) {
+          baseOptions.xAxis = { type: 'category', data: this.params.categories };
+          baseOptions.yAxis = { type: 'value' };
+          baseOptions.grid = { left: '3%', right: '4%', bottom: '3%', containLabel: true };
+          baseOptions.tooltip.trigger = 'axis'; // More suitable for bar/line charts
+      }
+
+      // "Escape Hatch": Just like before, allow for deep, custom overrides.
+      // This is crucial for accessing advanced ECharts features.
+      if (this.params.options) {
+        const merge = (target, source) => {
+            for (const key in source) {
+                if (source[key] instanceof Object && key in target) {
+                    Object.assign(source[key], merge(target[key], source[key]))
+                }
+            }
+            Object.assign(target || {}, source)
+            return target
+        }
+        return merge(baseOptions, this.params.options);
+      }
+
+      return baseOptions;
+    },
+  },
+};
+</script>
+
+<style scoped>
+/* ECharts needs a defined height on its container to render */
+.chart {
+  height: 100%;
+  min-height: 300px;
+}
+</style>
+```
+
+---
+
+#### Step 3: Register the New Component Globally
+
+For the new component to be recognized, you must register it in your main JavaScript file alongside the others.
+
+**File: `resources/js/app.js`**
+```javascript
+// ... (keep all existing registrations)
+
+// --- Register Your Custom Dashboard Components ---
+Vue.component('chart-block', require('./components/ChartBlock.vue').default);
+Vue.component('kpi-card', require('./components/KpiCard.vue').default);
+Vue.component('e-chart-block', require('./components/EChartBlock.vue').default); // Add this line
+
+// ... (rest of the file)
+```
+
+After adding this line, recompile your assets:
+```bash
+npm run dev
+```
+
+---
+
+#### Step 4: Use the `EChartBlock` in Your Dashboard
+
+You can now use `<e-chart-block>` just like any other widget. Let's add it to our "Standard Live Dashboard" (`MyReportPage.vue`) to show how it fits in.
+
+##### Update the Laravel Controller
+
+First, add some data and params specifically for an ECharts pie chart in your controller.
+
+**File: `app/Http/Controllers/ReportController.php`**
+```php
+// Inside the getDashboardData() method...
+private function getDashboardData(array $filters): array
+{
+    // ... (keep your existing data and params)
+
+    // Add new data and params for the ECharts widget
+    $echartParams = [
+        'title' => 'Task Distribution (ECharts)',
+        'type' => 'pie',
+        // Use the 'options' escape hatch for advanced configuration
+        'options' => [
+            'legend' => [
+                'orient' => 'horizontal',
+                'bottom' => 'bottom',
+            ],
+            'series' => [
+                [
+                    'radius' => ['40%', '70%'], // Make it a donut chart
+                    'avoidLabelOverlap' => false,
+                    'label' => ['show' => false, 'position' => 'center'],
+                    'emphasis' => [
+                        'label' => ['show' => true, 'fontSize' => '20', 'fontWeight' => 'bold']
+                    ]
+                ]
+            ]
+        ]
+    ];
+
+    $echartData = [
+        [
+            'name' => 'Tasks',
+            // For ECharts pie, data format is [{value: 335, name: 'Support'}, ...]
+            'data' => [
+                ['value' => 1048, 'name' => 'Feature Dev'],
+                ['value' => 735, 'name' => 'Bug Fixes'],
+                ['value' => 580, 'name' => 'Support'],
+                ['value' => 484, 'name' => 'Meetings'],
+            ]
+        ]
+    ];
+
+    // Merge the new data into the final object
+    return [
+        'params' => array_merge([ /* Your existing params... */ ], ['taskPieChart' => $echartParams]),
+        'data' => array_merge([ /* Your existing data... */ ], ['taskPieChart' => $echartData]),
+    ];
+}
+```
+
+##### Update the Vue Page Component
+
+Now, simply add the `<e-chart-block>` tag to your layout.
+
+**File: `resources/js/components/MyReportPage.vue`**
+```html
+<!-- Inside the <template v-slot:default="{ data, params }"> -->
+
+    <!-- ... (existing rows for KPIs and ChartBlock) ... -->
+
+    <!-- Add a new row for our ECharts widget -->
+    <div class="row">
+      <div class="col-md-6 mt-4">
+        <!-- It uses the same API, making it a simple drop-in! -->
+        <e-chart-block :data="data.taskPieChart" :params="params.taskPieChart" />
+      </div>
+      <div class="col-md-6 mt-4">
+        <!-- You could even put an ApexCharts block right next to it -->
+        <chart-block :data="data.soBarMix" :params="params.soBarMix" />
+      </div>
+    </div>
+
+<!-- ... (end of template) ... -->
+```
+
+### Key Takeaways
+
+*   **The Power of the Unified API:** Because we stuck to the `data` and `params` props, adding a completely new widget from a different library required **zero changes** to the `DashboardLayout` or the page's data flow logic.
+*   **The Adapter Pattern:** The new `EChartBlock.vue` component acts as an *Adapter*. It translates our simple, standardized API into the complex, specific API required by ECharts.
+*   **Infinite Extensibility:** You can now follow this exact pattern to create `<GoogleChartBlock>`, `<DataTableBlock>`, `<LeafletMapBlock>`, or any other custom widget you can imagine. The core architecture remains clean and stable.

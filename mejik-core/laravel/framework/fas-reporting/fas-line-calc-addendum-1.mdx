@@ -1,0 +1,340 @@
+---
+title: Addendum A - Formula Engine
+---
+
+### **FasReporting Subsystem Documentation - Addendum A**
+
+### Version: 1.1
+### Date: Nov 23, 2025
+### Change: Architectural Refactoring of Formula Engine
+
+---
+
+### **1. Overview of Changes**
+
+This addendum details the refactoring of the `FasReporting` subsystem to isolate the formula parsing and execution logic into a dedicated, reusable service class. This change enhances modularity, testability, and adherence to the Single Responsibility Principle.
+
+The `LineReportService` is now a high-level orchestrator, delegating all formula-based calculations to the new `FormulaEngineService`.
+
+### **2. Updated Directory Structure**
+
+The directory structure for the core services is now:
+
+```
+app/
+└── Services/
+    └── FasReporting/
+        ├── FormulaEngineService.php         <-- NEW
+        ├── LineReportService.php            <-- REFACTORED
+        └── ExcelTemplateImporterService.php <-- (Unchanged)
+```
+
+### **3. New Core Component: `FormulaEngineService`**
+
+A new service has been introduced to encapsulate all formula-related logic.
+
+#### **3.1. Purpose and Responsibility**
+
+The `FormulaEngineService` is solely responsible for:
+*   Parsing a given formula string (e.g., `SUM(KEY1, KEY2)`).
+*   Identifying the requested function (e.g., `SUM`, `AVG`, `SUB`).
+*   Executing the corresponding calculation logic.
+*   Performing necessary database queries for formula-based aggregations (e.g., `AVG(6000..6999)`).
+*   Returning a single numerical result.
+
+It is designed to be stateless regarding the report generation process; it receives all necessary context and data (`calculatedValues`) for each execution call.
+
+#### **3.2. `FormulaEngineService` Source Code**
+
+**File:** `app/Services/FasReporting/FormulaEngineService.php`
+
+```php
+<?php
+
+namespace App\Services\FasReporting;
+
+use App\Models\GeneralLedgerEntry;
+use Carbon\Carbon;
+use Illuminate\Support\Facades\Log;
+
+class FormulaEngineService
+{
+    /**
+     * The main entry point for the formula engine.
+     *
+     * @param string $formula The formula string, e.g., "SUM(KEY1, -KEY2)" or "AVG(6000..6999)"
+     * @param array $context Contains contextual data like company_id, start_date, end_date
+     * @param array $calculatedValues The running list of already calculated line values (by their Line Key)
+     * @return float The result of the calculation.
+     */
+    public function execute(string $formula, array $context, array $calculatedValues): float
+    {
+        preg_match('/^(\w+)\((.*?)\)$/', $formula, $matches);
+
+        if (count($matches) !== 3) {
+            Log::warning("FasReporting: Invalid formula format encountered: {$formula}");
+            return 0.0;
+        }
+
+        $functionName = strtolower($matches[1]);
+        $rawArgs = $matches[2];
+
+        switch ($functionName) {
+            case 'sum':
+                return str_contains($rawArgs, '..')
+                    ? $this->handleSumRange($rawArgs, $context)
+                    : $this->handleSumKeys($rawArgs, $calculatedValues);
+            case 'avg':
+                return $this->handleAvgRange($rawArgs, $context);
+            case 'add':
+                return $this->handleAdd($rawArgs, $calculatedValues);
+            case 'sub':
+                return $this->handleSub($rawArgs, $calculatedValues);
+            case 'mul':
+                return $this->handleMul($rawArgs, $calculatedValues);
+            default:
+                Log::warning("FasReporting: Unsupported formula function: {$functionName}");
+                return 0.0;
+        }
+    }
+
+    // --- Formula Handlers ---
+
+    private function handleSumKeys(string $rawArgs, array $calculatedValues): float
+    {
+        $keys = explode(',', str_replace(' ', '', $rawArgs));
+        $sum = 0.0;
+        foreach ($keys as $key) {
+            $multiplier = str_starts_with($key, '-') ? -1 : 1;
+            $key = ltrim($key, '-');
+            $sum += ($calculatedValues[$key] ?? 0.0) * $multiplier;
+        }
+        return $sum;
+    }
+
+    private function handleAdd(string $rawArgs, array $calculatedValues): float
+    {
+        $keys = explode(',', str_replace(' ', '', $rawArgs));
+        if (count($keys) !== 2) return 0.0;
+        $val1 = $calculatedValues[$keys[0]] ?? 0.0;
+        $val2 = $calculatedValues[$keys[1]] ?? 0.0;
+        return $val1 + $val2;
+    }
+
+    private function handleSub(string $rawArgs, array $calculatedValues): float
+    {
+        $keys = explode(',', str_replace(' ', '', $rawArgs));
+        if (count($keys) !== 2) return 0.0;
+        $val1 = $calculatedValues[$keys[0]] ?? 0.0;
+        $val2 = $calculatedValues[$keys[1]] ?? 0.0;
+        return $val1 - $val2;
+    }
+
+    private function handleMul(string $rawArgs, array $calculatedValues): float
+    {
+        $keys = explode(',', str_replace(' ', '', $rawArgs));
+        if (empty($keys[0])) return 0.0;
+
+        $product = 1.0;
+        foreach ($keys as $key) {
+            $product *= ($calculatedValues[$key] ?? 0.0);
+        }
+        return $product;
+    }
+
+    private function handleSumRange(string $rawArgs, array $context): float
+    {
+        $parts = explode('..', str_replace(' ', '', $rawArgs));
+        if (count($parts) !== 2) return 0.0;
+
+        $matchFilter = ['account_details.code' => ['$gte' => $parts[0], '$lte' => $parts[1]]];
+        return $this->runAccountAggregation($matchFilter, $context);
+    }
+
+    private function handleAvgRange(string $rawArgs, array $context): float
+    {
+        $parts = explode('..', str_replace(' ', '', $rawArgs));
+        if (count($parts) !== 2) return 0.0;
+
+        $result = GeneralLedgerEntry::raw(function($collection) use ($parts, $context) {
+            return $collection->aggregate([
+                ['$match' => $this->getBaseMatchFilters($context)],
+                ['$lookup' => ['from' => 'chart_of_accounts', 'localField' => 'account_id', 'foreignField' => '_id', 'as' => 'account_details']],
+                ['$unwind' => '$account_details'],
+                ['$match' => ['account_details.code' => ['$gte' => $parts[0], '$lte' => $parts[1]]]],
+                ['$group' => ['_id' => '$account_details._id', 'balance' => ['$sum' => $this->getBalanceCalculationLogic()]]],
+                ['$group' => ['_id' => null, 'total_balance' => ['$sum' => '$balance'], 'account_count' => ['$sum' => 1]]]
+            ]);
+        })->first();
+
+        return ($result && !empty($result->account_count)) ? ($result->total_balance / $result->account_count) : 0.0;
+    }
+
+    // --- Database Calculation Helpers ---
+
+    private function runAccountAggregation(array $accountMatchFilter, array $context): float
+    {
+        $result = GeneralLedgerEntry::raw(function ($collection) use ($accountMatchFilter, $context) {
+            return $collection->aggregate([
+                ['$match' => $this->getBaseMatchFilters($context)],
+                ['$lookup' => ['from' => 'chart_of_accounts', 'localField' => 'account_id', 'foreignField' => '_id', 'as' => 'account_details']],
+                ['$unwind' => '$account_details'],
+                ['$match' => $accountMatchFilter],
+                ['$group' => ['_id' => null, 'total' => ['$sum' => $this->getBalanceCalculationLogic()]]]
+            ]);
+        })->first();
+
+        return $result['total'] ?? 0.0;
+    }
+
+    private function getBaseMatchFilters(array $context): array
+    {
+        return [
+            'company_id' => $context['company_id'],
+            'transaction_date' => [
+                '$gte' => new \MongoDB\BSON\UTCDateTime(Carbon::parse($context['start_date'])->startOfDay()),
+                '$lte' => new \MongoDB\BSON\UTCDateTime(Carbon::parse($context['end_date'])->endOfDay())
+            ]
+        ];
+    }
+
+    private function getBalanceCalculationLogic(): array
+    {
+        return ['$cond' => ['if' => ['$in' => ['$account_details.type', ['REVENUE', 'EQUITY', 'LIABILITY']]], 'then' => ['$subtract' => ['$credit', '$debit']], 'else' => ['$subtract' => ['$debit', '$credit']]]];
+    }
+}
+```
+
+### **4. Refactored Core Component: `LineReportService`**
+
+The `LineReportService` has been simplified to act as an orchestrator. It relies on dependency injection to gain access to the `FormulaEngineService`.
+
+#### **4.1. Updated Purpose and Responsibility**
+
+*   Fetch the report template from the database.
+*   Iterate through the template lines in the correct sequence.
+*   Maintain the state of the report generation, specifically the `calculatedValues` array.
+*   For each line, determine whether to calculate its value from an `account_spec` or a `formula`.
+*   Delegate all formula calculations to the `FormulaEngineService`.
+*   Handle direct GL queries for `account_spec` based lines.
+*   Assemble the final report data structure.
+
+#### **4.2. `LineReportService` Updated Source Code**
+
+**File:** `app/Services/FasReporting/LineReportService.php`
+
+```php
+<?php
+
+namespace App\Services\FasReporting;
+
+use App\Models\ReportTemplate;
+use App\Models\GeneralLedgerEntry;
+use Carbon\Carbon;
+use Illuminate\Support\Collection;
+
+class LineReportService
+{
+    private FormulaEngineService $formulaEngine;
+    private array $calculatedValues = [];
+
+    public function __construct(FormulaEngineService $formulaEngine)
+    {
+        $this->formulaEngine = $formulaEngine;
+    }
+
+    /**
+     * Orchestrates the generation of a financial report.
+     */
+    public function generateReport(string $templateId, string $companyId, string $startDate, string $endDate): Collection
+    {
+        $this->calculatedValues = []; // Reset for each new report
+        $template = ReportTemplate::where('_id', $templateId)->where('company_id', $companyId)->firstOrFail();
+        $lines = collect($template->lines)->sortBy('seq');
+        $reportData = collect([]);
+
+        // Context to be used by all sub-services for this report run
+        $context = [
+            'company_id' => $companyId,
+            'start_date' => $startDate,
+            'end_date'   => $endDate,
+        ];
+
+        foreach ($lines as $line) {
+            $line = (object) $line;
+            $amount = 0.0;
+
+            if (!empty($line->account_spec)) {
+                $amount = $this->calculateFromAccountSpec($line->account_spec, $context);
+            } elseif (!empty($line->formula)) {
+                // Delegate all formula calculations to the engine
+                $amount = $this->formulaEngine->execute($line->formula, $context, $this->calculatedValues);
+            }
+
+            if (!empty($line->line_key)) {
+                $this->calculatedValues[$line->line_key] = $amount;
+            }
+
+            $reportData->push([
+                'seq' => $line->seq,
+                'level' => $line->level,
+                'line_name' => $line->line_name,
+                'amount' => $amount,
+                'display_style' => $line->display_style ?? null,
+            ]);
+        }
+
+        return $reportData;
+    }
+
+    /**
+     * Calculates a value based on an account spec (e.g., "4*").
+     * This logic remains here as it's not a formula, but a direct GL query.
+     */
+    private function calculateFromAccountSpec(string $spec, array $context): float
+    {
+        $regex = str_contains($spec, '*')
+            ? '^' . str_replace('*', '.*', $spec)
+            : '^' . preg_quote($spec) . '$';
+
+        $matchFilter = ['account_details.code' => ['$regex' => $regex]];
+
+        $result = GeneralLedgerEntry::raw(function ($collection) use ($matchFilter, $context) {
+             return $collection->aggregate([
+                 [
+                     '$match' => [
+                         'company_id' => $context['company_id'],
+                         'transaction_date' => [
+                             '$gte' => new \MongoDB\BSON\UTCDateTime(Carbon::parse($context['start_date'])->startOfDay()),
+                             '$lte' => new \MongoDB\BSON\UTCDateTime(Carbon::parse($context['end_date'])->endOfDay())
+                         ]
+                     ]
+                 ],
+                 ['$lookup' => ['from' => 'chart_of_accounts', 'localField' => 'account_id', 'foreignField' => '_id', 'as' => 'account_details']],
+                 ['$unwind' => '$account_details'],
+                 ['$match' => $matchFilter],
+                 [
+                    '$group' => [
+                        '_id' => null,
+                        'total' => [
+                            '$sum' => [
+                                '$cond' => [
+                                    'if' => ['$in' => ['$account_details.type', ['REVENUE', 'EQUITY', 'LIABILITY']]],
+                                    'then' => ['$subtract' => ['$credit', '$debit']],
+                                    'else' => ['$subtract' => ['$debit', '$credit']]
+                                ]
+                            ]
+                        ]
+                    ]
+                ]
+             ]);
+         })->first();
+
+         return $result['total'] ?? 0.0;
+    }
+}
+```
+
+### **5. Conclusion of Changes**
+
+This architectural improvement results in a more robust and maintainable system. The separation of concerns ensures that future modifications to the formula language can be made entirely within the `FormulaEngineService` without affecting the overall report generation flow managed by the `LineReportService`. This also simplifies unit testing, as the `FormulaEngineService` can be tested in isolation. All other aspects of the system, including the User Guide for creating Excel templates, remain unchanged.

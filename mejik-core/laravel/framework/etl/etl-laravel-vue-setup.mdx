@@ -1,0 +1,551 @@
+---
+title: ETL Import Modal Setup Guide
+---
+
+## Step-by-Step Setup Guide: Modern ETL Import Modal
+
+This guide will walk you through setting up the backend API, background jobs, and the Vue frontend component for a robust, multi-stage file import process.
+
+### Part 1: Backend Setup (Laravel)
+
+#### Step 1: Define API Routes
+
+First, define the endpoints that the frontend will communicate with.
+
+**File:** `routes/api.php`
+```php
+use App\Http\Controllers\EtlController;
+
+// It's highly recommended to protect these routes with authentication middleware
+// Route::middleware('auth:sanctum')->prefix('etl')->group(function () {
+Route::prefix('etl')->group(function () {
+    // 1. Uploads the file and starts the initial parsing job
+    Route::post('upload', [EtlController::class, 'upload']);
+
+    // 2. Gets a preview of the buffered data
+    Route::get('preview/{importId}', [EtlController::class, 'preview']);
+
+    // 3. Starts the final commit-to-production process
+    Route::post('commit/{importId}', [EtlController::class, 'commit']);
+
+    // 4. Streams live progress updates for the commit process
+    Route::get('progress/{importId}', [EtlController::class, 'progress']);
+
+    // 5. Downloads the template for a given schema
+    Route::get('template/{schema}', [EtlController::class, 'downloadTemplate']);
+});
+```
+
+#### Step 2: Create the Buffer Model
+
+This is a temporary collection to store data after parsing but before committing.
+
+1.  Run the command:
+```bash
+php artisan make:model EtlBuffer
+    ```
+
+2.  **File:** `app/Models/EtlBuffer.php`
+```php
+<?php
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Model; // Use the base model
+use Jenssegers\Mongodb\Eloquent\Model as MongoModel; // Or this if you want to be explicit
+
+// Use the appropriate base model for your project
+class EtlBuffer extends MongoModel
+{
+    protected $connection = 'mongodb';
+    protected $collection = 'etl_buffer';
+    protected $guarded = []; // Allow mass assignment for any field
+}
+    ```
+
+#### Step 3: Create the Pre-Commit Pipeline Classes
+
+This pipeline allows you to apply configurable data mutations before the final commit.
+
+1.  **Create the Interface:**
+**File:** `app/Services/Etl/Pipelines/PreCommitPipe.php`
+```php
+<?php
+namespace App\Services\Etl\Pipelines;
+use Illuminate\Support\Collection;
+
+interface PreCommitPipe
+{
+    public function handle(Collection $data, \Closure $next);
+}
+    ```
+
+2.  **Create the `ConvertId` Pipe:**
+**File:** `app/Services/Etl/Pipelines/ConvertIdToObjectIdPipe.php`
+```php
+<?php
+namespace App\Services\Etl\Pipelines;
+use Illuminate\Support\Collection;
+
+class ConvertIdToObjectIdPipe implements PreCommitPipe
+{
+    public function handle(Collection $data, \Closure $next)
+    {
+        $data->transform(function ($item) {
+            if (isset($item['_id'])) {
+                $item['extId'] = $item['_id']; // Keep original ID as extId
+                unset($item['_id']);
+            }
+            return $item;
+        });
+        return $next($data);
+    }
+}
+    ```
+
+3.  **Create the `Upsert` Pipe:**
+**File:** `app/Services/Etl/Pipelines/UpsertPipe.php`
+```php
+<?php
+namespace App\Services\Etl\Pipelines;
+use Illuminate\Support\Collection;
+
+class UpsertPipe implements PreCommitPipe
+{
+    public function __construct(
+        private string $modelClass,
+        private string $upsertField
+    ){}
+
+    public function handle(Collection $data, \Closure $next)
+    {
+        foreach ($data as $item) {
+            $this->modelClass::updateOrCreate(
+                [$this->upsertField => $item[$this->upsertField] ?? null],
+                $item
+            );
+        }
+        // This is the last pipe, so we don't call $next($data)
+        return $data;
+    }
+}
+    ```
+
+#### Step 4: Create the Background Jobs
+
+These jobs handle the heavy processing, preventing HTTP timeouts and allowing for progress tracking.
+
+1.  **Create the Parsing Job:**
+**File:** `app/Jobs/ProcessImportFileJob.php`
+```php
+<?php
+namespace App\Jobs;
+
+use App\Models\EtlBuffer;
+use Etl;
+use Illuminate\Bus\Queueable;
+use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Foundation\Bus\Dispatchable;
+use Illuminate\Queue\InteractsWithQueue;
+use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\Cache;
+
+class ProcessImportFileJob implements ShouldQueue
+{
+    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+
+    public function __construct(
+        public string $filePath,
+        public string $schemaName,
+        public string $importId
+    ) {}
+
+    public function handle(): void
+    {
+        Cache::put("import_status_{$this->importId}", 'parsing', now()->addHour());
+        $driver = str_ends_with(strtolower($this->filePath), '.csv') ? 'open_spout_csv_schema_import' : 'open_spout_schema_import';
+        $dataCollection = Etl::driver($driver)->process($this->filePath, $this->schemaName);
+
+        $bufferData = $dataCollection->map(function ($item) {
+            return [
+                'import_id' => $this->importId,
+                'data' => $item,
+                'created_at' => now(),
+                'updated_at' => now(),
+            ];
+        });
+
+        // Insert in chunks to avoid memory issues with huge files
+        foreach ($bufferData->chunk(500) as $chunk) {
+            EtlBuffer::insert($chunk->toArray());
+        }
+
+        Cache::put("import_status_{$this->importId}", 'ready_for_preview', now()->addHour());
+    }
+}
+    ```
+
+2.  **Create the Commit Job:**
+**File:** `app/Jobs/CommitImportJob.php`
+```php
+<?php
+namespace App\Jobs;
+
+use App\Models\EtlBuffer;
+use App\Services\Etl\Pipelines\ConvertIdToObjectIdPipe;
+use App\Services\Etl\Pipelines\UpsertPipe;
+use Illuminate\Bus\Queueable;
+use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Foundation\Bus\Dispatchable;
+use Illuminate\Pipeline\Pipeline;
+use Illuminate\Queue\InteractsWithQueue;
+use Illuminate\Queue\SerializesModels;
+use Illuminate\Support\Facades\Cache;
+
+class CommitImportJob implements ShouldQueue
+{
+    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+
+    public function __construct(
+        public string $importId,
+        public string $modelClass,
+        public array $options
+    ) {}
+
+    public function handle(): void
+    {
+        $total = EtlBuffer::where('import_id', $this->importId)->count();
+        if ($total === 0) {
+            $this->updateProgress(0, 0, 'Completed');
+            return;
+        }
+
+        $this->updateProgress(0, $total, 'Starting commit...');
+
+        $pipes = [];
+        if ($this->options['convert_id'] ?? false) {
+            $pipes[] = ConvertIdToObjectIdPipe::class;
+        }
+        if ($this->options['upsert'] ?? false) {
+             $pipes[] = new UpsertPipe($this->modelClass, $this->options['upsert_field'] ?? '_id');
+        }
+
+        $processed = 0;
+        // Use a cursor and chunking to process records efficiently
+        EtlBuffer::where('import_id', $this->importId)->cursor()->chunk(200)->each(function ($chunk) use (&$processed, $total, $pipes) {
+            $dataToProcess = $chunk->pluck('data');
+
+            app(Pipeline::class)->send($dataToProcess)->through($pipes)->then(fn($data) => $data);
+
+            $processed += $chunk->count();
+            $this->updateProgress($processed, $total, 'Processing...');
+        });
+
+        $this->updateProgress($total, $total, 'Completed');
+        DeleteEtlBufferJob::dispatch($this->importId)->delay(now()->addMinutes(5));
+    }
+
+    public function updateProgress(int $processed, int $total, string $status): void
+    {
+        Cache::put("progress_{$this->importId}", [
+            'processed' => $processed, 'total' => $total, 'status' => $status
+        ], now()->addHour());
+    }
+}
+    ```
+
+3.  **Create the Cleanup Job:**
+**File:** `app/Jobs/DeleteEtlBufferJob.php`
+```php
+<?php
+namespace App\Jobs;
+
+use App\Models\EtlBuffer;
+use Illuminate\Bus\Queueable;
+use Illuminate\Contracts\Queue\ShouldQueue;
+use Illuminate\Foundation\Bus\Dispatchable;
+use Illuminate\Queue\InteractsWithQueue;
+use Illuminate\Queue\SerializesModels;
+
+class DeleteEtlBufferJob implements ShouldQueue
+{
+    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+
+    public function __construct(public string $importId) {}
+
+    public function handle(): void
+    {
+        EtlBuffer::where('import_id', $this->importId)->delete();
+    }
+}
+    ```
+
+#### Step 5: Create the Controller
+
+This controller connects the routes to the jobs and provides the SSE stream.
+
+**File:** `app/Http/Controllers/EtlController.php`
+```php
+<?php
+namespace App\Http\Controllers;
+
+use App\Jobs\CommitImportJob;
+use App\Jobs\DeleteEtlBufferJob;
+use App\Jobs\ProcessImportFileJob;
+use App\Models\EtlBuffer;
+use App\Models\User; // Your final model, e.g., User
+use Etl;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
+use Illuminate\Support\Str;
+use Symfony\Component\HttpFoundation\StreamedResponse;
+
+class EtlController extends Controller
+{
+    public function upload(Request $request)
+    {
+        $request->validate(['file' => 'required|mimes:xlsx,xls,csv,txt']);
+        $importId = (string) Str::uuid();
+        $path = $request->file('file')->store('temp_imports');
+        ProcessImportFileJob::dispatch(storage_path('app/' . $path), $request->input('schema_name', 'user_schema'), $importId);
+        return response()->json(['importId' => $importId]);
+    }
+
+    public function preview(string $importId)
+    {
+        $data = EtlBuffer::where('import_id', $importId)->take(10)->get()->pluck('data');
+        return response()->json($data);
+    }
+
+    public function commit(Request $request, string $importId)
+    {
+        $options = $request->validate([
+            'convert_id' => 'required|boolean',
+            'upsert' => 'required|boolean',
+            'upsert_field' => 'sometimes|string',
+        ]);
+        CommitImportJob::dispatch($importId, User::class, $options);
+        return response()->json(['message' => 'Commit process started.'], 202);
+    }
+
+    public function progress(string $importId)
+    {
+        return new StreamedResponse(function () use ($importId) {
+            header('Content-Type: text/event-stream');
+            header('Cache-Control: no-cache');
+            header('Connection: keep-alive');
+            header('X-Accel-Buffering: no');
+
+            while (true) {
+                $progress = Cache::get("progress_{$importId}");
+                if ($progress) {
+                    echo "data: " . json_encode($progress) . "\n\n";
+                    ob_flush(); flush();
+                }
+                if (($progress['status'] ?? '') === 'Completed') break;
+                if (connection_aborted()) break;
+                sleep(1);
+            }
+        });
+    }
+
+    public function downloadTemplate(string $schema)
+    {
+        // Generate an export with an empty collection to get a template with only headers
+        return Etl::driver('open_spout_schema_export')
+                  ->generate(collect([]), $schema, "template_{$schema}.xlsx");
+    }
+}
+```
+
+---
+
+### Part 2: Frontend Setup (Vue 2 with Bootstrap-Vue)
+
+#### Step 6: Prerequisites
+
+1.  Install necessary packages:
+```bash
+npm install vue bootstrap bootstrap-vue axios
+    ```
+2.  Configure them in your main entry file:
+**File:** `resources/js/app.js` (or `main.js`)
+```javascript
+import Vue from 'vue';
+import { BootstrapVue, IconsPlugin } from 'bootstrap-vue';
+import 'bootstrap/dist/css/bootstrap.css';
+import 'bootstrap-vue/dist/bootstrap-vue.css';
+
+Vue.use(BootstrapVue);
+Vue.use(IconsPlugin);
+    ```
+
+#### Step 7: Create the Vue Component
+
+This is the complete, self-contained modal component.
+
+**File:** `resources/js/components/ImportModal.vue`
+```html
+<template>
+  <b-modal
+    id="import-modal"
+    :visible="visible"
+    @change="(val) => $emit('update:visible', val)"
+    title="Upload & Import Documents"
+    size="xl"
+    scrollable
+    no-close-on-backdrop
+    no-close-on-esc
+    @ok="handleCommit"
+    @hidden="resetState"
+    :ok-disabled="!importId || isCommitting || isUploading"
+    :cancel-disabled="isCommitting || isUploading"
+    ok-title="Commit"
+  >
+    <b-container fluid>
+      <div v-if="!importId">
+        <b-form-group label="Upload File" label-for="file-upload" description="Please upload an XLS or CSV file.">
+          <b-form-file id="file-upload" v-model="file" :state="Boolean(file)" placeholder="Choose a file or drop it here..." drop-placeholder="Drop file here..." accept=".xlsx, .xls, .csv" :disabled="isUploading"></b-form-file>
+        </b-form-group>
+        <b-progress v-if="isUploading" :value="uploadProgress" max="100" animated class="mt-3"></b-progress>
+      </div>
+      <div v-if="importId && !isCommitting">
+        <h5 class="mb-3">Data Preview & Options</h5>
+        <b-row class="options-container">
+          <b-col md="6" lg="3" class="mb-3">
+            <b-form-group label="Convert _id to ObjectId"><b-form-checkbox v-model="options.convert_id" switch size="lg">{{ options.convert_id ? 'Enabled' : 'Disabled' }}</b-form-checkbox><small class="text-muted">_id from data will be renamed to extId.</small></b-form-group>
+          </b-col>
+          <b-col md="6" lg="3" class="mb-3">
+            <b-form-group label="Upsert"><b-form-checkbox v-model="options.upsert" switch size="lg">{{ options.upsert ? 'Enabled' : 'Disabled' }}</b-form-checkbox><small class="text-muted">Update existing or insert new records.</small></b-form-group>
+          </b-col>
+          <b-col md="6" lg="3" class="mb-3" v-if="options.upsert">
+             <b-form-group label="Upsert Field" label-for="upsert-field-select"><b-form-select id="upsert-field-select" v-model="options.upsert_field" :options="headers"></b-form-select><small class="text-muted">The field to match for updates.</small></b-form-group>
+          </b-col>
+           <b-col md="6" lg="3" class="mb-3 align-self-center text-center">
+             <b-button variant="outline-primary" @click="downloadTemplate"><b-icon-download></b-icon-download> XLS Template</b-button>
+          </b-col>
+        </b-row>
+        <hr>
+        <h6>Preview</h6>
+        <div class="table-wrapper">
+          <b-table striped hover bordered responsive sticky-header="300px" :items="previewData" :fields="headers" v-if="previewData.length > 0"></b-table>
+          <div v-else class="text-center p-5"><b-spinner label="Loading..."></b-spinner><p class="mt-2">Loading preview data...</p></div>
+        </div>
+      </div>
+      <div v-if="isCommitting">
+          <h5 class="text-center">Committing Data... Please do not close this window.</h5><p class="text-center text-muted">{{ commitStatus }}</p>
+          <b-progress :value="commitProgress" max="100" show-progress animated class="mt-3"></b-progress>
+      </div>
+    </b-container>
+  </b-modal>
+</template>
+
+<script>
+import axios from 'axios';
+
+export default {
+  name: 'ImportModal',
+  props: { visible: { type: Boolean, default: false }, schemaName: { type: String, required: true } },
+  data: () => ({ file: null, importId: null, previewData: [], headers: [], isUploading: false, uploadProgress: 0, isCommitting: false, commitProgress: 0, commitStatus: '', options: { convert_id: false, upsert: true, upsert_field: '_id' } }),
+  watch: { file(newFile) { if (newFile) this.uploadFile(); } },
+  methods: {
+    async uploadFile() {
+      this.isUploading = true; this.uploadProgress = 0;
+      const formData = new FormData();
+      formData.append('file', this.file);
+      formData.append('schema_name', this.schemaName);
+      try {
+        const response = await axios.post('/api/etl/upload', formData, { onUploadProgress: (e) => { this.uploadProgress = Math.round((e.loaded * 100) / e.total); } });
+        this.importId = response.data.importId;
+        setTimeout(() => this.loadPreview(), 2000); // Simple delay for server to process file
+      } catch (error) { console.error('Upload failed:', error); } finally { this.isUploading = false; }
+    },
+    async loadPreview() {
+      if (!this.importId) return;
+      try {
+        const response = await axios.get(`/api/etl/preview/${this.importId}`);
+        this.previewData = response.data;
+        if (this.previewData.length > 0) {
+          this.headers = Object.keys(this.previewData[0]);
+          if (!this.headers.includes(this.options.upsert_field)) this.options.upsert_field = this.headers[0] || '';
+        }
+      } catch (error) { console.error('Preview failed:', error); }
+    },
+    handleCommit(bvModalEvt) {
+      bvModalEvt.preventDefault();
+      if (!this.importId || this.isCommitting) return;
+      this.isCommitting = true; this.commitProgress = 0; this.commitStatus = 'Starting commit...';
+      axios.post(`/api/etl/commit/${this.importId}`, this.options).then(() => this.listenForProgress()).catch((error) => { console.error('Commit failed:', error); this.isCommitting = false; });
+    },
+    listenForProgress() {
+      const eventSource = new EventSource(`/api/etl/progress/${this.importId}`);
+      eventSource.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        this.commitStatus = `${data.status} (${data.processed} / ${data.total})`;
+        if (data.total > 0) this.commitProgress = Math.round((data.processed * 100) / data.total);
+        if (data.status === 'Completed') {
+          eventSource.close();
+          setTimeout(() => { this.$bvToast.toast('Import completed successfully!', { title: 'Success', variant: 'success', solid: true }); this.$emit('update:visible', false); }, 500);
+        }
+      };
+      eventSource.onerror = (error) => { console.error('SSE Error:', error); eventSource.close(); this.isCommitting = false; };
+    },
+    downloadTemplate() { window.location.href = `/api/etl/template/${this.schemaName}`; },
+    resetState() { this.file = null; this.importId = null; this.previewData = []; this.headers = []; this.isUploading = false; this.uploadProgress = 0; this.isCommitting = false; this.commitProgress = 0; this.commitStatus = ''; }
+  }
+}
+</script>
+<style scoped>.options-container { border: 1px solid #dee2e6; border-radius: .25rem; padding: 1.5rem; background-color: #f8f9fa; } .table-wrapper { margin-top: 1rem; }</style>
+```
+
+#### Step 8: Use the Component in a Parent View
+
+Finally, place the modal component in one of your main application views.
+
+**File:** e.g., `resources/js/views/UsersPage.vue`
+```html
+<template>
+  <div>
+    <h1>User Management</h1>
+    <b-button variant="primary" @click="showImportModal = true">
+      <b-icon-upload></b-icon-upload> Import Users
+    </b-button>
+
+    <!-- The Modal Component -->
+    <import-modal
+      v-model="showImportModal"
+      schema-name="user_schema"
+    />
+  </div>
+</template>
+
+<script>
+import ImportModal from '../components/ImportModal.vue';
+
+export default {
+  components: {
+    ImportModal
+  },
+  data() {
+    return {
+      showImportModal: false
+    };
+  }
+}
+</script>
+```
+
+---
+
+### Final Check
+
+1.  **Run Migrations:** If you use database-based queues, run `php artisan migrate`.
+2.  **Start Queue Worker:** This is **critical**. The background jobs will not run without it. In your terminal, run:
+```bash
+php artisan queue:work
+    ```
+3.  **Compile Assets:** Compile your Vue components:
+```bash
+npm run dev
+    ```
+
+You now have a fully functional, modern, and robust ETL import system.

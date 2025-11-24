@@ -193,6 +193,21 @@
             ]
           },
           {
+            "group": "Financial & Accounting Report",
+            "pages": [
+              "mejik-core/laravel/framework/fas-reporting/fas-reporting-subsystem",
+              "mejik-core/laravel/framework/fas-reporting/fas-line-calc-addendum-1",
+              "mejik-core/laravel/framework/fas-reporting/fas-cell-edit-addendum-2"
+            ]
+          },
+          {
+            "group": "Dashboard & General Report",
+            "pages": [
+              "mejik-core/laravel/framework/dashboard/dash-modular-setup",
+              "mejik-core/laravel/framework/dashboard/dash-custom-block"
+            ]
+          },
+          {
             "group": "Messaging Sub System",
             "pages": [
               "mejik-core/laravel/framework/mms/mms-dev-guide-sending-message",
@@ -212,9 +227,15 @@
           {
             "group": "ETL Sub System",
             "pages": [
+              "mejik-core/laravel/framework/etl/etl-quickstart",
               "mejik-core/laravel/framework/etl/etl-user-guide",
               "mejik-core/laravel/framework/etl/etl-dev-guide",
-              "mejik-core/laravel/framework/etl/etl-devspec"
+              "mejik-core/laravel/framework/etl/etl-devspec",
+              "mejik-core/laravel/framework/etl/etl-laravel-vue-setup",
+              "mejik-core/laravel/framework/etl/etl-importmodal-components",
+              "mejik-core/laravel/framework/etl/etl-sse-components",
+              "mejik-core/laravel/framework/etl/sse-components-src",
+              "mejik-core/laravel/framework/etl/etl-addendum-schema"
             ]
           },
           {

@@ -1,0 +1,540 @@
+---
+title: Addendum B - Template Editing
+---
+
+### **FasReporting Subsystem Documentation - Addendum B**
+
+### Version: 1.2
+### Date: October 26, 2023
+### Change: Implementation of UI Components for Template Grid Editing
+
+---
+
+### **1. Overview of Changes**
+
+This addendum documents the creation of a suite of Vue 2 components designed to enable in-place editing of report template lines within a web interface. The primary goal is to provide a user-friendly way for administrators to modify templates directly in the browser, reducing reliance on the Excel re-import process for minor changes.
+
+The architecture consists of:
+1.  A new backend API endpoint to handle granular, cell-level updates.
+2.  Three specialized, reusable Vue components for different data types: `InlineTextEditor`, `StyleSelector`, and `FormulaEditorDialog`.
+3.  A parent view component, `TemplateEditor.vue`, which demonstrates how to integrate these editor components into a data table structure.
+
+### **2. Backend API Endpoint for Cell Updates**
+
+A new API endpoint is introduced to persist changes made in the UI. It is designed to update a single field of a specific line within a report template's embedded `lines` array.
+
+#### **2.1. API Route**
+
+**File:** `routes/api.php`
+
+```php
+// Route to handle updates for a specific line within a template
+Route::post('/report-templates/lines/update', 'Api\ReportTemplateLineController@update');
+```
+
+#### **2.2. API Controller**
+
+**File:** `app/Http/Controllers/Api/ReportTemplateLineController.php`
+
+```php
+<?php
+
+namespace App\Http\Controllers\Api;
+
+use App\Http\Controllers\Controller;
+use App\Models\ReportTemplate;
+use Illuminate\Http\Request;
+use Illuminate\Validation\Rule;
+use MongoDB\BSON\ObjectId;
+
+class ReportTemplateLineController extends Controller
+{
+    /**
+     * Updates a single field of an embedded line document in a ReportTemplate.
+     */
+    public function update(Request $request)
+    {
+        $validated = $request->validate([
+            'template_id' => 'required|string',
+            'line_id'     => 'required|string',
+            'fieldname'   => [
+                'required',
+                'string',
+                Rule::in(['line_key', 'account_spec', 'formula', 'display_style', 'line_name']),
+            ],
+            'value'       => 'nullable', // Can be a string, array, or null
+        ]);
+
+        $template = ReportTemplate::findOrFail($validated['template_id']);
+
+        // Construct the update path for the embedded document using the positional '$' operator
+        $fieldToUpdate = 'lines.$.' . $validated['fieldname'];
+
+        // The StyleSelector component sends an array; we must convert it to a space-separated string for storage.
+        $updateValue = is_array($validated['value'])
+            ? implode(' ', $validated['value'])
+            : $validated['value'];
+
+        // Use the raw MongoDB collection method for targeted updates on embedded documents
+        $result = $template->collection->updateOne(
+            [
+                '_id' => new ObjectId($validated['template_id']),
+                'lines.line_id' => new ObjectId($validated['line_id'])
+            ],
+            [
+                '$set' => [$fieldToUpdate => $updateValue]
+            ]
+        );
+
+        if ($result->getModifiedCount() > 0) {
+            return response()->json(['message' => 'Line updated successfully.']);
+        }
+
+        // Return a 200 OK even if no changes were made, as this is not an error state.
+        return response()->json(['message' => 'No changes detected or line not found.']);
+    }
+}
+```
+
+### **3. Frontend Vue 2 Components**
+
+These components are designed to be placed within the slots of a data table. Each one manages its own editing state and emits a standardized `@update` event with the new value.
+
+#### **3.1. Prerequisite: `vue-multiselect`**
+
+The `StyleSelector` component depends on the `vue-multiselect` library.
+
+**Installation:**
+```bash
+npm install vue-multiselect --save
+```
+**Global CSS Import (e.g., in `main.js`):**
+```javascript
+import 'vue-multiselect/dist/vue-multiselect.min.css';
+```
+
+#### **3.2. Component: `InlineTextEditor.vue`**
+
+**Purpose:** Provides a simple click-to-edit functionality for text-based fields.
+**File:** `resources/js/components/editors/InlineTextEditor.vue`
+
+```html
+<template>
+  <div>
+    <input
+      v-if="isEditing"
+      ref="input"
+      type="text"
+      v-model="internalValue"
+      @blur="saveChanges"
+      @keyup.enter="saveChanges"
+      @keyup.esc="cancelEditing"
+      class="inline-input"
+    />
+    <span v-else @click="startEditing" class="editable-text">
+      {{ value || '...' }}
+    </span>
+  </div>
+</template>
+
+<script>
+export default {
+  props: {
+    value: {
+      type: String,
+      default: '',
+    },
+  },
+  data() {
+    return {
+      isEditing: false,
+      internalValue: this.value,
+    };
+  },
+  methods: {
+    startEditing() {
+      this.internalValue = this.value;
+      this.isEditing = true;
+      this.$nextTick(() => {
+        this.$refs.input.focus();
+      });
+    },
+    saveChanges() {
+      if (this.internalValue !== this.value) {
+        this.$emit('update', this.internalValue);
+      }
+      this.isEditing = false;
+    },
+    cancelEditing() {
+      this.isEditing = false;
+    },
+  },
+};
+</script>
+
+<style scoped>
+.editable-text {
+  cursor: pointer;
+  border-bottom: 1px dashed #aaa;
+  padding: 2px 4px;
+  min-width: 20px;
+  display: inline-block;
+}
+.editable-text:hover {
+  background-color: #f5f5f5;
+}
+.inline-input {
+  width: 100%;
+  padding: 2px 4px;
+  border: 1px solid #4a90e2;
+  border-radius: 3px;
+  box-sizing: border-box;
+}
+</style>
+```
+
+#### **3.3. Component: `StyleSelector.vue`**
+
+**Purpose:** Provides a tags-style multi-select input for choosing and creating CSS class names.
+**File:** `resources/js/components/editors/StyleSelector.vue`
+
+```html
+<template>
+  <multiselect
+    v-model="selectedStyles"
+    :options="options"
+    :multiple="true"
+    :taggable="true"
+    @tag="addTag"
+    @input="onUpdate"
+    placeholder="Select or add styles"
+    selectLabel=""
+    selectedLabel=""
+    deselectLabel=""
+  ></multiselect>
+</template>
+
+<script>
+import Multiselect from 'vue-multiselect';
+
+export default {
+  components: { Multiselect },
+  props: {
+    // Value is a space-separated string of classes, e.g., "bold underline-top"
+    value: {
+      type: String,
+      default: '',
+    },
+    // Predefined options
+    options: {
+      type: Array,
+      default: () => ['bold', 'italic', 'underline-top', 'highlight'],
+    },
+  },
+  computed: {
+    selectedStyles: {
+      get() {
+        // Convert the incoming string prop to an array for the component
+        return this.value ? this.value.split(' ').filter(Boolean) : [];
+      },
+      set(newVal) {
+        // This setter is intentionally left empty; the @input event handles updates.
+      },
+    },
+  },
+  methods: {
+    addTag(newTag) {
+      // Allows users to create new, ad-hoc styles
+      this.options.push(newTag);
+      const currentStyles = this.selectedStyles;
+      currentStyles.push(newTag);
+      this.onUpdate(currentStyles);
+    },
+    onUpdate(newValue) {
+      // The component emits an array of strings, which the parent handles
+      this.$emit('update', newValue);
+    },
+  },
+};
+</script>
+
+<style>
+/* Scoped styles cannot penetrate child components like vue-multiselect. */
+/* Add global overrides if necessary, or use deep selectors. */
+</style>
+```
+
+#### **3.4. Component: `FormulaEditorDialog.vue`**
+
+**Purpose:** Provides a button that opens a modal with helpers for building complex formula strings.
+**File:** `resources/js/components/editors/FormulaEditorDialog.vue`
+
+```html
+<template>
+  <div>
+    <span @click="openDialog" class="formula-button">
+      {{ value || 'Set Formula' }}
+    </span>
+
+    <!-- The Dialog/Modal -->
+    <div v-if="isDialogOpen" class="modal-overlay" @click.self="closeDialog">
+      <div class="modal-content">
+        <h3>Formula Editor</h3>
+        <p class="guide">Use operators and click available keys to build your formula.</p>
+        <textarea v-model="internalFormula" ref="formulaInput" rows="4"></textarea>
+
+        <div class="helpers">
+          <div>
+            <strong>Operators</strong>
+            <button v-for="op in operators" :key="op.name" @click="insertOperator(op.template)" class="helper-btn">
+              {{ op.name }}
+            </button>
+          </div>
+          <div class="keys-list">
+            <strong>Available Keys</strong>
+            <button v-for="key in availableLineKeys" :key="key" @click="insertText(key)" class="helper-btn">
+              {{ key }}
+            </button>
+          </div>
+        </div>
+
+        <div class="modal-actions">
+          <button @click="saveFormula" class="btn-primary">Save Changes</button>
+          <button @click="closeDialog" class="btn-secondary">Cancel</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</template>
+
+<script>
+export default {
+  props: {
+    value: {
+      type: String,
+      default: '',
+    },
+    // Pass in all other line keys from the parent for context
+    availableLineKeys: {
+      type: Array,
+      default: () => [],
+    },
+  },
+  data() {
+    return {
+      isDialogOpen: false,
+      internalFormula: this.value,
+      operators: [
+        { name: 'SUM()', template: 'SUM()' },
+        { name: 'AVG(..)', template: 'AVG(..)' },
+        { name: 'ADD()', template: 'ADD()' },
+        { name: 'SUB()', template: 'SUB()' },
+        { name: 'MUL()', template: 'MUL()' },
+      ],
+    };
+  },
+  methods: {
+    openDialog() {
+      this.internalFormula = this.value;
+      this.isDialogOpen = true;
+    },
+    closeDialog() {
+      this.isDialogOpen = false;
+    },
+    insertText(text) {
+      const input = this.$refs.formulaInput;
+      this.internalFormula += text;
+      input.focus();
+    },
+    insertOperator(template) {
+       const input = this.$refs.formulaInput;
+       this.internalFormula += template;
+       input.focus();
+       // Place cursor inside the brackets for a better user experience
+       const cursorPos = this.internalFormula.length - (template.endsWith('..)') ? 3 : 1);
+       this.$nextTick(() => input.setSelectionRange(cursorPos, cursorPos));
+    },
+    saveFormula() {
+      if (this.internalFormula !== this.value) {
+        this.$emit('update', this.internalFormula);
+      }
+      this.closeDialog();
+    },
+  },
+};
+</script>
+
+<style scoped>
+.formula-button {
+  cursor: pointer;
+  border-bottom: 1px dashed #aaa;
+  color: #007bff;
+}
+.modal-overlay {
+  position: fixed; z-index: 1000; top: 0; left: 0; width: 100%; height: 100%;
+  background-color: rgba(0, 0, 0, 0.6); display: flex;
+  justify-content: center; align-items: center;
+}
+.modal-content {
+  background: white; padding: 20px 30px; border-radius: 8px;
+  width: 90%; max-width: 600px; box-shadow: 0 5px 15px rgba(0,0,0,.3);
+}
+.guide { font-size: 0.9em; color: #666; margin-top: 0; }
+textarea { width: 100%; margin-bottom: 15px; padding: 8px; border: 1px solid #ccc; border-radius: 4px; }
+.helpers { display: flex; flex-direction: column; gap: 15px; }
+.keys-list { max-height: 80px; overflow-y: auto; }
+.helper-btn { margin: 2px; padding: 4px 8px; border: 1px solid #ccc; background: #f0f0f0; border-radius: 4px; cursor: pointer; }
+.modal-actions { margin-top: 20px; text-align: right; border-top: 1px solid #eee; padding-top: 15px; }
+.btn-primary { background-color: #007bff; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer; }
+.btn-secondary { margin-left: 10px; }
+</style>
+```
+
+### **4. Parent View: `TemplateEditor.vue`**
+
+This view acts as a container and orchestrator. It fetches the template data and integrates the editor components into a table, handling the `@update` events to make API calls.
+
+**File:** `resources/js/views/TemplateEditor.vue`
+
+```html
+<template>
+  <div>
+    <h1>Report Template Editor: {{ template.name }}</h1>
+    <div v-if="isLoading" class="loading-state">Loading template data...</div>
+    <table class="template-table" v-if="!isLoading && template.lines">
+      <thead>
+        <tr>
+          <th style="width: 30%;">Line Name</th>
+          <th style="width: 15%;">Line Key</th>
+          <th style="width: 15%;">Account Spec</th>
+          <th style="width: 20%;">Formula</th>
+          <th style="width: 20%;">Display Style</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr v-for="line in template.lines" :key="line.line_id">
+          <!-- Indented Line Name -->
+          <td :style="{ paddingLeft: line.level * 25 + 10 + 'px' }">
+             <InlineTextEditor
+              :value="line.line_name"
+              @update="newValue => onCellUpdate(line.line_id, 'line_name', newValue)"
+            />
+          </td>
+          <!-- Line Key Editor -->
+          <td>
+            <InlineTextEditor
+              :value="line.line_key"
+              @update="newValue => onCellUpdate(line.line_id, 'line_key', newValue)"
+            />
+          </td>
+          <!-- Account Spec Editor -->
+          <td>
+            <InlineTextEditor
+              :value="line.account_spec"
+              @update="newValue => onCellUpdate(line.line_id, 'account_spec', newValue)"
+            />
+          </td>
+          <!-- Formula Editor -->
+          <td>
+             <FormulaEditorDialog
+              :value="line.formula"
+              :available-line-keys="availableLineKeys"
+              @update="newValue => onCellUpdate(line.line_id, 'formula', newValue)"
+            />
+          </td>
+          <!-- Style Selector -->
+          <td>
+            <StyleSelector
+              :value="line.display_style"
+              @update="newValue => onCellUpdate(line.line_id, 'display_style', newValue)"
+            />
+          </td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</template>
+
+<script>
+import axios from 'axios';
+import InlineTextEditor from '@/components/editors/InlineTextEditor.vue';
+import StyleSelector from '@/components/editors/StyleSelector.vue';
+import FormulaEditorDialog from '@/components/editors/FormulaEditorDialog.vue';
+
+export default {
+  components: { InlineTextEditor, StyleSelector, FormulaEditorDialog },
+  props: {
+    // The template ID is expected to be passed via the router, e.g., /templates/:templateId/edit
+    templateId: {
+        type: String,
+        required: true
+    }
+  },
+  data() {
+    return {
+      template: {},
+      isLoading: false,
+    };
+  },
+  computed: {
+    availableLineKeys() {
+      if (!this.template.lines) return [];
+      return this.template.lines
+        .map(line => line.line_key)
+        .filter(Boolean); // Filter out null/empty/undefined keys
+    },
+  },
+  methods: {
+    async fetchTemplate() {
+      this.isLoading = true;
+      try {
+        // NOTE: Replace with your actual API endpoint to fetch a single template by its ID
+        const response = await axios.get(`/api/report-templates/${this.templateId}`);
+        this.template = response.data;
+      } catch (error) {
+        console.error("Failed to fetch template", error);
+        // Handle error (e.g., show notification to user)
+      } finally {
+        this.isLoading = false;
+      }
+    },
+    async onCellUpdate(lineId, fieldName, value) {
+      const payload = {
+        template_id: this.template._id,
+        line_id: lineId,
+        fieldname: fieldName,
+        value: value,
+      };
+
+      try {
+        await axios.post('/api/report-templates/lines/update', payload);
+
+        // Optimistic UI Update: Update the local data immediately for a responsive feel
+        const line = this.template.lines.find(l => l.line_id === lineId);
+        if (line) {
+          // Convert array from StyleSelector back to string for local state consistency
+          const finalValue = Array.isArray(value) ? value.join(' ') : value;
+          this.$set(line, fieldName, finalValue);
+        }
+        // Optionally show a success toast/notification
+        console.log("Update successful for", payload);
+
+      } catch (error) {
+        console.error("Failed to update line:", error);
+        // Optionally show an error toast/notification and revert the local change if needed
+      }
+    },
+  },
+  created() {
+    this.fetchTemplate();
+  },
+};
+</script>
+
+<style scoped>
+.template-table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+.template-table th, .template-table td { border: 1px solid #ddd; padding: 4px 8px; text-align: left; vertical-align: top; }
+.template-table th { background-color: #f2f2f2; font-weight: bold; }
+.loading-state { padding: 20px; text-align: center; color: #666; }
+</style>
+```

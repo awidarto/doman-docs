@@ -1,0 +1,235 @@
+---
+title: ETL Import Modal Component
+---
+
+## `EtlImportModal.vue` Usage Guide
+
+This document provides a complete developer guide for integrating and using the `EtlImportModal.vue` component within a parent Vue component.
+
+---
+
+### **(English)**
+
+#### **1. Component Overview**
+
+The `EtlImportModal.vue` is the primary frontend component for the ETL system. It orchestrates a complete, multi-stage user interface for importing files:
+
+1.  **Stage 1 (Upload & Buffering):** The user uploads a file. The component shows real-time progress as the backend parses the file into a temporary "buffer".
+2.  **Stage 2 (Preview & Configure):** Once buffering is complete, the modal displays a preview of the imported data and allows the user to configure import options (e.g., the field to use for "upserting").
+3.  **Stage 3 (Commit):** After the user confirms, the component shows a final progress bar as the data is committed from the buffer to the production database collection.
+
+The component is designed for programmatic control, meaning the parent component tells it when to show and hide.
+
+#### **2. Component API**
+
+##### **Props**
+
+These are the properties you must pass to the component.
+
+| Prop Name    | Type   | Required | Default | Description                                                                                                               |
+|:-------------|:-------|:---------|:--------|:--------------------------------------------------------------------------------------------------------------------------|
+| `schemaName` | String | Yes      | `''`    | The unique name of the schema to use. This must match a `.yml` filename in `config/etl_schemas/` (e.g., `'user_schema'`). |
+| `baseUrl`    | String | Yes      | `''`    | The base prefix for all API routes that the modal will call (e.g., `'/api/etl'`).                                         |
+
+##### **Public Methods**
+
+You can call these methods on the component instance using a `ref`.
+
+| Method   | Description                                                      |
+|:---------|:-----------------------------------------------------------------|
+| `show()` | Programmatically opens the modal and starts the import workflow. |
+| `hide()` | Programmatically closes the modal.                               |
+
+##### **Events**
+
+You can listen for these events emitted by the component.
+
+| Event Name | Payload     | Description                                                                                                                                       |
+|:-----------|:------------|:--------------------------------------------------------------------------------------------------------------------------------------------------|
+| `hidden`   | `undefined` | Fired when the modal is fully closed (after any animations). This is the ideal event to listen for to refresh your parent component's data table. |
+| `shown`    | `undefined` | Fired when the modal is fully visible.                                                                                                            |
+
+#### **3. Integration Example**
+
+Here is a complete example of how to use the `EtlImportModal` from a parent page (e.g., `UsersPage.vue`).
+
+**Step 1: Import and Register the Component**
+```javascript
+// In your parent component's <script> section
+import EtlImportModal from '../components/etl/EtlImportModal.vue';
+
+export default {
+  components: {
+    EtlImportModal
+  },
+  // ...
+}
+```
+
+**Step 2: Add a Trigger Button and the Modal to Your Template**
+```html
+<!-- In your parent component's <template> section -->
+<template>
+  <b-container fluid>
+    <!-- 1. A button to trigger the modal -->
+    <b-button variant="primary" @click="openImportModal">
+      <i class="las la-upload"></i> Import Users
+    </b-button>
+
+    <!--
+      2. The modal component itself.
+         - A 'ref' is added so we can call its methods.
+         - The required props 'schema-name' and 'base-url' are provided.
+         - We listen for the '@hidden' event to know when to refresh our data.
+    -->
+    <etl-import-modal
+      ref="importModal"
+      schema-name="user_schema"
+      base-url="/api/etl"
+      @hidden="onImportModalClosed"
+    />
+  </b-container>
+</template>
+```
+
+**Step 3: Implement the Methods in Your Script**
+```javascript
+// In your parent component's <script> section
+import EtlImportModal from '../components/etl/EtlImportModal.vue';
+
+export default {
+  name: 'UsersPage',
+  components: {
+    EtlImportModal
+  },
+  methods: {
+    // 3. This method is called by the button's @click event
+    openImportModal() {
+      // Use $refs to access the component instance and call its public 'show()' method
+      this.$refs.importModal.show();
+    },
+
+    // 4. This method is called by the modal's @hidden event
+    onImportModalClosed() {
+      console.log('Import process finished and modal is closed. Refreshing user list...');
+      // This is the perfect place to refresh your page's data.
+      // For example: this.fetchUsers();
+    }
+  }
+}
+```
+
+---
+---
+
+### **(Bahasa Indonesia)**
+
+#### **1. Gambaran Umum Komponen**
+
+`EtlImportModal.vue` adalah komponen frontend utama untuk sistem ETL. Komponen ini mengatur antarmuka pengguna multi-tahap yang lengkap для mengimpor file:
+
+1.  **Tahap 1 (Upload & Buffering):** Pengguna mengunggah file. Komponen menampilkan progres real-time saat backend mem-parsing file ke dalam "buffer" sementara.
+2.  **Tahap 2 (Preview & Konfigurasi):** Setelah proses buffering selesai, modal menampilkan pratinjau data yang diimpor dan memungkinkan pengguna untuk mengkonfigurasi opsi impor (misalnya, field yang digunakan untuk "upsert").
+3.  **Tahap 3 (Commit):** Setelah pengguna mengkonfirmasi, komponen menampilkan progress bar terakhir saat data dipindahkan dari buffer ke koleksi database produksi.
+
+Komponen ini dirancang untuk kontrol terprogram, artinya komponen induk yang akan memberitahunya kapan harus ditampilkan dan disembunyikan.
+
+#### **2. API Komponen**
+
+##### **Props**
+
+Ini adalah properti yang harus Anda teruskan ke komponen.
+
+| Nama Prop    | Tipe   | Wajib | Default | Deskripsi                                                                                                                         |
+|:-------------|:-------|:------|:--------|:----------------------------------------------------------------------------------------------------------------------------------|
+| `schemaName` | String | Ya    | `''`    | Nama unik dari skema yang akan digunakan. Harus cocok dengan nama file `.yml` di `config/etl_schemas/` (contoh: `'user_schema'`). |
+| `baseUrl`    | String | Ya    | `''`    | Awalan dasar untuk semua rute API yang akan dipanggil oleh modal (contoh: `'/api/etl'`).                                          |
+
+##### **Method Publik**
+
+Anda dapat memanggil method ini pada instance komponen menggunakan `ref`.
+
+| Method | Deskripsi |
+| :--- | :--- |
+| `show()` | Membuka modal secara terprogram dan memulai alur kerja impor. |
+| `hide()` | Menutup modal secara terprogram. |
+
+##### **Event**
+
+Anda dapat mendengarkan event yang dipancarkan (emit) oleh komponen ini.
+
+| Nama Event | Payload | Deskripsi |
+| :--- | :--- | :--- |
+| `hidden` | `undefined` | Dijalankan saat modal sepenuhnya tertutup (setelah animasi selesai). Ini adalah event yang ideal untuk me-refresh tabel data di komponen induk Anda. |
+| `shown` | `undefined` | Dijalankan saat modal sepenuhnya terlihat. |
+
+#### **3. Contoh Integrasi**
+
+Berikut adalah contoh lengkap cara menggunakan `EtlImportModal` dari halaman induk (misalnya, `UsersPage.vue`).
+
+**Langkah 1: Impor dan Daftarkan Komponen**
+```javascript
+// Di dalam bagian <script> komponen induk Anda
+import EtlImportModal from '../components/etl/EtlImportModal.vue';
+
+export default {
+  components: {
+    EtlImportModal
+  },
+  // ...
+}
+```
+
+**Langkah 2: Tambahkan Tombol Pemicu dan Modal ke Template Anda**
+```html
+<!-- Di dalam bagian <template> komponen induk Anda -->
+<template>
+  <b-container fluid>
+    <!-- 1. Tombol untuk memicu modal -->
+    <b-button variant="primary" @click="bukaModalImpor">
+      <i class="las la-upload"></i> Impor Pengguna
+    </b-button>
+
+    <!--
+      2. Komponen modal itu sendiri.
+         - 'ref' ditambahkan agar kita bisa memanggil method-nya.
+         - 'v-model' tidak lagi digunakan.
+         - Prop yang wajib diisi, 'schema-name' dan 'base-url', disediakan.
+         - Kita mendengarkan event '@hidden' untuk tahu kapan harus me-refresh data.
+    -->
+    <etl-import-modal
+      ref="modalImpor"
+      schema-name="user_schema"
+      base-url="/api/etl"
+      @hidden="saatModalImporDitutup"
+    />
+  </b-container>
+</template>
+```
+
+**Langkah 3: Implementasikan Method di Script Anda**
+```javascript
+// Di dalam bagian <script> komponen induk Anda
+import EtlImportModal from '../components/etl/EtlImportModal.vue';
+
+export default {
+  name: 'UsersPage',
+  components: {
+    EtlImportModal
+  },
+  methods: {
+    // 3. Method ini dipanggil oleh event @click dari tombol
+    bukaModalImpor() {
+      // Gunakan $refs untuk mengakses instance komponen dan panggil method publik 'show()'
+      this.$refs.modalImpor.show();
+    },
+
+    // 4. Method ini dipanggil oleh event @hidden dari modal
+    saatModalImporDitutup() {
+      console.log('Proses impor selesai dan modal ditutup. Me-refresh daftar pengguna...');
+      // Ini adalah tempat yang sempurna untuk me-refresh data halaman Anda.
+      // Contoh: this.muatUlangDataPengguna();
+    }
+  }
+}
+```

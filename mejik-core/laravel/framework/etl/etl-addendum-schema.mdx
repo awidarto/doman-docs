@@ -1,0 +1,178 @@
+---
+title: Schema-Defined Pre-Commit Pipeline
+---
+
+### **Addendum: Schema-Defined Pre-Commit Pipeline**
+
+To make the service even more flexible and configurable, the commit process has been re-architected. It is now driven by a dynamic "pipeline" defined directly within the schema file, making the core import job a generic and reusable processor.
+
+## **English**
+
+### **1. Concept**
+
+Instead of having hardcoded logic inside the `CommitImportJob` (e.g., `if (option === 'convert_id')`), you can now specify a sequence of "pipe" classes in your schema. Each batch of imported records will be passed through every class in this sequence before it is finally saved to the database.
+
+This powerful pattern allows for complex, custom, and reusable data transformations (like formatting names, calculating values, or validating against other systems) to be defined on a per-schema basis without ever touching the core service code.
+
+### **2. Schema Update**
+
+A new **required** key, `pre_commit_pipeline`, has been added to the schema file. It must be an array of fully-qualified class names.
+
+| Key | Description | Example |
+| :--- | :--- | :--- |
+| `pre_commit_pipeline` | **Required.** An ordered array of pipe classes that data will be sent through before being saved. | `pre_commit_pipeline: [FirstPipe::class, SecondPipe::class]` |
+
+**Example `user_schema.yml`:**
+```yaml
+model: App\Models\User
+driver: open_spout_schema_import
+primary_key: _id
+
+# The order of classes here is the order of execution.
+pre_commit_pipeline:
+  # This pipe renames the original _id from the spreadsheet to extId.
+  - App\Services\Etl\Pipelines\ConvertIdToObjectIdPipe
+  # This pipe performs the final database upsert operation.
+  - App\Services\Etl\Pipelines\UpsertPipe
+
+fields:
+  _id:
+    # ...
+```
+
+### **3. How to Create a Custom Pipe**
+
+Creating a new transformation step is now incredibly simple:
+
+1.  **Create a New Pipe Class:** Create a new class, for example in `app/Services/Etl/Pipelines/`. This class **must** implement the `App\Services\Etl\Pipelines\PreCommitPipe` interface, which requires a single `handle` method.
+
+2.  **Implement the Logic:** Inside the `handle` method, perform your transformations on the `$data` collection. Crucially, you must call `return $next($data);` at the end to pass the modified data to the next pipe in the sequence.
+
+**Example: A pipe that capitalizes user names.**
+**File:** `app/Services/Etl/Pipelines/FormatUserNamePipe.php`
+```php
+<?php
+namespace App\Services\Etl\Pipelines;
+
+use Illuminate\Support\Collection;
+use Illuminate\Support\Str;
+
+class FormatUserNamePipe implements PreCommitPipe
+{
+    public function handle(Collection $data, \Closure $next)
+    {
+        $data->transform(function ($item) {
+            if (isset($item['name'])) {
+                // Capitalize each word in the name
+                $item['name'] = Str::title($item['name']);
+            }
+            return $item;
+        });
+
+        // Pass the transformed data to the next pipe
+        return $next($data);
+    }
+}
+```
+
+3.  **Add the Pipe to Your Schema:** Simply add the new class to the `pre_commit_pipeline` array in your `.yml` file.
+
+```yaml
+pre_commit_pipeline:
+  - App\Services\Etl\Pipelines\ConvertIdToObjectIdPipe
+  - App\Services\Etl\Pipelines\FormatUserNamePipe  # <-- Add your new pipe
+  - App\Services\Etl\Pipelines\UpsertPipe
+    ```
+
+### **4. Developer Impact Summary**
+
+*   **`CommitImportJob` is a Generic Runner:** The core job is now completely agnostic of business logic. It simply reads the `pre_commit_pipeline` array and executes it.
+*   **Maximum Extensibility:** Adding new functionality no longer requires modifying the core service. You only need to create a new, self-contained pipe class and add it to the schema.
+*   **Centralized Configuration:** All logic for a specific import is now fully described within its schema file, making the system easier to understand and maintain.
+*   **Frontend Options are still Used:** UI options from the `EtlImportModal` (like `upsert` and `upsert_field`) are still passed to the `CommitImportJob`. The job uses these options to correctly configure pipes that require arguments (like the `UpsertPipe`).
+
+---
+
+## **Bahasa Indonesia**
+
+### **1. Konsep**
+
+Daripada memiliki logika yang di-hardcode di dalam `CommitImportJob` (misalnya, `if (opsi === 'convert_id')`), Anda sekarang dapat menentukan urutan kelas "pipe" di dalam file skema Anda. Setiap batch data yang diimpor akan dilewatkan melalui setiap kelas dalam urutan ini sebelum akhirnya disimpan ke database.
+
+Pola yang kuat ini memungkinkan transformasi data yang kompleks, kustom, dan dapat digunakan kembali (seperti memformat nama, menghitung nilai, atau validasi terhadap sistem lain) untuk didefinisikan per skema tanpa perlu menyentuh kode inti layanan sama sekali.
+
+### **2. Pembaruan Skema**
+
+Sebuah kunci baru yang **wajib diisi**, `pre_commit_pipeline`, telah ditambahkan ke file skema. Kunci ini harus berupa array yang berisi nama kelas yang fully-qualified.
+
+| Key | Deskripsi | Contoh |
+| :--- | :--- | :--- |
+| `pre_commit_pipeline` | **Wajib Diisi.** Array berurutan berisi kelas-kelas pipe yang akan dilewati data sebelum disimpan. | `pre_commit_pipeline: [FirstPipe::class, SecondPipe::class]` |
+
+**Contoh `user_schema.yml`:**
+```yaml
+model: App\Models\User
+driver: open_spout_schema_import
+primary_key: _id
+
+# Urutan kelas di sini adalah urutan eksekusinya.
+pre_commit_pipeline:
+  # Pipe ini mengubah nama _id asli dari spreadsheet menjadi extId.
+  - App\Services\Etl\Pipelines\ConvertIdToObjectIdPipe
+  # Pipe ini melakukan operasi upsert final ke database.
+  - App\Services\Etl\Pipelines\UpsertPipe
+
+fields:
+  # ...
+```
+
+### **3. Cara Membuat Pipe Kustom**
+
+Membuat langkah transformasi baru sekarang sangat sederhana:
+
+1.  **Buat Kelas Pipe Baru:** Buat sebuah kelas baru, misalnya di `app/Services/Etl/Pipelines/`. Kelas ini **wajib** mengimplementasikan interface `App\Services\Etl\Pipelines\PreCommitPipe`, yang memerlukan satu method `handle`.
+
+2.  **Implementasikan Logika:** Di dalam method `handle`, lakukan transformasi Anda pada collection `$data`. Yang terpenting, Anda harus memanggil `return $next($data);` di akhir untuk meneruskan data yang telah dimodifikasi ke pipe berikutnya dalam urutan.
+
+**Contoh: Pipe yang membuat huruf kapital di setiap kata pada nama pengguna.**
+**File:** `app/Services/Etl/Pipelines/FormatUserNamePipe.php`
+```php
+<?php
+namespace App\Services\Etl\Pipelines;
+
+use Illuminate\Support\Collection;
+use Illuminate\Support\Str;
+
+class FormatUserNamePipe implements PreCommitPipe
+{
+    public function handle(Collection $data, \Closure $next)
+    {
+        $data->transform(function ($item) {
+            if (isset($item['name'])) {
+                // Buat setiap kata menjadi huruf kapital
+                $item['name'] = Str::title($item['name']);
+            }
+            return $item;
+        });
+
+        // Teruskan data yang sudah ditransformasi ke pipe selanjutnya
+        return $next($data);
+    }
+}
+```
+
+3.  **Tambahkan Pipe ke Skema Anda:** Cukup tambahkan kelas baru tersebut ke dalam array `pre_commit_pipeline` di file `.yml` Anda.
+
+```yaml
+pre_commit_pipeline:
+  - App\Services\Etl\Pipelines\ConvertIdToObjectIdPipe
+  - App\Services\Etl\Pipelines\FormatUserNamePipe  # <-- Tambahkan pipe baru Anda
+  - App\Services\Etl\Pipelines\UpsertPipe
+    ```
+
+### **4. Ringkasan Dampak bagi Developer**
+
+*   **`CommitImportJob` Menjadi Runner Generik:** Job inti sekarang sepenuhnya agnostik terhadap logika bisnis. Job ini hanya membaca array `pre_commit_pipeline` dan menjalankannya.
+*   **Ekstensibilitas Maksimal:** Menambahkan fungsionalitas baru tidak lagi memerlukan modifikasi pada layanan inti. Anda hanya perlu membuat kelas pipe baru yang mandiri dan menambahkannya ke skema.
+*   **Konfigurasi Terpusat:** Semua logika untuk proses impor tertentu sekarang sepenuhnya dijelaskan di dalam file skema-nya, membuat sistem lebih mudah dipahami dan dipelihara.
+*   **Opsi Frontend Tetap Digunakan:** Opsi UI dari `EtlImportModal` (seperti `upsert` dan `upsert_field`) tetap diteruskan ke `CommitImportJob`. Job ini menggunakan opsi tersebut untuk mengkonfigurasi pipe yang memerlukan argumen (seperti `UpsertPipe`) dengan benar.

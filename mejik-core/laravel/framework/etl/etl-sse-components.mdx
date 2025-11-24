@@ -1,0 +1,406 @@
+---
+title: SSE Based ETL Components
+---
+
+## SSE ETL Component & Integration Guide
+
+This document provides a technical guide for developers on the three-stage import system. It covers the purpose of each Vue component, their API (props and events), and the required Laravel backend setup for Server-Sent Events (SSE) interaction.
+
+---
+
+### **(English)**
+
+## Part 1: Component Architecture Overview
+
+The import process is managed by three distinct Vue components that create a robust, three-stage user experience:
+
+1.  **`AttachmentLinkUpload.vue`**: The initial file uploader. It handles the first stage (**Upload**) and, when configured, triggers the second stage.
+2.  **`SseProgressBar.vue`**: A reusable component that provides real-time progress for any long-running background task (**Buffering** and **Commit** stages).
+3.  **`EtlImportModal.vue`**: The main orchestrator. It controls the overall workflow, showing the correct component for each stage and managing the state of the import process.
+
+---
+
+## Part 2: Component Documentation
+
+### 1. `SseProgressBar.vue`
+
+A general-purpose component for displaying real-time progress from an SSE stream.
+
+#### **Purpose**
+To connect to a server endpoint, listen for progress events, and display the status and percentage to the user.
+
+#### **Props**
+
+| Prop Name | Type | Required | Default | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| `title` | String | Yes | `''` | The main title text to display above the progress bar (e.g., "Buffering Data"). |
+| `baseUrl` | String | Yes | `''` | The base URL of the SSE endpoint (e.g., `/api/etl/buffer-progress`). |
+| `processId`| String | Yes | `''` | The unique ID for the process to track (e.g., the `importId`). |
+
+#### **Events**
+
+| Event Name | Payload | Description |
+| :--- | :--- | :--- |
+| `complete` | `undefined` | Fired when the SSE stream sends a "Completed" status and closes. |
+| `error` | `undefined` | Fired if the connection to the SSE stream is lost or fails. |
+
+#### **Usage Example**
+```html
+<sse-progress-bar
+    ref="myProgress"
+    title="Processing Your Request"
+    base-url="/api/my-process/progress"
+    process-id="unique-job-id-123"
+    @complete="onProcessFinished"
+/>
+```
+```javascript
+// To start listening:
+this.$refs.myProgress.start();
+```
+
+---
+
+### 2. `AttachmentLinkUpload.vue`
+
+A flexible file uploader that can operate in a standard mode or in a background-processing mode with SSE.
+
+#### **Purpose**
+To handle the initial file upload. In "SSE mode," it uploads the file and then immediately hands off to the `SseProgressBar` to track the background job it just triggered.
+
+#### **Key Props for ETL Integration**
+
+| Prop Name | Type | Required | Default | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| `uploadurl`| String | Yes | `''` | The backend endpoint to which the file will be uploaded. |
+| `extraData`| Object | No | `{}` | Additional data to send along with the file (e.g., `schema_name`). |
+| `useSse` | Boolean | No | `false` | **Crucial.** If `true`, enables the SSE workflow. |
+| `sseProgressUrl`| String | If `useSse` | `''` | The base URL for the SSE progress endpoint. |
+| `sseTitle`| String | No | `'Processing...'` | The title to pass to the internal `SseProgressBar`. |
+| `acceptedFiles`| String | No | `*.*` | A string of accepted file types (e.g., `.xlsx,.csv`). |
+
+#### **Key Events for ETL Integration**
+
+| Event Name | Payload | Description |
+| :--- | :--- | :--- |
+| `complete` | Object | Fired when the entire process (upload + SSE) is done. Payload is `{ importId: '...' }`. |
+| `error` | String | Fired if the upload or the SSE process fails. |
+
+#### **Usage Example**
+```html
+<attachment-link-upload
+    ref="uploader"
+    uploadurl="/api/etl/upload"
+    :extra-data="{ schema_name: 'user_schema' }"
+    :use-sse="true"
+    sse-progress-url="/api/etl/buffer-progress"
+    sse-title="Parsing and Buffering File"
+    @complete="onFileBuffered"
+    @error="onUploadFailed"
+/>
+```
+
+---
+
+### 3. `EtlImportModal.vue`
+
+The main modal component that orchestrates the entire import flow.
+
+#### **Purpose**
+To provide a complete UI for the three-stage import process by managing and displaying the other two components based on the current `stage`.
+
+#### **Props**
+
+| Prop Name | Type | Required | Default | Description |
+| :--- | :--- | :--- | :--- | :--- |
+| `schemaName`| String | Yes | `''` | The name of the schema to use (e.g., `user_schema`). |
+| `baseUrl` | String | Yes | `''` | The base prefix for all API routes (e.g., `/api/etl`). |
+
+#### **Public Methods**
+
+| Method | Description |
+| :--- | :--- |
+| `show()` | Programmatically opens the modal. |
+| `hide()` | Programmatically closes the modal. |
+
+#### **Events**
+
+| Event Name | Payload | Description |
+| :--- | :--- | :--- |
+| `hidden` | `undefined` | Fired when the modal is fully closed. Used to trigger data refreshes. |
+| `shown` | `undefined` | Fired when the modal is fully visible. |
+
+---
+
+## Part 3: Backend Setup for SSE Interaction
+
+The frontend components rely on specific backend endpoints to function correctly.
+
+#### **1. Required Routes**
+Ensure these routes are defined in your `routes/api.php` file.
+
+```php
+// routes/api.php
+use App\Http\Controllers\EtlController;
+
+Route::prefix('etl')->group(function () {
+    // Stage 1: Receives the file, returns an `importId`, and dispatches the buffering job.
+    Route::post('upload', [EtlController::class, 'upload']);
+
+    // Stage 2: Streams progress for the buffering job.
+    Route::get('buffer-progress/{importId}', [EtlController::class, 'bufferProgress']);
+
+    // Preview Stage: Gets a preview of buffered data.
+    Route::get('preview/{importId}', [EtlController::class, 'preview']);
+
+    // Stage 3: Starts the commit job.
+    Route::post('commit/{importId}', [EtlController::class, 'commit']);
+
+    // Stage 3: Streams progress for the commit job.
+    Route::get('commit-progress/{importId}', [EtlController::class, 'commitProgress']);
+
+    // Utility for downloading templates.
+    Route::get('template/{schema}', [EtlController::class, 'downloadTemplate']);
+});
+```
+
+#### **2. Controller Logic for SSE**
+The controller needs methods to handle the SSE connections. A helper function can reduce code duplication.
+
+**File:** `app/Http/Controllers/EtlController.php`
+```php
+<?php
+namespace App\Http\Controllers;
+
+use Illuminate\Support\Facades\Cache;
+use Symfony\Component\HttpFoundation\StreamedResponse;
+// ... other imports
+
+class EtlController extends Controller
+{
+    // ... upload, commit, preview methods ...
+
+    public function bufferProgress(string $importId)
+    {
+        return $this->streamProgress("buffer_progress_{$importId}");
+    }
+
+    public function commitProgress(string $importId)
+    {
+        return $this->streamProgress("progress_{$importId}");
+    }
+
+    private function streamProgress(string $cacheKey)
+    {
+        return new StreamedResponse(function () use ($cacheKey) {
+            header('Content-Type: text/event-stream');
+            header('Cache-Control: no-cache');
+            header('Connection: keep-alive');
+            header('X-Accel-Buffering: no'); // Important for Nginx
+
+            while (true) {
+                $progress = Cache::get($cacheKey);
+                if ($progress) {
+                    echo "data: " . json_encode($progress) . "\n\n";
+                    ob_flush(); flush();
+                }
+                // Stop the loop if the job is done or the client disconnects
+                if (($progress['status'] ?? '') === 'Completed' || connection_aborted()) {
+                    break;
+                }
+                sleep(1); // Wait a second before checking the cache again
+            }
+        });
+    }
+}
+```
+
+#### **3. Job Progress Reporting**
+Your background jobs must periodically update a value in the cache that the controller can read.
+
+**Example from `ProcessImportFileJob.php`:**
+```php
+private function updateProgress(int $processed, int $total, string $status): void
+{
+    // The cache key must match what the controller is listening for.
+    Cache::put("buffer_progress_{$this->importId}", [
+        'processed' => $processed,
+        'total' => $total,
+        'status' => $status
+    ], now()->addHour());
+}
+```
+
+---
+---
+
+### **(Bahasa Indonesia)**
+
+## Bagian 1: Gambaran Arsitektur Komponen
+
+Proses impor dikelola oleh tiga komponen Vue yang berbeda untuk menciptakan pengalaman pengguna tiga tahap yang tangguh:
+
+1.  **`AttachmentLinkUpload.vue`**: Pengunggah file awal. Komponen ini menangani tahap pertama (**Upload**) dan, saat dikonfigurasi, akan memicu tahap kedua.
+2.  **`SseProgressBar.vue`**: Komponen yang dapat digunakan kembali yang menyediakan progres real-time untuk tugas latar belakang apa pun yang berjalan lama (tahap **Buffering** dan **Commit**).
+3.  **`EtlImportModal.vue`**: Orkestrator utama. Komponen ini mengontrol alur kerja secara keseluruhan, menampilkan komponen yang benar untuk setiap tahap, dan mengelola status proses impor.
+
+---
+
+## Bagian 2: Dokumentasi Komponen
+
+### 1. `SseProgressBar.vue`
+
+Komponen serbaguna untuk menampilkan progres real-time dari stream Server-Sent Events (SSE).
+
+#### **Tujuan**
+Untuk terhubung ke endpoint server, mendengarkan event progres, dan menampilkan status serta persentase kepada pengguna.
+
+#### **Props**
+
+| Nama Prop | Tipe | Wajib | Default | Deskripsi |
+| :--- | :--- | :--- | :--- | :--- |
+| `title` | String | Ya | `''` | Teks judul utama yang ditampilkan di atas progress bar (misalnya, "Memproses Data"). |
+| `baseUrl` | String | Ya | `''` | URL dasar dari endpoint SSE (misalnya, `/api/etl/buffer-progress`). |
+| `processId`| String | Ya | `''` | ID unik untuk proses yang akan dilacak (misalnya, `importId`). |
+
+#### **Event**
+
+| Nama Event | Payload | Deskripsi |
+| :--- | :--- | :--- |
+| `complete` | `undefined` | Dijalankan saat stream SSE mengirim status "Completed" dan ditutup. |
+| `error` | `undefined` | Dijalankan jika koneksi ke stream SSE terputus atau gagal. |
+
+---
+
+### 2. `AttachmentLinkUpload.vue`
+
+Pengunggah file fleksibel yang dapat beroperasi dalam mode standar atau mode pemrosesan latar belakang dengan SSE.
+
+#### **Tujuan**
+Untuk menangani unggahan file awal. Dalam "mode SSE", komponen ini mengunggah file dan segera menyerahkannya ke `SseProgressBar` untuk melacak tugas latar belakang yang baru saja dipicu.
+
+#### **Props Kunci untuk Integrasi ETL**
+
+| Nama Prop | Tipe | Wajib | Default | Deskripsi |
+| :--- | :--- | :--- | :--- | :--- |
+| `uploadurl`| String | Ya | `''` | Endpoint backend tempat file akan diunggah. |
+| `extraData`| Object | Tidak | `{}` | Data tambahan untuk dikirim bersama file (misalnya, `schema_name`). |
+| `useSse` | Boolean | Tidak | `false` | **Penting.** Jika `true`, mengaktifkan alur kerja SSE. |
+| `sseProgressUrl`| String | Jika `useSse` | `''` | URL dasar untuk endpoint progres SSE. |
+| `sseTitle`| String | Tidak | `'Processing...'` | Judul yang akan diteruskan ke `SseProgressBar` internal. |
+| `acceptedFiles`| String | Tidak | `*.*` | String tipe file yang diterima (misalnya, `.xlsx,.csv`). |
+
+#### **Event Kunci untuk Integrasi ETL**
+
+| Nama Event | Payload | Deskripsi |
+| :--- | :--- | :--- |
+| `complete` | Object | Dijalankan saat seluruh proses (unggah + SSE) selesai. Payload-nya adalah `{ importId: '...' }`. |
+| `error` | String | Dijalankan jika proses unggah atau SSE gagal. |
+
+---
+
+### 3. `EtlImportModal.vue`
+
+Komponen modal utama yang mengatur seluruh alur impor.
+
+#### **Tujuan**
+Menyediakan UI lengkap untuk proses impor tiga tahap dengan mengelola dan menampilkan dua komponen lainnya berdasarkan `stage` saat ini.
+
+#### **Props**
+
+| Nama Prop | Tipe | Wajib | Default | Deskripsi |
+| :--- | :--- | :--- | :--- | :--- |
+| `schemaName`| String | Ya | `''` | Nama skema yang akan digunakan (misalnya, `user_schema`). |
+| `baseUrl` | String | Ya | `''` | Awalan dasar untuk semua rute API (misalnya, `/api/etl`). |
+
+#### **Method Publik**
+
+| Method | Deskripsi |
+| :--- | :--- |
+| `show()` | Membuka modal secara terprogram. |
+| `hide()` | Menutup modal secara terprogram. |
+
+#### **Event**
+
+| Nama Event | Payload | Deskripsi |
+| :--- | :--- | :--- |
+| `hidden` | `undefined` | Dijalankan saat modal sepenuhnya tertutup. Digunakan untuk memicu refresh data. |
+| `shown` | `undefined` | Dijalankan saat modal sepenuhnya terlihat. |
+
+---
+
+## Bagian 3: Pengaturan Backend untuk Interaksi SSE
+
+Komponen frontend bergantung pada endpoint backend tertentu agar dapat berfungsi dengan benar.
+
+#### **1. Rute yang Diperlukan**
+Pastikan rute-rute ini didefinisikan dalam file `routes/api.php` Anda.
+
+```php
+// routes/api.php
+use App\Http\Controllers\EtlController;
+
+Route::prefix('etl')->group(function () {
+    Route::post('upload', [EtlController::class, 'upload']);
+    Route::get('buffer-progress/{importId}', [EtlController::class, 'bufferProgress']);
+    Route::get('preview/{importId}', [EtlController::class, 'preview']);
+    Route::post('commit/{importId}', [EtlController::class, 'commit']);
+    Route::get('commit-progress/{importId}', [EtlController::class, 'commitProgress']);
+    Route::get('template/{schema}', [EtlController::class, 'downloadTemplate']);
+});
+```
+
+#### **2. Logika Controller untuk SSE**
+Controller memerlukan method untuk menangani koneksi SSE. Fungsi pembantu dapat mengurangi duplikasi kode.
+
+**File:** `app/Http/Controllers/EtlController.php`
+```php
+<?php
+namespace App\Http\Controllers;
+
+use Illuminate\Support\Facades\Cache;
+use Symfony\Component\HttpFoundation\StreamedResponse;
+
+class EtlController extends Controller
+{
+    public function bufferProgress(string $importId) {
+        return $this->streamProgress("buffer_progress_{$importId}");
+    }
+
+    public function commitProgress(string $importId) {
+        return $this->streamProgress("progress_{$importId}");
+    }
+
+    private function streamProgress(string $cacheKey)
+    {
+        return new StreamedResponse(function () use ($cacheKey) {
+            // ... (logika header dan loop seperti di contoh Inggris) ...
+            while (true) {
+                $progress = Cache::get($cacheKey);
+                if ($progress) {
+                    echo "data: " . json_encode($progress) . "\n\n";
+                    ob_flush(); flush();
+                }
+                if (($progress['status'] ?? '') === 'Completed' || connection_aborted()) break;
+                sleep(1);
+            }
+        });
+    }
+}
+```
+
+#### **3. Pelaporan Progres dari Job**
+Job latar belakang Anda harus secara berkala memperbarui nilai di cache yang dapat dibaca oleh controller.
+
+**Contoh dari `ProcessImportFileJob.php`:**
+```php
+private function updateProgress(int $processed, int $total, string $status): void
+{
+    // Kunci cache harus cocok dengan yang didengarkan oleh controller.
+    Cache::put("buffer_progress_{$this->importId}", [
+        'processed' => $processed,
+        'total' => $total,
+        'status' => $status
+    ], now()->addHour());
+}
+```

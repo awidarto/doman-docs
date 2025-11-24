@@ -1,0 +1,154 @@
+---
+title: YAML Schema Editor
+---
+
+## English Documentation
+
+### **YAML Schema Editor: Developer's Guide**
+
+#### **1. Overview**
+
+The YAML Schema Editor is a comprehensive, Vue.js-based tool designed to create, manage, and visualize application schemas. It provides a rich, multi-tabbed interface that allows developers to visually define everything from database structures and API-facing fields (`vue`) to form layouts and printable document templates.
+
+The system's core philosophy is to provide both high-level visual editors (like drag-and-drop layout builders) and low-level source code editors, giving developers full control while accelerating the development workflow. The final output is clean, human-readable YAML that can be used to drive back-end and front-end code generation.
+
+#### **2. Key Features**
+
+*   **Multi-Tab Interface:** Each aspect of the schema (Vue, Table, Form, DB, Layouts, etc.) is managed in its own dedicated tab.
+*   **Three-Panel Editor:** For core schemas (`vue`, `form`, `table`), the UI provides a list of fields, a property editor for the selected field, and a live preview.
+*   **Advanced Data Import:**
+*   **Load from File:** Load existing schemas directly from YAML files on the server.
+*   **Paste from Text:** A powerful modal that accepts multiple text formats (JSON, YAML, CSV, MongoDB documents) to quickly bootstrap a new schema.
+*   **Visual Layout Editor:** A drag-and-drop interface for building complex form and view layouts.
+*   **WYSIWYG Document Editor:** A rich-text editor (based on Tiptap) for creating printable document templates, with support for HTML, Markdown, and Blade syntax output.
+*   **Hierarchical DB Schema:** A dedicated YAML editor for defining complex database schemas with nested objects and arrays, ideal for document databases like MongoDB.
+*   **Cross-Schema Syncing:** Easily generate `form`, `table`, or `db` fields based on the primary `vue` schema definition.
+
+#### **3. System Architecture**
+
+The system is built around a central parent component, `YamlEditor.vue`, which orchestrates the state and functionality for numerous specialized child components.
+
+*   **`YamlEditor.vue` (Parent):** Manages the overall state, including all schema data (`yamlDataProp`, `yamlDbDataProp`, etc.), handles tab switching, and passes data down to child editors.
+*   **Child Components (Editors & Tools):**
+*   **`SectionList.vue`:** Displays the list of fields for a given section (`vue`, `form`, etc.).
+*   **`PropertyEditor.vue`:** A dynamic form that displays and allows editing of properties for a selected field, including nested objects.
+*   **`LoadFileModal.vue` & `PasteSchemaModal.vue`:** Self-contained modals for data import.
+*   **`VisualFormLayoutEditor.vue`:** The container for the drag-and-drop layout builder.
+*   **`DocumentTemplateEditor.vue`:** The container for the WYSIWYG document editor.
+*   **`CodeEditor.vue`:** A general-purpose source code editor used for the DB Schema and output previews.
+
+#### **4. Developer Workflow: How to Use the Editor**
+
+A typical development workflow involves the following steps:
+
+1.  **Start a New Schema:**
+*   Use the **`Paste JSON / Text`** button for the fastest start. Paste a sample MongoDB document, a simple CSV, or a JSON object. The tool will infer the fields and types.
+*   Alternatively, use **`Load YAML`** to continue working on an existing schema file from the server.
+*   Or, start from scratch by clicking **`Add Field`** in the `vue` tab.
+
+2.  **Define the Core `vue` Schema:**
+*   The **`vue`** tab is the "source of truth." Add, remove, and reorder all fields here.
+*   Click on a field to select it. The **Property Editor** will appear on the right, allowing you to fine-tune its properties (e.g., `type`, `default` value). Use dot notation (e.g., `address.street`) for nested fields.
+
+3.  **Sync to Other Schemas:**
+*   Once your `vue` schema is defined, use the **`Sync to DB Schema`**, **`Sync to Table`**, and **`Sync to Form`** buttons. This automatically creates corresponding fields in the other sections, saving significant time.
+*   You can also sync fields individually using the icons next to each field in the `vue` list.
+
+4.  **Refine the DB Schema:**
+*   Switch to the **`DB Schema`** tab. Here you will see a full YAML representation of your database structure.
+*   This is where you define nested `object` and `array` structures, add validators, and set primary keys, as the flat-list editors do not support this level of detail.
+
+5.  **Design Layouts and Templates:**
+*   Go to the **`visual form layout`** or **`visual view layout`** tab to use the drag-and-drop editor to arrange fields.
+*   Go to the **`document template`** tab to use the WYSIWYG editor to create print layouts. Insert dynamic data by selecting variables from the sidebar.
+
+6.  **Review the Final Output:**
+*   The **`yml`** tab shows the complete YAML output for the main schema, which you can copy and save to your project's schema file.
+
+#### **5. Deep Dive: Paste Modal Input Formats**
+
+The "Paste JSON / Text" modal is a powerful bootstrapping tool. You must select the correct format for your input.
+
+| Format                | Description                                                                                                                                 |
+|-----------------------|---------------------------------------------------------------------------------------------------------------------------------------------|
+| **Schema Array**      | A full YAML/JSON object containing keys for each section (`vue`, `form`, etc.) with an array of fields. Ideal for pasting existing schemas. |
+| **Simplified Schema** | A YAML/JSON object with a single `fields` key. The tool will generate the `vue`, `form`, `table`, and `db` sections automatically.          |
+| **Full Schema**       | Similar to Simplified Schema but may include a `primary_key` and other top-level metadata.                                                  |
+| **MongoDB Document**  | A single JSON document from your collection. The tool infers field names, types (string, number, boolean, datetime), and nested structures. |
+| **Delimited Text**    | A CSV-like text where each line represents a field. The expected format is `field_name, Label, type` (type is optional).                    |
+
+
+## Dokumentasi Bahasa Indonesia
+
+### **YAML Schema Editor: Panduan untuk Developer**
+
+#### **1. Gambaran Umum**
+
+YAML Schema Editor adalah sebuah *tool* komprehensif berbasis Vue.js yang dirancang untuk membuat, mengelola, dan memvisualisasikan skema aplikasi. *Tool* ini menyediakan antarmuka multi-tab yang kaya, memungkinkan developer untuk mendefinisikan segala sesuatu secara visual, mulai dari struktur *database* dan *field* untuk API (`vue`) hingga tata letak formulir dan templat dokumen yang dapat dicetak.
+
+Filosofi inti dari sistem ini adalah menyediakan editor visual tingkat tinggi (seperti *drag-and-drop layout builder*) dan editor kode sumber tingkat rendah, memberikan developer kontrol penuh sambil mempercepat alur kerja pengembangan. Hasil akhirnya adalah YAML yang bersih dan mudah dibaca yang dapat digunakan untuk menggerakkan pembuatan kode (*code generation*) di sisi *back-end* dan *front-end*.
+
+#### **2. Fitur Utama**
+
+*   **Antarmuka Multi-Tab:** Setiap aspek skema (Vue, Table, Form, DB, Layout, dll.) dikelola di dalam tab-nya masing-masing.
+*   **Editor Tiga Panel:** Untuk skema inti (`vue`, `form`, `table`), antarmuka menyediakan daftar *field*, editor properti untuk *field* yang dipilih, dan pratinjau langsung (*live preview*).
+*   **Impor Data Tingkat Lanjut:**
+*   **`Load from File`:** Memuat skema yang sudah ada langsung dari *file* YAML di server.
+*   **`Paste from Text`:** Sebuah modal canggih yang menerima berbagai format teks (JSON, YAML, CSV, dokumen MongoDB) untuk membuat skema baru dengan cepat.
+*   **Visual Layout Editor:** Antarmuka *drag-and-drop* untuk membangun tata letak formulir dan tampilan yang kompleks.
+*   **WYSIWYG Document Editor:** Editor *rich-text* (berbasis Tiptap) untuk membuat templat dokumen yang dapat dicetak, dengan dukungan untuk *output* sintaks HTML, Markdown, dan Blade.
+*   **Skema DB Hierarkis:** Editor YAML khusus untuk mendefinisikan skema *database* yang kompleks dengan objek dan *array* bersarang (*nested*), ideal untuk *database* dokumen seperti MongoDB.
+*   **Sinkronisasi Antar-Skema:** Membuat *field* untuk `form`, `table`, atau `db` dengan mudah berdasarkan definisi skema utama di `vue`.
+
+#### **3. Arsitektur Sistem**
+
+Sistem ini dibangun di sekitar satu komponen induk, `YamlEditor.vue`, yang mengatur *state* dan fungsionalitas untuk banyak komponen anak yang terspesialisasi.
+
+*   **`YamlEditor.vue` (Induk):** Mengelola *state* keseluruhan, termasuk semua data skema (`yamlDataProp`, `yamlDbDataProp`, dll.), menangani perpindahan tab, dan meneruskan data ke editor anak.
+*   **Komponen Anak (Editor & *Tools*):**
+*   **`SectionList.vue`:** Menampilkan daftar *field* untuk sebuah seksi (`vue`, `form`, dll.).
+*   **`PropertyEditor.vue`:** Formulir dinamis yang menampilkan dan memungkinkan pengeditan properti untuk *field* yang dipilih, termasuk objek bersarang.
+*   **`LoadFileModal.vue` & `PasteSchemaModal.vue`:** Modal mandiri untuk impor data.
+*   **`VisualFormLayoutEditor.vue`:** Kontainer untuk *layout builder drag-and-drop*.
+*   **`DocumentTemplateEditor.vue`:** Kontainer untuk editor dokumen WYSIWYG.
+*   **`CodeEditor.vue`:** Editor kode sumber serbaguna yang digunakan untuk Skema DB dan pratinjau *output*.
+
+#### **4. Alur Kerja Developer: Cara Menggunakan Editor**
+
+Alur kerja pengembangan yang umum melibatkan langkah-langkah berikut:
+
+1.  **Memulai Skema Baru:**
+*   Gunakan tombol **`Paste JSON / Text`** untuk cara tercepat. Tempelkan (*paste*) contoh dokumen MongoDB, CSV sederhana, atau objek JSON. *Tool* akan menyimpulkan *field* dan tipenya.
+*   Sebagai alternatif, gunakan **`Load YAML`** untuk melanjutkan pekerjaan pada *file* skema yang sudah ada di server.
+*   Atau, mulai dari awal dengan mengklik **`Add Field`** di tab `vue`.
+
+2.  **Definisikan Skema Inti di `vue`:**
+*   Tab **`vue`** adalah "sumber kebenaran" (*source of truth*). Tambah, hapus, dan urutkan semua *field* di sini.
+*   Klik pada sebuah *field* untuk memilihnya. **Property Editor** akan muncul di sebelah kanan, memungkinkan Anda untuk mengatur propertinya (misalnya, `type`, nilai `default`). Gunakan notasi titik (*dot notation*) (contoh: `address.street`) untuk *field* bersarang.
+
+3.  **Sinkronisasi ke Skema Lain:**
+*   Setelah skema `vue` Anda terdefinisi, gunakan tombol **`Sync to DB Schema`**, **`Sync to Table`**, dan **`Sync to Form`**. Ini akan secara otomatis membuat *field* yang sesuai di seksi lain, menghemat banyak waktu.
+*   Anda juga dapat menyinkronkan *field* satu per satu menggunakan ikon di sebelah setiap *field* dalam daftar `vue`.
+
+4.  **Sempurnakan Skema DB:**
+*   Beralihlah ke tab **`DB Schema`**. Di sini Anda akan melihat representasi YAML lengkap dari struktur *database* Anda.
+*   Di sinilah Anda mendefinisikan struktur `object` dan `array` bersarang, menambahkan *validator*, dan mengatur *primary key*, karena editor daftar datar tidak mendukung detail tingkat ini.
+
+5.  **Rancang Tata Letak dan Templat:**
+*   Buka tab **`visual form layout`** atau **`visual view layout`** untuk menggunakan editor *drag-and-drop* untuk menyusun *field*.
+*   Buka tab **`document template`** untuk menggunakan editor WYSIWYG untuk membuat tata letak cetak. Sisipkan data dinamis dengan memilih variabel dari *sidebar*.
+
+6.  **Tinjau Hasil Akhir:**
+*   Tab **`yml`** menunjukkan *output* YAML lengkap untuk skema utama, yang dapat Anda salin dan simpan ke *file* skema proyek Anda.
+
+#### **5. Detail Fitur: Format Input Modal `Paste`**
+
+Modal "Paste JSON / Text" adalah *tool bootstrapping* yang sangat berguna. Anda harus memilih format yang benar untuk input Anda.
+
+| Format                | Deskripsi                                                                                                                                                              |
+|-----------------------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Schema Array**      | Objek YAML/JSON lengkap yang berisi *key* untuk setiap seksi (`vue`, `form`, dll.) dengan sebuah *array* berisi *field*. Ideal untuk menempelkan skema yang sudah ada. |
+| **Simplified Schema** | Objek YAML/JSON dengan satu *key* `fields`. *Tool* akan membuat seksi `vue`, `form`, `table`, dan `db` secara otomatis.                                                |
+| **Full Schema**       | Mirip dengan Simplified Schema tetapi dapat menyertakan `primary_key` dan metadata tingkat atas lainnya.                                                               |
+| **MongoDB Document**  | Satu dokumen JSON dari koleksi Anda. *Tool* akan menyimpulkan nama *field*, tipe (string, number, boolean, datetime), dan struktur bersarang.                          |
+| **Delimited Text**    | Teks seperti CSV di mana setiap baris mewakili sebuah *field*. Format yang diharapkan adalah `nama_field, Label, tipe` (tipe bersifat opsional).                       |

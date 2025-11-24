@@ -1,0 +1,458 @@
+---
+title: Finance Accounting Report System
+---
+
+## FasReporting Subsystem Documentation
+
+### Version: 1.0
+### Date: Nov 23, 2025
+
+---
+
+### **Table of Contents**
+
+1.  **Introduction**
+*   1.1. System Overview
+*   1.2. Key Features
+2.  **System Architecture**
+*   2.1. High-Level Flow
+*   2.2. Technology Stack
+3.  **Setup & Installation (Developer Guide)**
+*   3.1. Directory Structure
+*   3.2. Dependencies
+*   3.3. Configuration
+4.  **Core Components & Implementation (Developer Guide)**
+*   4.1. MongoDB Models
+*   4.2. Core Services (`FasReporting` Namespace)
+*   4.3. Asynchronous Jobs (`Fas` Namespace)
+*   4.4. Artisan Commands (`Fas` Namespace)
+*   4.5. API Controllers
+5.  **System Usage (Developer Guide)**
+*   5.1. Importing Report Templates via API
+*   5.2. Compiling Reports via Artisan Command
+*   5.3. Retrieving Compiled Reports via API
+6.  **Report Template Creation (User Guide)**
+*   6.1. Introduction to Excel Templates
+*   6.2. Template Structure and Rules
+*   6.3. Example 1: Profit & Loss Statement Template
+*   6.4. Example 2: Trial Balance Template
+7.  **Future Enhancements**
+
+---
+
+### 1. Introduction
+
+#### 1.1. System Overview
+
+The **FasReporting** subsystem is a robust, template-driven engine for generating standard financial reports within a Laravel application. It is designed to be highly configurable and scalable, offloading the heavy computational work of report generation to a background queue. The system uses MongoDB for its data storage, leveraging its performance for complex accounting queries.
+
+The core principle is the separation of report structure (the "template") from the accounting data (the "General Ledger"). This allows financial analysts and accountants to design and modify report layouts in a familiar tool like Microsoft Excel, without requiring code changes.
+
+#### 1.2. Key Features
+
+*   **Template-Driven:** Report layouts are defined in external Excel files, allowing for easy customization.
+*   **Asynchronous Compilation:** Report generation is handled by background jobs, ensuring the user interface remains responsive.
+*   **Result Caching:** Compiled reports are cached in Redis for near-instant retrieval on subsequent requests.
+*   **MongoDB Optimized:** Leverages MongoDB's aggregation pipeline for efficient calculation of account balances.
+*   **Namespaced & Modular:** All components are logically grouped under `Fas` and `FasReporting` namespaces for clean code organization.
+
+---
+
+### 2. System Architecture
+
+#### 2.1. High-Level Flow
+
+The reporting process follows these steps:
+
+1.  **Template Import:** A user uploads an Excel file defining the report structure via a dedicated API endpoint. The system parses this file and saves the template to the `report_templates` collection in MongoDB.
+2.  **Compilation Trigger:** A developer or a system process triggers a report compilation for a specific template, company, and date range using an `artisan` command.
+3.  **Queue Dispatch:** The command dispatches a `CompileReportJob` to the configured queue (e.g., Redis).
+4.  **Background Processing:** A queue worker picks up the job and executes the `LineReportService`. This service queries the General Ledger, performs all calculations based on the template rules, and assembles the final report data.
+5.  **Caching:** The resulting report data (a JSON array) is stored in the cache with a unique key derived from the company, template, and date range.
+6.  **Report Retrieval:** A client application (e.g., a frontend UI) fetches the report from a retrieval API. This API first checks the cache; if the report exists, it is returned immediately.
+
+#### 2.2. Technology Stack
+
+*   **Backend Framework:** Laravel 8+
+*   **Database:** MongoDB
+*   **Laravel-MongoDB Driver:** `jenssegers/laravel-mongodb`
+*   **Excel Parsing:** `maatwebsite/excel`
+*   **Caching/Queueing:** Redis (recommended)
+
+---
+
+### 3. Setup & Installation (Developer Guide)
+
+#### 3.1. Directory Structure
+
+The subsystem's components are organized as follows:
+
+```
+app/
+├── Console/
+│   └── Commands/
+│       └── Fas/
+│           └── CompileReport.php
+├── Http/
+│   └── Controllers/
+│       └── Api/
+│           ├── ReportRetrievalController.php
+│           └── ReportTemplateImportController.php
+├── Jobs/
+│   └── Fas/
+│       └── CompileReportJob.php
+├── Models/
+│   ├── ReportTemplate.php
+│   ├── ChartOfAccount.php
+│   └── GeneralLedgerEntry.php
+└── Services/
+    └── FasReporting/
+        ├── ExcelTemplateImporterService.php
+        └── LineReportService.php
+```
+
+#### 3.2. Dependencies
+
+Install the required packages using Composer:
+
+```bash
+composer require jenssegers/mongodb
+composer require maatwebsite/excel
+```
+
+#### 3.3. Configuration
+
+1.  **Database:** Configure your MongoDB connection in `config/database.php` and `.env`.
+2.  **Queue:** Set your queue driver to `redis` or another persistent driver in your `.env` file.
+```env
+QUEUE_CONNECTION=redis
+    ```
+3.  **Queue Worker:** Ensure you have a queue worker running to process the jobs:
+```bash
+php artisan queue:work
+    ```
+
+---
+
+### 4. Core Components & Implementation (Developer Guide)
+
+#### 4.1. MongoDB Models
+
+The system relies on three primary models. (Source code for `ChartOfAccount` and `GeneralLedgerEntry` are standard Eloquent models for MongoDB).
+
+**`app/Models/ReportTemplate.php`**
+This model represents a report template and its embedded lines.
+
+```php
+<?php
+namespace App;
+
+use Jenssegers\Mongodb\Eloquent\Model;
+
+class ReportTemplate extends Model
+{
+    protected $connection = 'mongodb';
+    protected $collection = 'report_templates';
+
+    protected $fillable = [
+        'name',
+        'type',
+        'company_id',
+        'lines',
+    ];
+
+    protected $casts = [
+        'lines' => 'array',
+    ];
+}
+```
+
+#### 4.2. Core Services (`FasReporting` Namespace)
+
+**`app/Services/FasReporting/LineReportService.php`**
+This is the heart of the engine, responsible for all calculations.
+
+```php
+<?php
+// ... (Full source code from previous response)
+namespace App\Services\FasReporting;
+use App\Models\ReportTemplate;
+use App\Models\GeneralLedgerEntry;
+use Carbon\Carbon;
+use Illuminate\Support\Collection;
+
+class LineReportService
+{
+    // ... Implementation ...
+}
+```
+
+**`app/Services/FasReporting/ExcelTemplateImporterService.php`**
+This service parses the uploaded Excel file and persists the template.
+
+```php
+<?php
+// ... (Full source code from previous response)
+namespace App\Services\FasReporting;
+use App\Models\ReportTemplate;
+use Illuminate\Http\UploadedFile;
+use Maatwebsite\Excel\Facades\Excel;
+use MongoDB\BSON\ObjectId;
+
+class ExcelTemplateImporterService
+{
+    // ... Implementation ...
+}
+```
+
+#### 4.3. Asynchronous Jobs (`Fas` Namespace)
+
+**`app/Jobs/Fas/CompileReportJob.php`**
+This job wraps the `LineReportService` execution so it can be processed in the background.
+
+```php
+<?php
+// ... (Full source code from previous response)
+namespace App\Jobs\Fas;
+use Illuminate\Bus\Queueable;
+// ... other imports
+use App\Services\FasReporting\LineReportService;
+
+class CompileReportJob implements ShouldQueue
+{
+    // ... Implementation ...
+}
+```
+
+#### 4.4. Artisan Commands (`Fas` Namespace)
+
+**`app/Console/Commands/Fas/CompileReport.php`**
+This command provides a command-line interface to trigger report compilations.
+
+```php
+<?php
+// ... (Full source code from previous response)
+namespace App\Console\Commands\Fas;
+use Illuminate\Console\Command;
+use App\Jobs\Fas\CompileReportJob;
+
+class CompileReport extends Command
+{
+    protected $signature = 'fas:report:compile ...';
+    // ... Implementation ...
+}
+```
+
+#### 4.5. API Controllers
+
+**`app/Http/Controllers/Api/ReportTemplateImportController.php`**
+Handles the file upload and initiates the import process.
+
+```php
+<?php
+// ... (Full source code from previous response)
+namespace App\Http\Controllers\Api;
+use App\Http\Controllers\Controller;
+use Illuminate\Http\Request;
+use App\Services\FasReporting\ExcelTemplateImporterService;
+
+class ReportTemplateImportController extends Controller
+{
+    // ... Implementation ...
+}
+```
+
+**`app/Http/Controllers/Api/ReportRetrievalController.php`**
+Provides an endpoint to fetch the final, cached report.
+
+```php
+<?php
+namespace App\Http\Controllers\Api;
+
+use App\Http\Controllers\Controller;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Cache;
+use App\Jobs\Fas\CompileReportJob;
+
+class ReportRetrievalController extends Controller
+{
+    public function getReport(Request $request, string $companyId, string $templateId)
+    {
+        $validated = $request->validate([
+            'start_date' => 'required|date_format:Y-m-d',
+            'end_date' => 'required|date_format:Y-m-d',
+        ]);
+
+        $cacheKey = "fas:reports:{$companyId}:{$templateId}:{$validated['start_date']}_to_{$validated['end_date']}";
+
+        if (Cache::has($cacheKey)) {
+            return response()->json([
+                'status' => 'completed',
+                'data' => Cache::get($cacheKey),
+            ]);
+        }
+
+        // Optional: Automatically dispatch a job if the report isn't found
+        // CompileReportJob::dispatch($templateId, $companyId, $validated['start_date'], $validated['end_date']);
+
+        return response()->json([
+            'status' => 'pending',
+            'message' => 'Report is not yet available. It may be processing or has not been generated yet.',
+        ], 202); // 202 Accepted
+    }
+}
+```
+
+---
+
+### 5. System Usage (Developer Guide)
+
+#### 5.1. Importing Report Templates via API
+
+To create or update a report template, make a `POST` request to the import endpoint.
+
+*   **Endpoint:** `POST /api/companies/{companyId}/report-templates/import`
+*   **Content-Type:** `multipart/form-data`
+*   **Parameters:**
+*   `template_file` (file): The `.xlsx` or `.xls` template file.
+*   `template_name` (string): The name for the report (e.g., "Standard P&L").
+*   `template_type` (string): The type of report. Must be one of: `PNL`, `BALANCE_SHEET`, `TRIAL_BALANCE`.
+
+**Example `curl` Request:**
+```bash
+curl -X POST "http://your-app.test/api/companies/653a123.../report-templates/import" \
+-H "Authorization: Bearer <your_token>" \
+-F "template_file=@/path/to/your/pnl_template.xlsx" \
+-F "template_name=Standard Profit & Loss" \
+-F "template_type=PNL"
+```
+**Success Response (201):**
+```json
+{
+    "message": "Report template imported successfully.",
+    "template_id": "653a456..."
+}
+```
+
+#### 5.2. Compiling Reports via Artisan Command
+
+Use the `fas:report:compile` command to generate a report.
+
+**Asynchronous (Recommended for Production):**
+```bash
+php artisan fas:report:compile {templateId} {companyId} {startDate} {endDate} --queue
+# Example:
+php artisan fas:report:compile 653a456... 653a123... 2023-01-01 2023-01-31 --queue
+```
+
+**Synchronous (For Debugging):**
+```bash
+php artisan fas:report:compile 653a456... 653a123... 2023-01-01 2023-01-31
+```
+
+#### 5.3. Retrieving Compiled Reports via API
+
+*   **Endpoint:** `GET /api/reports/{companyId}/{templateId}`
+*   **Query Parameters:**
+*   `start_date` (string, Y-m-d): The report start date.
+*   `end_date` (string, Y-m-d): The report end date.
+
+**Example `curl` Request:**
+```bash
+curl -X GET "http://your-app.test/api/reports/653a123.../653a456...?start_date=2023-01-01&end_date=2023-01-31" \
+-H "Authorization: Bearer <your_token>"
+```
+**Success Response (200 - Report is ready):**
+```json
+{
+    "status": "completed",
+    "data": [
+        { "seq": 10, "level": 0, "line_name": "Revenue", "amount": 500000000, "display_style": "bold" },
+        { "seq": 20, "level": 1, "line_name": "Product Sales", "amount": 500000000, "display_style": null },
+        // ... more lines
+    ]
+}
+```
+**Pending Response (202 - Report not yet cached):**
+```json
+{
+    "status": "pending",
+    "message": "Report is not yet available. It may be processing or has not been generated yet."
+}
+```
+
+---
+
+### 6. Report Template Creation (User Guide)
+
+#### 6.1. Introduction to Excel Templates
+
+You can create complex financial report layouts using a simple Excel spreadsheet. The system intelligently interprets the structure of your spreadsheet based on a few rules. Each row in the Excel sheet corresponds to one line in the final report.
+
+#### 6.2. Template Structure and Rules
+
+Your Excel file should have columns that map to the following fields. The system **does not read headers**; it only reads the data starting from the second row (Row 2).
+
+| Column | Field Name      | Description                                                                                                                                                                                            |
+| :----- | :-------------- | :----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A, B, C… | **Indentation**   | **The number of empty cells from the left determines the indentation level (`level`)**. One empty cell = level 1, two empty cells = level 2, etc. The first non-empty cell is the `line_name`. |
+| D      | **Line Name**     | The text to be displayed for this line. This is automatically inferred from the first non-empty cell.                                                                                                |
+| E      | **Line Key**      | A unique, uppercase key (e.g., `TOTAL_REVENUE`) used to reference this line's calculated amount in other formulas. This is **critical for building calculations**.                                   |
+| F      | **Account Spec**  | Defines which GL accounts to sum for this line. Use `*` as a wildcard (e.g., `4*` for all accounts starting with 4). Leave blank for header or formula lines.                                         |
+| G      | **Formula**       | A calculation based on other `Line Key` values. Currently supports `SUM()`. Ex: `SUM(KEY1, KEY2, -KEY3)`. The minus sign (`-`) subtracts the value. Leave blank if using `Account Spec`.              |
+| H      | **Display Style** | (Optional) A CSS class name for styling on the frontend. Common values are `bold` or `underline-top`.                                                                                                 |
+
+#### 6.3. Example 1: Profit & Loss Statement Template
+
+This example shows how to structure a standard P&L statement.
+
+**Excel View:**
+
+| | A | B | C | D | E | F | G | H |
+|---|---|---|---|---|---|---|---|---|
+| **1** | | | | *(Ignored Header)* | Line Key | Account Spec | Formula | Style |
+| **2** | Revenue | | | | | | | bold |
+| **3** | | Sales Revenue | | | SALES | 4* | | |
+| **4** | | Interest Income | | | INTEREST | 4900 | | |
+| **5** | **Total Revenue** | | | | TOTAL_REVENUE | | SUM(SALES, INTEREST) | bold |
+| **6** | | | | | | | | |
+| **7** | Cost of Goods Sold | | | | COGS | 5* | | |
+| **8** | **Gross Profit** | | | | GROSS_PROFIT | | SUM(TOTAL_REVENUE, -COGS) | bold |
+| **9** | | | | | | | | |
+| **10**| Operating Expenses | | | | | | | bold |
+| **11**| | Salaries Expense | | | SALARIES | 6000-6199 | | |
+| **12**| | Rent Expense | | | RENT | 6200 | | |
+| **13**| **Total OpEx** | | | | TOTAL_OPEX | | SUM(SALARIES, RENT) | bold |
+| **14**| **Net Income** | | | | NET_INCOME | | SUM(GROSS_PROFIT, -TOTAL_OPEX) | bold |
+
+**How it's interpreted:**
+
+*   **Row 3:** Has one empty cell in column A. `level` is 1. `line_name` is "Sales Revenue". `account_spec` is `4*`, so it will sum all accounts starting with 4. Its value is stored with the key `SALES`.
+*   **Row 5:** `level` is 0. `formula` is `SUM(SALES, INTEREST)`. The system will take the calculated values from rows 3 and 4 and add them together.
+*   **Row 8:** The formula `SUM(TOTAL_REVENUE, -COGS)` calculates Gross Profit by subtracting the `COGS` value from the `TOTAL_REVENUE` value.
+
+#### 6.4. Example 2: Trial Balance Template
+
+A Trial Balance is simpler and typically doesn't use formulas, just direct account sums.
+
+**Excel View:**
+
+| | A | B | C | D | E | F | G | H |
+|---|---|---|---|---|---|---|---|---|
+| **1** | | | | *(Ignored Header)* | Line Key | Account Spec | Formula | Style |
+| **2** | **Assets** | | | | | | | bold |
+| **3** | | Cash and Bank | | | | 1* | | |
+| **4** | | Accounts Receivable | | | | 12* | | |
+| **5** | **Liabilities** | | | | | | | bold |
+| **6** | | Accounts Payable | | | | 2* | | |
+| **7** | **Equity** | | | | | | | bold |
+| **8** | | Retained Earnings | | | | 3* | | |
+
+---
+
+### 7. Future Enhancements
+
+*   **Advanced Formula Engine:** Extend the formula parser to support more complex operations like `IF`, `AVG`, or nested calculations.
+*   **UI for Template Management:** Build a web interface for users to upload, manage, and edit report templates directly in the application.
+*   **Real-time Progress:** Use WebSockets (e.g., Laravel Echo) to provide real-time updates on report compilation status to the frontend.
+*   **Multi-Period Reports:** Add functionality to generate comparative reports (e.g., This Year vs. Last Year) by accepting multiple date ranges.

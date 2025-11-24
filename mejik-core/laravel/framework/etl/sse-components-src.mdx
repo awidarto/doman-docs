@@ -1,0 +1,496 @@
+---
+title: SSE Components Source Code
+---
+
+1.  **`SseProgressBar.vue`**: The reusable component for tracking any SSE-based background process.
+2.  **`AttachmentLinkUpload.vue`**: The enhanced uploader that now includes an optional SSE progress tracking mode.
+3.  **`EtlImportModal.vue`**: The main orchestrator modal that uses the other two components to manage the full import workflow.
+
+---
+
+### 1. `SseProgressBar.vue`
+
+This is the general-purpose component for displaying progress from a Server-Sent Events stream.
+
+**File Path:** `resources/js/components/etl/SseProgressBar.vue`
+```html
+<template>
+  <div class="sse-progress-container">
+    <h5 class="text-center">{{ title }}</h5>
+    <p class="text-center text-muted">{{ statusText }}</p>
+    <b-progress :value="percentage" max="100" show-progress animated class="mt-3"></b-progress>
+  </div>
+</template>
+
+<script>
+import { BProgress } from 'bootstrap-vue';
+
+export default {
+  name: 'SseProgressBar',
+  components: {
+    BProgress
+  },
+  props: {
+    title: {
+      type: String,
+      required: true
+    },
+    baseUrl: {
+      type: String,
+      required: true
+    },
+    processId: {
+      type: String,
+      required: true
+    }
+  },
+  data() {
+    return {
+      percentage: 0,
+      statusText: 'Initializing...',
+      eventSource: null
+    };
+  },
+  methods: {
+    start() {
+      if (!this.processId) {
+        console.error("SseProgressBar: processId is missing.");
+        return;
+      }
+      this.listenForProgress();
+    },
+    listenForProgress() {
+      // Ensure we don't have multiple connections open
+      if (this.eventSource) {
+        this.eventSource.close();
+      }
+
+      this.eventSource = new EventSource(`${this.baseUrl}/${this.processId}`);
+
+      this.eventSource.onmessage = (event) => {
+        const data = JSON.parse(event.data);
+        this.statusText = `${data.status} (${data.processed} / ${data.total})`;
+
+        if (data.total > 0) {
+          this.percentage = Math.round((data.processed * 100) / data.total);
+        } else if (data.processed > 0) {
+          // Handle indeterminate progress (total unknown) by just showing status
+          this.percentage = 100; // Keep the bar full but animate
+        }
+
+        if (data.status === 'Completed') {
+          this.eventSource.close();
+          this.statusText = "Completed successfully!";
+          this.percentage = 100;
+          this.$emit('complete');
+        }
+      };
+
+      this.eventSource.onerror = (error) => {
+        console.error('SSE Error:', error);
+        this.statusText = "Error: Connection to server lost.";
+        this.eventSource.close();
+        this.$emit('error');
+      };
+    }
+  },
+  beforeDestroy() {
+    // Clean up the connection when the component is removed from the DOM
+    if (this.eventSource) {
+      this.eventSource.close();
+    }
+  }
+}
+</script>
+```
+
+---
+
+### 2. `AttachmentLinkUpload.vue`
+
+This is your uploader, now enhanced with an optional SSE progress tracking mode.
+
+**File Path:** `resources/js/components/etl/AttachmentLinkUpload.vue`
+```html
+<template>
+    <div style="display:block;">
+        <!-- Uploader Action -->
+        <div class="d-flex justify-content-start" v-if="stage === 'idle'">
+            <div style="min-width: 56px;" >
+                <vue-clip
+                    :on-sending="sending"
+                    :on-complete="complete"
+                    :options="options">
+                    <template slot="clip-uploader-action">
+                        <div class="drop-pad d-flex justify-content-center" >
+                            <div class="btn dz-message d-flex justify-content-center" style="padding: 4px 16px !important;" >
+                                <b-spinner small v-if="isUploading" ></b-spinner>
+                                <i v-if="!isUploading" class="las la-upload"></i>
+                            </div>
+                        </div>
+                    </template>
+                </vue-clip>
+            </div>
+            <!-- Your display logic here (optional) -->
+        </div>
+
+        <!-- Progress Display -->
+        <div v-if="stage !== 'idle'">
+            <!-- Standard vue-clip upload progress -->
+            <div v-if="!useSse && isUploading">
+                <p class="text-muted text-center">Uploading... {{ progressPct }} %</p>
+                <b-progress :value="progressPct" max="100" animated></b-progress>
+            </div>
+
+            <!-- SSE background process progress -->
+            <div v-if="useSse && stage === 'processing'">
+                 <sse-progress-bar
+                    ref="sseProgress"
+                    :title="sseTitle"
+                    :base-url="sseProgressUrl"
+                    :process-id="processId"
+                    @complete="handleSseComplete"
+                    @error="handleSseError"
+                ></sse-progress-bar>
+            </div>
+        </div>
+
+        <!-- File List (optional) -->
+        <div v-if="showList && mode == 'multi' && fileObjects.length > 0">
+            <!-- Your v-for list here -->
+        </div>
+    </div>
+</template>
+
+<script>
+    import { BProgress, BSpinner } from 'bootstrap-vue';
+    import SseProgressBar from './SseProgressBar.vue';
+    // Assuming vue-clip is globally registered or imported as 'vue-clip'
+    // import VueClip from 'vue-clip';
+
+    export default {
+        name: "AttachmentLinkUpload",
+        components: { SseProgressBar, BProgress, BSpinner },
+        props: {
+            uploadurl: { type: String, required: true },
+            acceptedFiles: { type: String, default: '*.*' },
+            extraData: { type: Object, default: () => ({}) },
+            mode: { type: String, default: 'single' },
+            showList: { type: Boolean, default: false },
+            fileObjects: { type: Array, default: () => ([]) },
+            // New Props for SSE
+            useSse: { type: Boolean, default: false },
+            sseProgressUrl: { type: String, default: '' },
+            sseTitle: { type: String, default: 'Processing File' }
+        },
+        data: function (){
+            return {
+                options: {
+                    url: this.uploadurl,
+                    paramName: 'file',
+                    acceptedFiles: this.acceptedFiles,
+                },
+                isUploading: false,
+                progressPct: 0,
+                stage: 'idle', // idle, uploading, processing, complete
+                processId: null
+            }
+        },
+        methods: {
+            generateRandomString(length=6){ return Math.random().toString(20).substr(2, length) },
+            totalProgress(progress, totalBytes, bytesSent){ this.progressPct = progress; },
+
+            sending (file, xhr, formData) {
+                this.isUploading = true;
+                if (!this.useSse) this.stage = 'uploading';
+
+                // Append extra data from props
+                for (const key in this.extraData) {
+                    formData.append(key, this.extraData[key]);
+                }
+            },
+
+            complete (file, status, xhr) {
+                this.isUploading = false;
+                this.progressPct = 0;
+
+                try {
+                    const response = JSON.parse(xhr.response);
+
+                    if (this.useSse) {
+                        if (response.importId) {
+                            this.processId = response.importId;
+                            this.stage = 'processing';
+                            this.$nextTick(() => { this.$refs.sseProgress.start(); });
+                        } else {
+                            console.error("SSE Error: 'importId' missing in server response.");
+                            this.$emit('error', "Server response is missing a process ID.");
+                            this.stage = 'idle';
+                        }
+                    } else {
+                        this.stage = 'complete';
+                        this.$emit('complete', response);
+                        setTimeout(() => { this.stage = 'idle' }, 2000);
+                    }
+                } catch (e) {
+                    console.error("Failed to parse upload response:", e);
+                    this.$emit('error', 'Invalid response from server.');
+                    this.stage = 'idle';
+                }
+            },
+
+            handleSseComplete() {
+                this.stage = 'complete';
+                this.$emit('complete', { importId: this.processId });
+            },
+
+            handleSseError() {
+                this.stage = 'idle';
+                this.$emit('error', 'An error occurred during background processing.');
+            },
+
+            reset() {
+                this.stage = 'idle';
+                this.processId = null;
+                this.isUploading = false;
+                this.progressPct = 0;
+            },
+
+            // Your other methods can be added back here if needed
+            // (removeFile, getThumbnail, etc.)
+        }
+    }
+</script>
+
+<style scoped>
+/* Your existing styles */
+.drop-pad {
+    width: 100%;
+    padding: 2px;
+    border: #0a4b3e dashed thin;
+    cursor: pointer;
+    border-radius: 4px;
+}
+</style>
+```
+
+---
+
+### 3. `EtlImportModal.vue`
+
+This is the main orchestrator that uses the other two components to manage the three-stage workflow.
+
+**File Path:** `resources/js/components/etl/EtlImportModal.vue`
+```html
+<template>
+  <b-modal
+    ref="importModal"
+    id="import-modal"
+    @hidden="onModalHidden"
+    title="Upload & Import Documents"
+    size="xl"
+    scrollable
+    no-close-on-backdrop
+    no-close-on-esc
+    :ok-disabled="stage !== 'preview'"
+    :cancel-disabled="stage === 'buffering' || stage === 'committing'"
+    ok-title="Commit"
+    @ok="handleCommit"
+  >
+    <div class="container-fluid">
+      <!-- STAGE 1 & 2: UPLOAD & BUFFERING -->
+      <div v-if="stage === 'upload_or_buffer'">
+        <attachment-link-upload
+            ref="uploader"
+            :uploadurl="uploadUrl"
+            :accepted-files="acceptedFiles"
+            :extra-data="{ schema_name: schemaName }"
+
+            :use-sse="true"
+            :sse-progress-url="bufferProgressUrl"
+            sse-title="Parsing and Buffering File"
+
+            @complete="handleBufferingComplete"
+            @error="handleUploadError"
+
+            mode="single"
+        ></attachment-link-upload>
+      </div>
+
+      <!-- STAGE 3: PREVIEW -->
+      <div v-if="stage === 'preview'">
+        <h5 class="mb-3">Data Preview & Options</h5>
+        <div class="row options-container">
+          <div class="col-md-6 col-lg-3 mb-3">
+            <div class="form-group">
+              <label>Convert _id to ObjectId</label>
+              <div class="custom-control custom-switch custom-control-lg">
+                <input type="checkbox" class="custom-control-input" id="convertIdSwitch" v-model="options.convert_id">
+                <label class="custom-control-label" for="convertIdSwitch">{{ options.convert_id ? 'Enabled' : 'Disabled' }}</label>
+              </div>
+              <small class="text-muted">_id from data will be renamed to extId.</small>
+            </div>
+          </div>
+          <div class="col-md-6 col-lg-3 mb-3">
+            <div class="form-group">
+              <label>Upsert</label>
+              <div class="custom-control custom-switch custom-control-lg">
+                <input type="checkbox" class="custom-control-input" id="upsertSwitch" v-model="options.upsert">
+                <label class="custom-control-label" for="upsertSwitch">{{ options.upsert ? 'Enabled' : 'Disabled' }}</label>
+              </div>
+              <small class="text-muted">Update existing or insert new records.</small>
+            </div>
+          </div>
+          <div class="col-md-6 col-lg-3 mb-3" v-if="options.upsert">
+            <div class="form-group">
+              <label for="upsert-field-select">Upsert Field</label>
+              <select class="form-control" id="upsert-field-select" v-model="options.upsert_field">
+                <option v-for="header in headers" :key="header" :value="header">{{ header }}</option>
+              </select>
+              <small class="text-muted">The field to match for updates.</small>
+            </div>
+          </div>
+          <div class="col-md-6 col-lg-3 mb-3 align-self-center text-center">
+            <button class="btn btn-outline-primary" @click="downloadTemplate">
+               <i class="las la-download mr-1"></i> XLS Template
+            </button>
+          </div>
+        </div>
+        <hr>
+        <h6>Preview</h6>
+        <div class="table-responsive table-wrapper">
+          <table class="table table-striped table-hover table-bordered" v-if="previewData.length > 0">
+            <thead class="thead-light">
+              <tr><th v-for="header in headers" :key="header">{{ header }}</th></tr>
+            </thead>
+            <tbody>
+              <tr v-for="(row, index) in previewData" :key="index">
+                <td v-for="header in headers" :key="header">{{ row[header] }}</td>
+              </tr>
+            </tbody>
+          </table>
+          <div v-else class="text-center p-5">
+            <div class="spinner-border" role="status"><span class="sr-only">Loading...</span></div>
+            <p class="mt-2">Loading preview data...</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- STAGE 4: COMMIT -->
+      <div v-if="stage === 'committing'">
+          <sse-progress-bar
+            ref="commitProgress"
+            title="Committing Data"
+            :base-url="commitProgressUrl"
+            :process-id="importId"
+            @complete="handleCommitComplete"
+            @error="handleCommitError"
+        ></sse-progress-bar>
+      </div>
+    </div>
+  </b-modal>
+</template>
+
+<script>
+import axios from 'axios';
+import AttachmentLinkUpload from './AttachmentLinkUpload.vue';
+import SseProgressBar from './SseProgressBar.vue';
+import { BModal } from 'bootstrap-vue';
+
+export default {
+  name: 'EtlImportModal',
+  components: {
+      AttachmentLinkUpload,
+      SseProgressBar,
+      BModal
+  },
+  props: {
+    schemaName: { type: String, required: true },
+    baseUrl: { type: String, required: true }
+  },
+  data() {
+    return {
+      stage: 'upload_or_buffer', // upload_or_buffer, preview, committing
+      importId: null,
+      previewData: [],
+      headers: [],
+      options: { convert_id: false, upsert: true, upsert_field: '_id' },
+      acceptedFiles: '.xlsx,.xls,.csv'
+    };
+  },
+  computed: {
+      uploadUrl() { return `${this.baseUrl}/upload`; },
+      bufferProgressUrl() { return `${this.baseUrl}/buffer-progress`; },
+      commitProgressUrl() { return `${this.baseUrl}/commit-progress`; },
+  },
+  methods: {
+    show() { this.$refs.importModal.show(); },
+    hide() { this.$refs.importModal.hide(); },
+    onModalHidden() { this.resetState(); this.$emit('hidden'); },
+
+    handleBufferingComplete(response) {
+        this.importId = response.importId;
+        this.stage = 'preview';
+        this.loadPreview();
+    },
+
+    handleUploadError(errorMessage) {
+        this.$bvToast.toast(errorMessage, { title: 'Error', variant: 'danger', solid: true });
+        this.resetState();
+    },
+
+    async loadPreview() {
+      if (!this.importId) return;
+      try {
+        const response = await axios.get(`${this.baseUrl}/preview/${this.importId}`);
+        this.previewData = response.data;
+        if (this.previewData.length > 0) {
+          this.headers = Object.keys(this.previewData[0]);
+          if (!this.headers.includes(this.options.upsert_field)) this.options.upsert_field = this.headers[0] || '';
+        }
+      } catch (error) { console.error('Preview failed:', error); }
+    },
+
+    handleCommit(bvModalEvt) {
+      bvModalEvt.preventDefault();
+      const payload = { ...this.options, schema_name: this.schemaName };
+      axios.post(`${this.baseUrl}/commit/${this.importId}`, payload)
+        .then(() => {
+          this.stage = 'committing';
+          this.$nextTick(() => { this.$refs.commitProgress.start(); });
+        })
+        .catch(error => console.error('Failed to start commit:', error));
+    },
+
+    handleCommitComplete(){
+        this.$bvToast.toast('Import completed successfully!', { title: 'Success', variant: 'success', solid: true });
+        this.hide();
+    },
+
+    handleCommitError() {
+        this.$bvToast.toast('An error occurred during the commit process.', { title: 'Error', variant: 'danger', solid: true });
+        this.stage = 'preview'; // Revert to preview stage on error
+    },
+
+    downloadTemplate() { window.location.href = `${this.baseUrl}/template/${this.schemaName}`; },
+
+    resetState() {
+      this.stage = 'upload_or_buffer';
+      this.importId = null;
+      this.previewData = [];
+      this.headers = [];
+      if (this.$refs.uploader) {
+          this.$refs.uploader.reset();
+      }
+    }
+  }
+}
+</script>
+
+<style scoped>
+/* Your existing styles */
+.options-container { border: 1px solid #dee2e6; border-radius: .25rem; padding: 1.5rem; background-color: #f8f9fa; margin: 0; }
+.table-wrapper { margin-top: 1rem; max-height: 300px; }
+.table-wrapper .table thead th { position: sticky; top: 0; z-index: 2; }
+</style>
+```
