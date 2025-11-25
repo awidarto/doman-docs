@@ -1,0 +1,232 @@
+---
+title: YAML Editor
+---
+
+# YamlEditor Component Documentation
+
+## 1. Overview
+
+The `YamlEditor` is a comprehensive, multi-tabbed interface for creating and managing data model schemas in YAML format. It provides a structured environment for defining different aspects of a model, including its core properties, database schema, table and form presentations, layouts, and printing templates.
+
+The editor is divided into logical tab groups:
+*   **Core Schema:** Define the fundamental fields for `vue` (data model), `table`, `form`, `view`, and `db` contexts.
+*   **Layouts:** Visually or textually design the layout for forms and views.
+*   **Printing:** Configure document templates, print layouts, and page settings, with a live preview.
+*   **DB Object Schema:** Define database-specific object schemas, including primary keys and field mappings.
+
+It features live previews, synchronization tools, and the ability to load schemas from files or pasted text, making it a powerful tool for rapid application development.
+
+## 2. Props
+
+The `YamlEditor` component is configured through a set of props. They are categorized below for clarity.
+
+### Data & Configuration Props
+
+These props are used to pass the initial data and configuration to the editor. The component uses the `.sync` modifier (or `v-model` in Vue 3) to emit updates back to the parent.
+
+| Prop Name              | Type             | Required | Default                               | Description                                                                                                                                              |
+| ---------------------- | ---------------- | -------- | ------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `fieldConfig`          | `Object`, `Array`  | `true`   | -                                     | An object defining the available properties and options for each field type in the `PropertyEditor` (e.g., configuration for 'text', 'select', 'number' fields). |
+| `modelName`            | `String`         | `true`   | -                                     | The name of the model being edited. Used for context, often passed to child components.                                                                |
+| `yamlDataProp`         | `Object`         | `true`   | -                                     | The main schema object containing keys like `vue`, `table`, `form`, and `view`. Use `.sync` for two-way binding.                                       |
+| `yamlDbDataProp`       | `Array`, `Object`  | `true`   | -                                     | The array of fields for the database schema (`db` tab). Use `.sync` for two-way binding.                                                               |
+| `dbObjectSchemaProp`   | `Object`         | `false`  | `{ primary_key: '', fields: {} }`      | The schema for the DB Object editor, defining primary keys and field details. Use `.sync` for two-way binding.                                       |
+| `printSettingProp`     | `Object`         | `true`   | -                                     | An object containing page setup configurations for printing (margins, pagination, etc.). Use `.sync` for two-way binding.                             |
+| `formLayoutProp`       | `String`         | `false`  | `''`                                  | The raw YML string for the form layout. Used by the text-based layout editor. Use `.sync`.                                                               |
+| `viewLayoutProp`       | `String`         | `false`  | `''`                                  | The raw YML string for the view layout. Used by the text-based layout editor. Use `.sync`.                                                               |
+| `formLayoutYmlProp`    | `String`         | `false`  | `''`                                  | YML output from the visual form layout editor. Use `.sync`.                                                                                              |
+| `formLayoutHtmlProp`   | `String`         | `false`  | `''`                                  | HTML output from the visual form layout editor. Use `.sync`.                                                                                             |
+| `formLayoutBladeProp`  | `String`         | `false`  | `''`                                  | Blade template output from the visual form layout editor. Use `.sync`.                                                                                   |
+| `formLayoutMarkdownProp`| `String`        | `false`  | `''`                                  | Markdown output from the visual form layout editor. Use `.sync`.                                                                                         |
+| `viewLayoutYmlProp`    | `String`         | `false`  | `''`                                  | YML output from the visual view layout editor. Use `.sync`.                                                                                              |
+| `viewLayoutHtmlProp`   | `String`         | `false`  | `''`                                  | HTML output from the visual view layout editor. Use `.sync`.                                                                                             |
+| `viewLayoutBladeProp`  | `String`         | `false`  | `''`                                  | Blade template output from the visual view layout editor. Use `.sync`.                                                                                   |
+| `viewLayoutMarkdownProp`| `String`        | `false`  | `''`                                  | Markdown output from the visual view layout editor. Use `.sync`.                                                                                         |
+
+---
+
+### Print Template Props
+
+These props manage the content for different sections of the print template. All use the `.sync` modifier.
+
+| Prop Name              | Type     | Default | Description                                                        |
+| ---------------------- | -------- | ------- | ------------------------------------------------------------------ |
+| `printBodyProp`          | `String` | `''`    | The main body content of the print template.                       |
+| `printHeadFirstPageProp` | `String` | `''`    | Special header content only for the first page.                    |
+| `printHeadLeftProp`      | `String` | `''`    | Content for the left side of the header.                           |
+| `printHeadRightProp`     | `String` | `''`    | Content for the right side of the header.                          |
+| `printFooterFullProp`    | `String` | `''`    | Content spanning the full width of the footer.                     |
+| `printFooterLeftProp`    | `String` | `''`    | Content for the left side of the footer.                           |
+| `printFooterCenterProp`  | `String` | `''`    | Content for the center of the footer.                              |
+| `printFooterRightProp`   | `String` | `''`    | Content for the right side of the footer. *Note: Not in component template but good to have for consistency.* |
+
+---
+
+### Tab Visibility Props
+
+These boolean props control which tabs are visible in the editor interface.
+
+| Prop Name               | Type      | Default | Description                                         |
+| ----------------------- | --------- | ------- | --------------------------------------------------- |
+| `showVueTab`            | `Boolean` | `true`  | Toggles visibility of the 'vue' schema tab.         |
+| `showTableTab`          | `Boolean` | `true`  | Toggles visibility of the 'table' schema tab.       |
+| `showFormTab`           | `Boolean` | `true`  | Toggles visibility of the 'form' schema tab.        |
+| `showViewTab`           | `Boolean` | `true`  | Toggles visibility of the 'view' schema tab.        |
+| `showDbTab`             | `Boolean` | `true`  | Toggles visibility of the 'db' schema tab.          |
+| `showDbObjectSchemaTab` | `Boolean` | `true`  | Toggles visibility of the 'db object schema' tab.   |
+| `showFormLayoutTab`     | `Boolean` | `true`  | Toggles visibility of the form layout tabs.         |
+| `showViewLayoutTab`     | `Boolean` | `true`  | Toggles visibility of the view layout tabs.         |
+| `showDocumentTemplateTab`| `Boolean`| `true`  | Toggles visibility of the 'document template' tab.  |
+| `showPrintTemplateTab`  | `Boolean` | `true`  | Toggles visibility of the 'print template' tab.     |
+| `showPageSetupTab`      | `Boolean` | `true`  | Toggles visibility of the 'print preview' tab.      |
+| `showYmlTab`            | `Boolean` | `true`  | Toggles visibility of the main 'yml' output tab.    |
+| `showDbYmlTab`          | `Boolean` | `true`  | Toggles visibility of the 'db yml' output tab.      |
+| `showPrintYmlTab`       | `Boolean` | `true`  | Toggles visibility of the 'print yml' output tab.   |
+| `showPageSetupYmlTab`   | `Boolean` | `true`  | Toggles visibility of the 'page setup yml' tab.     |
+
+---
+
+### URL Props
+
+These props define the API endpoints required for certain features to function.
+
+| Prop Name         | Type     | Required | Description                                                            |
+| ----------------- | -------- | -------- | ---------------------------------------------------------------------- |
+| `formPreviewUrl`  | `String` | `true`   | URL to fetch the rendered HTML for the form layout preview.            |
+| `viewPreviewUrl`  | `String` | `true`   | URL to fetch the rendered HTML for the view layout preview.            |
+| `renderPreviewUrl`| `String` | `true`   | URL to render the print preview HTML from template and schema data.    |
+| `fileTreeUrl`     | `String` | `true`   | URL to fetch the directory structure of available YAML files to load.  |
+| `loadYamlUrl`     | `String` | `true`   | URL to load the content of a selected YAML file.                       |
+
+
+## 3. Emitted Events (`.sync`)
+
+The `YamlEditor` is designed to work with two-way data binding. It emits `update:propName` events for all data-related props. When using this component, you should use the `.sync` modifier (Vue 2) or `v-model:propName` (Vue 3) on the corresponding props to ensure data is updated in the parent component.
+
+**Example using `.sync` (Vue 2):**
+```html
+<YamlEditor
+  :yaml-data-prop.sync="myYamlData"
+  :yaml-db-data-prop.sync="myDbData"
+  :print-setting-prop.sync="myPrintSettings"
+  ...
+/>
+```
+
+## 4. Usage Example
+
+Here is a complete example of how to integrate the `YamlEditor` into a parent Vue component.
+
+```vue
+<!-- ParentComponent.vue -->
+<template>
+  <div id="app">
+    <h1 class="mb-4">Product Schema Manager</h1>
+    <YamlEditor
+      :model-name="'Product'"
+      :field-config="fieldConfig"
+      :yaml-data-prop.sync="yamlData"
+      :yaml-db-data-prop.sync="yamlDbData"
+      :db-object-schema-prop.sync="dbObjectSchema"
+      :print-setting-prop.sync="printSettings"
+      :print-body-prop.sync="printBody"
+      :form-layout-prop.sync="formLayout"
+      :view-layout-prop.sync="viewLayout"
+      :form-preview-url="'/api/preview/form'"
+      :view-preview-url="'/api/preview/view'"
+      :render-preview-url="'/api/preview/print'"
+      :file-tree-url="'/api/files/tree'"
+      :load-yaml-url="'/api/files/load'"
+    />
+
+    <div class="mt-5">
+      <h4>Live Data in Parent Component:</h4>
+      <pre><code>{{ JSON.stringify(yamlData, null, 2) }}</code></pre>
+    </div>
+  </div>
+</template>
+
+<script>
+import YamlEditor from './components/YamlEditor.vue';
+
+export default {
+  name: 'ParentComponent',
+  components: {
+    YamlEditor,
+  },
+  data() {
+    return {
+      // Configuration for the property editor
+      fieldConfig: {
+        types: [ 'text', 'number', 'boolean', 'date', 'select' ],
+        sections: {
+          vue: {
+            properties: [ 'model', 'type', 'default', 'label' ]
+          },
+          table: {
+            properties: [ 'name', 'label', 'show', 'sort', 'filter' ]
+          },
+          form: {
+            properties: [ 'model', 'label', 'type', 'create', 'edit' ]
+          },
+          // ... other sections
+        }
+      },
+
+      // Initial main schema data
+      yamlData: {
+        vue: [
+          { model: 'product_name', type: 'string', default: '', label: 'Product Name' },
+          { model: 'price', type: 'number', default: 0, label: 'Price' }
+        ],
+        table: [
+          { name: 'product_name', label: 'Product Name', show: true, sort: true },
+          { name: 'price', label: 'Price', show: true, sort: true }
+        ],
+        form: [
+          { model: 'product_name', label: 'Product Name', type: 'text', create: true, edit: true },
+          { model: 'price', label: 'Price', type: 'number', create: true, edit: true }
+        ],
+        view: [
+          { model: 'product_name', label: 'Product Name', type: 'text' },
+          { model: 'price', label: 'Price', type: 'text' }
+        ]
+      },
+
+      // Initial DB schema data
+      yamlDbData: [
+        { name: 'product_name', type: 'string', nullable: false, api: { show: true } },
+        { name: 'price', type: 'decimal', default: 0, api: { show: true } }
+      ],
+
+      // Initial DB Object Schema data
+      dbObjectSchema: {
+        primary_key: 'id',
+        fields: {
+            id: { type: 'increments', name: 'id' }
+        }
+      },
+
+      // Initial layout and print data
+      formLayout: "rows:\n  - columns:\n      - fields: ['product_name']\n      - fields: ['price']",
+      viewLayout: "rows:\n  - columns:\n      - fields: ['product_name', 'price']",
+      printSettings: {
+        margins: { top: '20mm', bottom: '20mm', left: '10mm', right: '10mm' }
+      },
+      printBody: "<h1>Product Details</h1><p>Name: {{ product_name }}</p><p>Price: {{ price }}</p>",
+    };
+  }
+};
+</script>
+
+<style>
+/* Add bootstrap or other global styles if needed */
+@import"https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css";
+pre {
+  background-color: #f4f4f4;
+  padding: 1rem;
+  border-radius: 5px;
+  white-space: pre-wrap;
+}
+</style>
+```

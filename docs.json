@@ -341,6 +341,12 @@
             ]
           },
           {
+            "group": "Multi Purpose Functions",
+            "pages": [
+              "mejik-core/vue/components/multipurpose/yaml-editor"
+            ]
+          },
+          {
             "group": "References",
             "pages": [
               "mejik-core/vue/components/reference/unified-data-backend-setup",
